@@ -3,20 +3,20 @@ using Vizfolio.Domain.Holdings;
 
 namespace Vizfolio.Api.Tests.Domain;
 
-public sealed class HoldingTests
+public sealed class FundHoldingTests
 {
     private static readonly Guid SampleSnapshotId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     [Fact]
     public void Constructor_requires_fund_snapshot_id()
     {
-        Should.Throw<ArgumentException>(() => new Holding(Guid.Empty, 0.05m));
+        Should.Throw<ArgumentException>(() => new FundHolding(Guid.Empty, 0.05m));
     }
 
     [Fact]
     public void LinkToSecurity_rejects_empty_id()
     {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
         Should.Throw<ArgumentException>(() => holding.LinkToSecurity(Guid.Empty));
     }
@@ -24,7 +24,7 @@ public sealed class HoldingTests
     [Fact]
     public void LinkToSecurity_assigns_security_id()
     {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
         var securityId = Guid.NewGuid();
 
         holding.LinkToSecurity(securityId);
@@ -35,7 +35,7 @@ public sealed class HoldingTests
     [Fact]
     public void SetIdentifiers_uppercases_ticker_and_isin()
     {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
         holding.SetIdentifiers("Apple Inc.", "aapl", "us0378331005");
 
@@ -47,7 +47,7 @@ public sealed class HoldingTests
     [Fact]
     public void SetIdentifiers_normalizes_blank_ticker_to_null()
     {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
         holding.SetIdentifiers("Apple Inc.", "   ", null);
 
@@ -58,7 +58,7 @@ public sealed class HoldingTests
     [Fact]
     public void SetValuation_assigns_money_and_units()
     {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
         holding.SetValuation(123_456.78m, 1_000m, "NS");
 
@@ -70,50 +70,12 @@ public sealed class HoldingTests
     [Fact]
     public void SetClassification_assigns_categorization()
     {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
         holding.SetClassification("EC", "US", "USD");
 
         holding.AssetCategory.ShouldBe("EC");
         holding.Country.ShouldBe("US");
         holding.Currency.ShouldBe("USD");
-    }
-
-    [Fact]
-    public void CitSubstitutionId_defaults_to_null()
-    {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
-
-        holding.CitSubstitutionId.ShouldBeNull();
-    }
-
-    [Fact]
-    public void LinkToCitSubstitution_rejects_empty_id()
-    {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
-
-        Should.Throw<ArgumentException>(() => holding.LinkToCitSubstitution(Guid.Empty));
-    }
-
-    [Fact]
-    public void LinkToCitSubstitution_assigns_id()
-    {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
-        var citSubstitutionId = Guid.NewGuid();
-
-        holding.LinkToCitSubstitution(citSubstitutionId);
-
-        holding.CitSubstitutionId.ShouldBe(citSubstitutionId);
-    }
-
-    [Fact]
-    public void ClearCitSubstitution_resets_id_to_null()
-    {
-        var holding = new Holding(SampleSnapshotId, 0.05m);
-        holding.LinkToCitSubstitution(Guid.NewGuid());
-
-        holding.ClearCitSubstitution();
-
-        holding.CitSubstitutionId.ShouldBeNull();
     }
 }

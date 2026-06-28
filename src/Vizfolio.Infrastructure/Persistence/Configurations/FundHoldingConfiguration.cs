@@ -4,14 +4,14 @@ using Vizfolio.Domain.Holdings;
 
 namespace Vizfolio.Infrastructure.Persistence.Configurations;
 
-internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
+internal sealed class FundHoldingConfiguration : IEntityTypeConfiguration<FundHolding>
 {
     private const string MoneyType = "decimal(28,4)";
     private const string PercentageType = "decimal(18,8)";
 
-    public void Configure(EntityTypeBuilder<Holding> builder)
+    public void Configure(EntityTypeBuilder<FundHolding> builder)
     {
-        builder.ToTable("Holdings");
+        builder.ToTable("FundHoldings");
         builder.HasKey(h => h.Id);
 
         builder.Property(h => h.FundSnapshotId).IsRequired();
@@ -19,13 +19,6 @@ internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
 
         builder.Property(h => h.SecurityId);
         builder.HasIndex(h => h.SecurityId);
-
-        builder.Property(h => h.CitSubstitutionId);
-        builder.HasIndex(h => h.CitSubstitutionId);
-        builder.HasOne<Vizfolio.Domain.Funds.CitSubstitution>()
-            .WithMany()
-            .HasForeignKey(h => h.CitSubstitutionId)
-            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(h => h.Weight).HasColumnType(PercentageType).IsRequired();
         builder.Property(h => h.FairValueUsd).HasColumnType(MoneyType);

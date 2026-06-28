@@ -2,11 +2,11 @@ using Vizfolio.Domain.Common;
 
 namespace Vizfolio.Domain.Holdings;
 
-public sealed class Holding : Entity
+public sealed class FundHolding : Entity
 {
-    private Holding() { }
+    private FundHolding() { }
 
-    public Holding(Guid fundSnapshotId, decimal weight)
+    public FundHolding(Guid fundSnapshotId, decimal weight)
     {
         if (fundSnapshotId == Guid.Empty)
             throw new ArgumentException("Fund snapshot ID is required.", nameof(fundSnapshotId));
@@ -18,8 +18,6 @@ public sealed class Holding : Entity
     public Guid FundSnapshotId { get; private set; }
 
     public Guid? SecurityId { get; private set; }
-
-    public Guid? CitSubstitutionId { get; private set; }
 
     public decimal Weight { get; private set; }
 
@@ -48,16 +46,6 @@ public sealed class Holding : Entity
 
         SecurityId = securityId;
     }
-
-    public void LinkToCitSubstitution(Guid citSubstitutionId)
-    {
-        if (citSubstitutionId == Guid.Empty)
-            throw new ArgumentException("CIT substitution ID is required.", nameof(citSubstitutionId));
-
-        CitSubstitutionId = citSubstitutionId;
-    }
-
-    public void ClearCitSubstitution() => CitSubstitutionId = null;
 
     public void SetIdentifiers(string? name, string? ticker, string? isin)
     {

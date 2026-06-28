@@ -26,7 +26,7 @@ public sealed class AppDbContextModelTests
         context.Model.FindEntityType(typeof(Security)).ShouldNotBeNull();
         context.Model.FindEntityType(typeof(Fund)).ShouldNotBeNull();
         context.Model.FindEntityType(typeof(FundSnapshot)).ShouldNotBeNull();
-        context.Model.FindEntityType(typeof(Holding)).ShouldNotBeNull();
+        context.Model.FindEntityType(typeof(FundHolding)).ShouldNotBeNull();
         context.Model.FindEntityType(typeof(CitSubstitution)).ShouldNotBeNull();
     }
 
@@ -93,20 +93,5 @@ public sealed class AppDbContextModelTests
         var created = context.Database.EnsureCreated();
 
         created.ShouldBeTrue();
-    }
-
-    [Fact]
-    public void Holding_has_foreign_key_to_CitSubstitution()
-    {
-        using var context = CreateContext();
-
-        var holding = context.Model.FindEntityType(typeof(Holding))!;
-        var fk = holding.GetForeignKeys()
-            .FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(CitSubstitution));
-
-        fk.ShouldNotBeNull();
-        fk.Properties.ShouldHaveSingleItem().Name.ShouldBe(nameof(Holding.CitSubstitutionId));
-        fk.DeleteBehavior.ShouldBe(DeleteBehavior.Restrict);
-        fk.IsRequired.ShouldBeFalse();
     }
 }

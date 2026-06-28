@@ -21,7 +21,7 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<FundSnapshot> FundSnapshots => Set<FundSnapshot>();
 
-    public DbSet<Holding> Holdings => Set<Holding>();
+    public DbSet<FundHolding> FundHoldings => Set<FundHolding>();
 
     public DbSet<CitSubstitution> CitSubstitutions => Set<CitSubstitution>();
 

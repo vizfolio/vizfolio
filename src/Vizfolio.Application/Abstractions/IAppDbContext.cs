@@ -16,7 +16,7 @@ public interface IAppDbContext
 
     DbSet<FundSnapshot> FundSnapshots { get; }
 
-    DbSet<Holding> Holdings { get; }
+    DbSet<FundHolding> FundHoldings { get; }
 
     DbSet<CitSubstitution> CitSubstitutions { get; }
 
