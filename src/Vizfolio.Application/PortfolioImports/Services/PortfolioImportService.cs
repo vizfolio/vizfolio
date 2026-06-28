@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Application.Instruments;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Domain.Portfolios;
@@ -74,7 +75,9 @@ public sealed class PortfolioImportService : IPortfolioImportService
             .Select(t => t!.Trim().ToUpperInvariant())
             .Distinct()
             .ToList();
-        var securityIdByTicker = await ResolveSecurityIdsByTickerAsync(tickerSet, cancellationToken);
+
+        var resolver = new InstrumentResolver(_db, _logger);
+        await resolver.PrimeAsync(tickerSet, cancellationToken);
 
         var validCurrencies = await _db.Currencies.AsNoTracking()
             .Select(c => c.Code).ToListAsync(cancellationToken);
@@ -114,10 +117,11 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
                 entity.SetMemo(parsedTx.Memo);
 
-                if (!string.IsNullOrWhiteSpace(entity.Ticker)
-                    && securityIdByTicker.TryGetValue(entity.Ticker!, out var securityId))
+                if (!string.IsNullOrWhiteSpace(entity.Ticker))
                 {
-                    entity.LinkToSecurity(securityId);
+                    var instrument = resolver.ResolveByTicker(entity.Ticker!, entity.Cusip, entity.CurrencyCode);
+                    if (instrument is not null)
+                        entity.LinkToInstrument(instrument.InstrumentId);
                 }
 
                 _db.AccountTransactions.Add(entity);
@@ -151,27 +155,6 @@ public sealed class PortfolioImportService : IPortfolioImportService
             Failed: failures.Count,
             Failures: failures,
             Duration: stopwatch.Elapsed);
-    }
-
-    private async Task<Dictionary<string, Guid>> ResolveSecurityIdsByTickerAsync(
-        IReadOnlyCollection<string> tickers,
-        CancellationToken cancellationToken)
-    {
-        var map = new Dictionary<string, Guid>(StringComparer.Ordinal);
-        if (tickers.Count == 0) return map;
-
-        // Tickers is a primitive-collection backing field; we materialise the (small)
-        // Security table and match in memory rather than relying on provider-specific
-        // JSON query translation.
-        var securities = await _db.Securities.AsNoTracking().ToListAsync(cancellationToken);
-        foreach (var s in securities)
-        {
-            foreach (var ticker in s.Tickers)
-            {
-                if (tickers.Contains(ticker)) map.TryAdd(ticker, s.SecurityId);
-            }
-        }
-        return map;
     }
 
     private static string? NormalizeCurrency(string? raw, IReadOnlySet<string> validCodes)

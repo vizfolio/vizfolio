@@ -210,6 +210,71 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.ToTable("FundSnapshot", (string)null);
                 });
 
+            modelBuilder.Entity("Vizfolio.Domain.Instruments.Instrument", b =>
+                {
+                    b.Property<Guid>("InstrumentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssetCategoryCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssetClassCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Cusip")
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("FundId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Isin")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SecurityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Symbol")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("InstrumentId");
+
+                    b.HasIndex("AssetCategoryCode");
+
+                    b.HasIndex("AssetClassCode");
+
+                    b.HasIndex("CurrencyCode");
+
+                    b.HasIndex("FundId");
+
+                    b.HasIndex("SecurityId");
+
+                    b.HasIndex("Symbol");
+
+                    b.ToTable("Instrument", (string)null);
+                });
+
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
                 {
                     b.Property<Guid>("AccountId")
@@ -280,6 +345,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("ImportedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("InstrumentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Memo")
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
@@ -289,9 +357,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
                     b.Property<decimal?>("Quantity")
                         .HasColumnType("decimal(28,8)");
-
-                    b.Property<Guid?>("SecurityId")
-                        .HasColumnType("TEXT");
 
                     b.Property<DateOnly?>("SettlementDate")
                         .HasColumnType("TEXT");
@@ -317,7 +382,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CurrencyCode");
 
-                    b.HasIndex("SecurityId");
+                    b.HasIndex("InstrumentId");
 
                     b.HasIndex("Ticker");
 
@@ -3413,6 +3478,34 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.Navigation("ShareClasses");
                 });
 
+            modelBuilder.Entity("Vizfolio.Domain.Instruments.Instrument", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Reference.AssetCategory", null)
+                        .WithMany()
+                        .HasForeignKey("AssetCategoryCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Reference.AssetClass", null)
+                        .WithMany()
+                        .HasForeignKey("AssetClassCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Reference.Currency", null)
+                        .WithMany()
+                        .HasForeignKey("CurrencyCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Funds.Fund", null)
+                        .WithMany()
+                        .HasForeignKey("FundId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Securities.Security", null)
+                        .WithMany()
+                        .HasForeignKey("SecurityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
                 {
                     b.HasOne("Vizfolio.Domain.Portfolios.Portfolio", null)
@@ -3435,9 +3528,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CurrencyCode")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Vizfolio.Domain.Securities.Security", null)
+                    b.HasOne("Vizfolio.Domain.Instruments.Instrument", null)
                         .WithMany()
-                        .HasForeignKey("SecurityId")
+                        .HasForeignKey("InstrumentId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

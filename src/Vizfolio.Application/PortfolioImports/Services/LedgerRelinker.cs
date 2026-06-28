@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Application.Instruments;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 
 namespace Vizfolio.Application.PortfolioImports.Services;
@@ -19,7 +20,7 @@ public sealed class LedgerRelinker : ILedgerRelinker
     public async Task<int> RelinkAsync(CancellationToken cancellationToken = default)
     {
         var unlinked = await _db.AccountTransactions
-            .Where(t => t.SecurityId == null && t.Ticker != null)
+            .Where(t => t.InstrumentId == null && t.Ticker != null)
             .ToListAsync(cancellationToken);
 
         if (unlinked.Count == 0) return 0;
@@ -29,30 +30,22 @@ public sealed class LedgerRelinker : ILedgerRelinker
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        var securities = await _db.Securities.AsNoTracking().ToListAsync(cancellationToken);
-
-        var securityIdByTicker = new Dictionary<string, Guid>(StringComparer.Ordinal);
-        foreach (var security in securities)
-        {
-            foreach (var ticker in security.Tickers)
-            {
-                if (tickers.Contains(ticker)) securityIdByTicker.TryAdd(ticker, security.SecurityId);
-            }
-        }
+        var resolver = new InstrumentResolver(_db, _logger);
+        await resolver.PrimeAsync(tickers, cancellationToken);
 
         var linked = 0;
         foreach (var transaction in unlinked)
         {
-            if (transaction.Ticker is null) continue;
-            if (!securityIdByTicker.TryGetValue(transaction.Ticker, out var securityId)) continue;
-            transaction.LinkToSecurity(securityId);
+            var instrument = resolver.ResolveByTicker(transaction.Ticker!, transaction.Cusip, transaction.CurrencyCode);
+            if (instrument is null) continue;
+            transaction.LinkToInstrument(instrument.InstrumentId);
             linked++;
         }
 
         if (linked > 0)
         {
             await _db.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Re-linked {Count} account transactions to securities by ticker", linked);
+            _logger.LogInformation("Re-linked {Count} account transactions to instruments", linked);
         }
 
         return linked;

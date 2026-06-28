@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Domain.Funds;
+using Vizfolio.Domain.Instruments;
 using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
@@ -20,6 +21,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
     public DbSet<AccountTransaction> AccountTransactions => Set<AccountTransaction>();
 
     public DbSet<Security> Securities => Set<Security>();
+
+    public DbSet<Instrument> Instruments => Set<Instrument>();
 
     public DbSet<Fund> Funds => Set<Fund>();
 

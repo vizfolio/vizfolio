@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Vizfolio.Domain.Instruments;
 using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Reference;
-using Vizfolio.Domain.Securities;
 
 namespace Vizfolio.Infrastructure.Persistence.Configurations;
 
@@ -31,10 +31,10 @@ internal sealed class AccountTransactionConfiguration : IEntityTypeConfiguration
         builder.Property(t => t.Ticker).HasMaxLength(20);
         builder.Property(t => t.Cusip).HasMaxLength(9);
 
-        builder.Property(t => t.SecurityId);
-        builder.HasOne<Security>()
+        builder.Property(t => t.InstrumentId);
+        builder.HasOne<Instrument>()
             .WithMany()
-            .HasForeignKey(t => t.SecurityId)
+            .HasForeignKey(t => t.InstrumentId)
             .OnDelete(DeleteBehavior.Restrict)
             .IsRequired(false);
 
@@ -56,5 +56,6 @@ internal sealed class AccountTransactionConfiguration : IEntityTypeConfiguration
         builder.HasIndex(t => new { t.AccountId, t.SourceSystem, t.ExternalId }).IsUnique();
         builder.HasIndex(t => new { t.AccountId, t.TradeDate });
         builder.HasIndex(t => t.Ticker);
+        builder.HasIndex(t => t.InstrumentId);
     }
 }

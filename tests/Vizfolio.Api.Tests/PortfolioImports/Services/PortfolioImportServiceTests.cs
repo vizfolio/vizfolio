@@ -103,7 +103,7 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task ImportAsync_resolves_security_id_when_ticker_matches()
+    public async Task ImportAsync_links_transactions_to_security_instrument_when_ticker_matches()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
@@ -116,9 +116,13 @@ public sealed class PortfolioImportServiceTests
         var service = NewService(ctx);
         await service.ImportAsync(account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
 
+        var instrument = await ctx.Db.Instruments.AsNoTracking().SingleAsync();
+        instrument.Kind.ShouldBe(Vizfolio.Domain.Instruments.InstrumentKind.Security);
+        instrument.SecurityId.ShouldBe(security.SecurityId);
+
         var rows = await ctx.Db.AccountTransactions.AsNoTracking()
             .Where(t => t.AccountId == account.AccountId).ToListAsync();
-        rows.ShouldAllBe(t => t.SecurityId == security.SecurityId);
+        rows.ShouldAllBe(t => t.InstrumentId == instrument.InstrumentId);
     }
 
     [Fact]
