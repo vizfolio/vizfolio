@@ -1,4 +1,9 @@
 <Solution>
+  <Folder Name="/Docs/">
+    <File Path="docs\er-diagram.md" />
+    <File Path="docs\fund-data.md" />
+    <File Path="docs\security-data.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Vizfolio.Api/Vizfolio.Api.csproj" />
     <Project Path="src/Vizfolio.Application/Vizfolio.Application.csproj" />
