@@ -144,6 +144,102 @@ NEWFILEUID:NONE
     }
 
     [Fact]
+    public async Task ParseAsync_resolves_cusip_to_ticker_via_seclist_in_ofx2()
+    {
+        const string sample = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>X1234</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20260101</DTSTART><DTEND>20260601</DTEND>
+        <BUYMF>
+          <INVBUY>
+            <INVTRAN><FITID>BUY-CUSIP-1</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>TEST00001</UNIQUEID><UNIQUEIDTYPE>CUSIP</UNIQUEIDTYPE></SECID>
+            <UNITS>1</UNITS><UNITPRICE>10.00</UNITPRICE><TOTAL>-10.00</TOTAL>
+          </INVBUY>
+          <BUYTYPE>BUY</BUYTYPE>
+        </BUYMF>
+        <BUYMF>
+          <INVBUY>
+            <INVTRAN><FITID>BUY-CUSIP-2</FITID><DTTRADE>20260120</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>TEST00099</UNIQUEID><UNIQUEIDTYPE>CUSIP</UNIQUEIDTYPE></SECID>
+            <UNITS>1</UNITS><UNITPRICE>5.00</UNITPRICE><TOTAL>-5.00</TOTAL>
+          </INVBUY>
+          <BUYTYPE>BUY</BUYTYPE>
+        </BUYMF>
+      </INVTRANLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+  <SECLISTMSGSRSV1><SECLIST>
+    <MFINFO>
+      <SECINFO>
+        <SECID><UNIQUEID>TEST00001</UNIQUEID><UNIQUEIDTYPE>CUSIP</UNIQUEIDTYPE></SECID>
+        <SECNAME>Test Fund One</SECNAME>
+        <TICKER>TST1</TICKER>
+      </SECINFO>
+      <MFTYPE>OPENEND</MFTYPE>
+    </MFINFO>
+  </SECLIST></SECLISTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+        await using var stream = StringStream(sample);
+
+        var parsed = await parser.ParseAsync(stream, "sample.qfx", CancellationToken.None);
+
+        parsed.Transactions.Count.ShouldBe(2);
+
+        var resolved = parsed.Transactions[0];
+        resolved.Ticker.ShouldBe("TST1");
+        resolved.Cusip.ShouldBe("TEST00001");
+
+        var unmapped = parsed.Transactions[1];
+        unmapped.Ticker.ShouldBeNull();
+        unmapped.Cusip.ShouldBe("TEST00099");
+    }
+
+    [Fact]
+    public async Task ParseAsync_resolves_cusip_to_ticker_via_seclist_in_ofx1_sgml()
+    {
+        const string sample = """
+OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+SECURITY:NONE
+ENCODING:USASCII
+CHARSET:1252
+COMPRESSION:NONE
+OLDFILEUID:NONE
+NEWFILEUID:NONE
+
+<OFX>
+<INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1<STATUS><CODE>0<SEVERITY>INFO</STATUS>
+<INVSTMTRS><DTASOF>20260601<CURDEF>USD<INVACCTFROM><BROKERID>vanguard.com<ACCTID>X9999</INVACCTFROM>
+<INVTRANLIST><DTSTART>20260101<DTEND>20260601
+<BUYMF><INVBUY><INVTRAN><FITID>BUY-SGML-1<DTTRADE>20260115</INVTRAN><SECID><UNIQUEID>TEST00042<UNIQUEIDTYPE>CUSIP</SECID><UNITS>2<UNITPRICE>50.00<TOTAL>-100.00</INVBUY><BUYTYPE>BUY</BUYMF>
+</INVTRANLIST></INVSTMTRS></INVSTMTTRNRS></INVSTMTMSGSRSV1>
+<SECLISTMSGSRSV1><SECLIST>
+<MFINFO><SECINFO><SECID><UNIQUEID>TEST00042<UNIQUEIDTYPE>CUSIP</SECID><SECNAME>Test Fund Forty Two<TICKER>TST42</SECINFO><MFTYPE>OPENEND</MFINFO>
+</SECLIST></SECLISTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+        await using var stream = StringStream(sample);
+
+        var parsed = await parser.ParseAsync(stream, "sample.qfx", CancellationToken.None);
+
+        parsed.Transactions.Count.ShouldBe(1);
+        parsed.Transactions[0].Ticker.ShouldBe("TST42");
+        parsed.Transactions[0].Cusip.ShouldBe("TEST00042");
+    }
+
+    [Fact]
     public async Task ParseAsync_extracts_bank_transactions_from_ofx1_sgml()
     {
         var parser = new QfxFileParser();

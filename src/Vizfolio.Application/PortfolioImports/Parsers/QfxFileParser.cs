@@ -37,14 +37,38 @@ public sealed class QfxFileParser : IPortfolioFileParser
                           ?? SelectText(doc, "//BANKACCTFROM/ACCTID")
                           ?? SelectText(doc, "//CCACCTFROM/ACCTID");
 
+        var securityList = BuildSecurityList(doc);
+
         var transactions = new List<ParsedTransaction>();
-        ParseInvestmentTransactions(doc, transactions);
+        ParseInvestmentTransactions(doc, transactions, securityList);
         ParseBankTransactions(doc, transactions);
 
         return new ParsedPortfolioFile(SourceSystem, institution, accountNumber, transactions);
     }
 
-    private static void ParseInvestmentTransactions(XmlDocument doc, List<ParsedTransaction> transactions)
+    private static Dictionary<string, string> BuildSecurityList(XmlDocument doc)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var secInfos = doc.SelectNodes("//SECLIST//SECINFO");
+        if (secInfos is null) return map;
+
+        foreach (XmlNode secInfo in secInfos)
+        {
+            var uniqueId = SelectText(secInfo, "SECID/UNIQUEID");
+            var uniqueIdType = SelectText(secInfo, "SECID/UNIQUEIDTYPE");
+            var ticker = SelectText(secInfo, "TICKER");
+            if (string.IsNullOrWhiteSpace(uniqueId) || string.IsNullOrWhiteSpace(ticker)) continue;
+            if (!string.Equals(uniqueIdType, "CUSIP", StringComparison.OrdinalIgnoreCase)) continue;
+
+            map[uniqueId.Trim()] = ticker.Trim();
+        }
+        return map;
+    }
+
+    private static void ParseInvestmentTransactions(
+        XmlDocument doc,
+        List<ParsedTransaction> transactions,
+        IReadOnlyDictionary<string, string> securityList)
     {
         var invList = doc.SelectSingleNode("//INVTRANLIST");
         if (invList is null) return;
@@ -54,11 +78,11 @@ public sealed class QfxFileParser : IPortfolioFileParser
             if (node.NodeType != XmlNodeType.Element) continue;
             var tx = node.Name.ToUpperInvariant() switch
             {
-                "BUYSTOCK" or "BUYMF" or "BUYOTHER" => InvBuySell(node, TransactionType.Buy),
-                "SELLSTOCK" or "SELLMF" or "SELLOTHER" => InvBuySell(node, TransactionType.Sell),
-                "INCOME" => InvIncome(node),
-                "REINVEST" => InvReinvest(node),
-                "TRANSFER" => InvTransfer(node),
+                "BUYSTOCK" or "BUYMF" or "BUYOTHER" => InvBuySell(node, TransactionType.Buy, securityList),
+                "SELLSTOCK" or "SELLMF" or "SELLOTHER" => InvBuySell(node, TransactionType.Sell, securityList),
+                "INCOME" => InvIncome(node, securityList),
+                "REINVEST" => InvReinvest(node, securityList),
+                "TRANSFER" => InvTransfer(node, securityList),
                 _ => null,
             };
             if (tx is not null) transactions.Add(tx);
@@ -108,18 +132,21 @@ public sealed class QfxFileParser : IPortfolioFileParser
         }
     }
 
-    private static ParsedTransaction InvBuySell(XmlNode node, TransactionType type)
+    private static ParsedTransaction InvBuySell(
+        XmlNode node,
+        TransactionType type,
+        IReadOnlyDictionary<string, string> securityList)
     {
         var invtran = node.SelectSingleNode(".//INVTRAN");
-        var secid = node.SelectSingleNode(".//SECID");
         var fitId = SelectText(invtran, "FITID") ?? string.Empty;
         var dtTrade = ParseDateOnly(SelectText(invtran, "DTTRADE"));
         var dtSettle = TryParseDateOnly(SelectText(invtran, "DTSETTLE"));
         var memo = SelectText(invtran, "MEMO");
 
-        var ticker = SelectText(node, ".//SECID/UNIQUEID");
-        var uniqueIdType = SelectText(node, ".//SECID/UNIQUEIDTYPE");
-        var (mappedTicker, mappedCusip) = SplitSecurityId(ticker, uniqueIdType);
+        var (mappedTicker, mappedCusip) = ResolveSecurityId(
+            SelectText(node, ".//SECID/UNIQUEID"),
+            SelectText(node, ".//SECID/UNIQUEIDTYPE"),
+            securityList);
 
         var units = ParseDecimal(SelectText(node, ".//UNITS"));
         var unitPrice = ParseDecimal(SelectText(node, ".//UNITPRICE"));
@@ -144,7 +171,7 @@ public sealed class QfxFileParser : IPortfolioFileParser
             Memo: memo);
     }
 
-    private static ParsedTransaction InvIncome(XmlNode node)
+    private static ParsedTransaction InvIncome(XmlNode node, IReadOnlyDictionary<string, string> securityList)
     {
         var invtran = node.SelectSingleNode(".//INVTRAN");
         var fitId = SelectText(invtran, "FITID") ?? string.Empty;
@@ -160,9 +187,10 @@ public sealed class QfxFileParser : IPortfolioFileParser
             _ => TransactionType.Other,
         };
 
-        var ticker = SelectText(node, ".//SECID/UNIQUEID");
-        var uniqueIdType = SelectText(node, ".//SECID/UNIQUEIDTYPE");
-        var (mappedTicker, mappedCusip) = SplitSecurityId(ticker, uniqueIdType);
+        var (mappedTicker, mappedCusip) = ResolveSecurityId(
+            SelectText(node, ".//SECID/UNIQUEID"),
+            SelectText(node, ".//SECID/UNIQUEIDTYPE"),
+            securityList);
 
         var total = ParseDecimal(SelectText(node, "TOTAL")) ?? 0m;
         var currency = SelectText(node, ".//CURRENCY/CURSYM");
@@ -182,16 +210,17 @@ public sealed class QfxFileParser : IPortfolioFileParser
             Memo: memo);
     }
 
-    private static ParsedTransaction InvReinvest(XmlNode node)
+    private static ParsedTransaction InvReinvest(XmlNode node, IReadOnlyDictionary<string, string> securityList)
     {
         var invtran = node.SelectSingleNode(".//INVTRAN");
         var fitId = SelectText(invtran, "FITID") ?? string.Empty;
         var dtTrade = ParseDateOnly(SelectText(invtran, "DTTRADE"));
         var memo = SelectText(invtran, "MEMO");
 
-        var ticker = SelectText(node, ".//SECID/UNIQUEID");
-        var uniqueIdType = SelectText(node, ".//SECID/UNIQUEIDTYPE");
-        var (mappedTicker, mappedCusip) = SplitSecurityId(ticker, uniqueIdType);
+        var (mappedTicker, mappedCusip) = ResolveSecurityId(
+            SelectText(node, ".//SECID/UNIQUEID"),
+            SelectText(node, ".//SECID/UNIQUEIDTYPE"),
+            securityList);
 
         var units = ParseDecimal(SelectText(node, "UNITS"));
         var unitPrice = ParseDecimal(SelectText(node, "UNITPRICE"));
@@ -213,16 +242,17 @@ public sealed class QfxFileParser : IPortfolioFileParser
             Memo: memo);
     }
 
-    private static ParsedTransaction InvTransfer(XmlNode node)
+    private static ParsedTransaction InvTransfer(XmlNode node, IReadOnlyDictionary<string, string> securityList)
     {
         var invtran = node.SelectSingleNode(".//INVTRAN");
         var fitId = SelectText(invtran, "FITID") ?? string.Empty;
         var dtTrade = ParseDateOnly(SelectText(invtran, "DTTRADE"));
         var memo = SelectText(invtran, "MEMO");
 
-        var ticker = SelectText(node, ".//SECID/UNIQUEID");
-        var uniqueIdType = SelectText(node, ".//SECID/UNIQUEIDTYPE");
-        var (mappedTicker, mappedCusip) = SplitSecurityId(ticker, uniqueIdType);
+        var (mappedTicker, mappedCusip) = ResolveSecurityId(
+            SelectText(node, ".//SECID/UNIQUEID"),
+            SelectText(node, ".//SECID/UNIQUEIDTYPE"),
+            securityList);
 
         var units = ParseDecimal(SelectText(node, "UNITS"));
 
@@ -241,18 +271,22 @@ public sealed class QfxFileParser : IPortfolioFileParser
             Memo: memo);
     }
 
-    private static (string? Ticker, string? Cusip) SplitSecurityId(string? id, string? idType)
+    private static (string? Ticker, string? Cusip) ResolveSecurityId(
+        string? id,
+        string? idType,
+        IReadOnlyDictionary<string, string> securityList)
     {
         if (string.IsNullOrWhiteSpace(id)) return (null, null);
         var trimmed = id.Trim();
         var t = (idType ?? string.Empty).Trim().ToUpperInvariant();
-        return t switch
-        {
-            "CUSIP" => (null, trimmed),
-            "TICKER" => (trimmed, null),
-            _ => (trimmed.Length is >= 1 and <= 8 ? trimmed : null,
-                  trimmed.Length == 9 ? trimmed : null),
-        };
+
+        if (t == "TICKER") return (trimmed, null);
+
+        var looksLikeCusip = t == "CUSIP" || (t.Length == 0 && trimmed.Length == 9);
+        if (!looksLikeCusip) return (trimmed, null);
+
+        var resolvedTicker = securityList.TryGetValue(trimmed, out var ticker) ? ticker : null;
+        return (resolvedTicker, trimmed);
     }
 
     private static string StripHeader(string raw)
