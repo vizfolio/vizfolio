@@ -188,6 +188,7 @@ public sealed class FundsImporter : IFundsImporter
             holding.SetValuation(h.FairValueUsd, h.Balance, units: null);
             holding.SetClassification(
                 gate.AcceptAssetCategory(h.AssetCategory),
+                gate.AcceptAssetClass(h.AssetClass),
                 gate.AcceptCountry(h.Country),
                 gate.AcceptCurrency(h.Currency));
             holding.SetIssuerCik(h.IssuerCik);

@@ -27,6 +27,19 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "AssetClass",
+                columns: table => new
+                {
+                    Code = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
+                    Description = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AssetClass", x => x.Code);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "CitSubstitution",
                 columns: table => new
                 {
@@ -165,6 +178,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     Ticker = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
                     Isin = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
                     AssetCategoryCode = table.Column<string>(type: "TEXT", maxLength: 10, nullable: true),
+                    AssetClassCode = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
                     CountryCode = table.Column<string>(type: "TEXT", maxLength: 2, nullable: true),
                     CurrencyCode = table.Column<string>(type: "TEXT", maxLength: 3, nullable: true),
                     IssuerCik = table.Column<string>(type: "TEXT", maxLength: 10, nullable: true)
@@ -176,6 +190,12 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         name: "FK_FundHolding_AssetCategory_AssetCategoryCode",
                         column: x => x.AssetCategoryCode,
                         principalTable: "AssetCategory",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_FundHolding_AssetClass_AssetClassCode",
+                        column: x => x.AssetClassCode,
+                        principalTable: "AssetClass",
                         principalColumn: "Code",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
@@ -254,10 +274,41 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 columns: new[] { "Code", "Description", "Name" },
                 values: new object[,]
                 {
+                    { "ABS-APCP", "Asset-backed commercial paper.", "ABS-Asset Backed Commercial Paper" },
+                    { "ABS-CBDO", "Collateralized bond or debt obligation.", "ABS-Collateralized Bond/Debt Obligation" },
+                    { "ABS-MBS", "Mortgage-backed security.", "ABS-Mortgage Backed Security" },
+                    { "ABS-O", "Other asset-backed security not otherwise classified.", "ABS-Other" },
+                    { "COMD", "Physical commodity or commodity-linked instrument.", "Commodity" },
+                    { "DBT", "Debt securities.", "Debt" },
+                    { "DCO", "Derivative referencing a commodity.", "Derivative-Commodity" },
+                    { "DCR", "Derivative referencing credit (e.g. credit default swap).", "Derivative-Credit" },
+                    { "DE", "Derivative referencing equity.", "Derivative-Equity" },
+                    { "DFE", "Derivative referencing foreign exchange.", "Derivative-Foreign Exchange" },
+                    { "DIR", "Derivative referencing interest rates.", "Derivative-Interest Rate" },
+                    { "DOT", "Derivative not otherwise classified.", "Derivative-Other" },
+                    { "EC", "Common equity securities.", "Equity-Common" },
+                    { "EP", "Preferred equity securities.", "Equity-Preferred" },
+                    { "LON", "Loans and loan participations.", "Loan" },
+                    { "OTH", "Other asset category not otherwise classified.", "Other" },
+                    { "OTHER", "Alias used by some N-PORT filings for OTH.", "Other" },
+                    { "RA", "Repurchase or reverse repurchase agreement.", "Repurchase Agreement" },
+                    { "RE", "Direct real estate or real estate-linked investment.", "Real Estate" },
+                    { "SN", "Structured note.", "Structured Note" },
+                    { "STIV", "Money market fund, liquidity pool, or other cash management vehicle.", "Short-Term Investment Vehicle" }
+                });
+
+            migrationBuilder.InsertData(
+                table: "AssetClass",
+                columns: new[] { "Code", "Description", "Name" },
+                values: new object[,]
+                {
+                    { "CASH", "Short-term investment vehicles and repurchase agreements (cash-equivalent positions).", "Cash" },
+                    { "COMMODITY", "Physical commodities or commodity-linked instruments.", "Commodity" },
                     { "DEBT", "Debt, structured notes, loans, and asset-backed securities.", "Debt" },
                     { "DERIVATIVE", "Equity, credit, rate, commodity, FX, or other derivatives.", "Derivative" },
                     { "EQUITY", "Equity securities (common or preferred).", "Equity" },
-                    { "OTHER", "Short-term investments, repurchase agreements, commodities, real estate, and anything not otherwise classified.", "Other" }
+                    { "OTHER", "Anything not otherwise classified.", "Other" },
+                    { "REAL_ESTATE", "Direct real estate or real estate-linked investments.", "Real Estate" }
                 });
 
             migrationBuilder.InsertData(
@@ -723,6 +774,11 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 column: "AssetCategoryCode");
 
             migrationBuilder.CreateIndex(
+                name: "IX_FundHolding_AssetClassCode",
+                table: "FundHolding",
+                column: "AssetClassCode");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_FundHolding_CountryCode",
                 table: "FundHolding",
                 column: "CountryCode");
@@ -796,6 +852,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "AssetCategory");
+
+            migrationBuilder.DropTable(
+                name: "AssetClass");
 
             migrationBuilder.DropTable(
                 name: "Currency");

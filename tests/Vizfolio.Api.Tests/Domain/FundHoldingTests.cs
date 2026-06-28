@@ -72,9 +72,10 @@ public sealed class FundHoldingTests
     {
         var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
-        holding.SetClassification("EC", "US", "USD");
+        holding.SetClassification("EC", "EQUITY", "US", "USD");
 
         holding.AssetCategoryCode.ShouldBe("EC");
+        holding.AssetClassCode.ShouldBe("EQUITY");
         holding.CountryCode.ShouldBe("US");
         holding.CurrencyCode.ShouldBe("USD");
     }
@@ -84,9 +85,10 @@ public sealed class FundHoldingTests
     {
         var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
-        holding.SetClassification("  ec ", " us ", "usd ");
+        holding.SetClassification("  ec ", " equity ", " us ", "usd ");
 
         holding.AssetCategoryCode.ShouldBe("EC");
+        holding.AssetClassCode.ShouldBe("EQUITY");
         holding.CountryCode.ShouldBe("US");
         holding.CurrencyCode.ShouldBe("USD");
     }
@@ -96,9 +98,10 @@ public sealed class FundHoldingTests
     {
         var holding = new FundHolding(SampleSnapshotId, 0.05m);
 
-        holding.SetClassification("   ", "", null);
+        holding.SetClassification("   ", "", "", null);
 
         holding.AssetCategoryCode.ShouldBeNull();
+        holding.AssetClassCode.ShouldBeNull();
         holding.CountryCode.ShouldBeNull();
         holding.CurrencyCode.ShouldBeNull();
     }

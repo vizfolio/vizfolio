@@ -31,6 +31,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<AssetCategory> AssetCategories => Set<AssetCategory>();
 
+    public DbSet<AssetClass> AssetClasses => Set<AssetClass>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

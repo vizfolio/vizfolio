@@ -48,14 +48,23 @@ public sealed class ReferenceDataSeedTests
     }
 
     [Fact]
-    public async Task AssetCategory_seed_matches_extract_pipeline_buckets()
+    public async Task AssetCategory_seed_contains_sec_nport_enumeration()
     {
         await using var ctx = await TestDbContext.CreateAsync();
 
-        foreach (var expected in new[] { "EQUITY", "DEBT", "DERIVATIVE", "OTHER" })
+        foreach (var expected in new[] { "EC", "EP", "DBT", "SN", "LON", "ABS-MBS", "ABS-APCP", "ABS-CBDO", "ABS-O", "DE", "DCR", "DIR", "DCO", "DFE", "DOT", "STIV", "RA", "COMD", "RE", "OTH", "OTHER" })
             (await ctx.Db.AssetCategories.AnyAsync(c => c.Code == expected)).ShouldBeTrue(expected);
+    }
 
-        (await ctx.Db.AssetCategories.CountAsync()).ShouldBe(4);
+    [Fact]
+    public async Task AssetClass_seed_matches_extract_pipeline_buckets()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+
+        foreach (var expected in new[] { "EQUITY", "DEBT", "DERIVATIVE", "CASH", "COMMODITY", "REAL_ESTATE", "OTHER" })
+            (await ctx.Db.AssetClasses.AnyAsync(c => c.Code == expected)).ShouldBeTrue(expected);
+
+        (await ctx.Db.AssetClasses.CountAsync()).ShouldBe(7);
     }
 
     [Fact]
@@ -65,7 +74,7 @@ public sealed class ReferenceDataSeedTests
         var (_, snapshotId) = await SeedFundSnapshotAsync(ctx);
 
         var holding = new FundHolding(snapshotId, 0.05m);
-        holding.SetClassification(null, null, "ZZZ");
+        holding.SetClassification(null, null, null, "ZZZ");
         ctx.Db.FundHoldings.Add(holding);
 
         var ex = await Should.ThrowAsync<DbUpdateException>(() => ctx.Db.SaveChangesAsync());
@@ -79,7 +88,20 @@ public sealed class ReferenceDataSeedTests
         var (_, snapshotId) = await SeedFundSnapshotAsync(ctx);
 
         var holding = new FundHolding(snapshotId, 0.05m);
-        holding.SetClassification(null, "ZZ", null);
+        holding.SetClassification(null, null, "ZZ", null);
+        ctx.Db.FundHoldings.Add(holding);
+
+        await Should.ThrowAsync<DbUpdateException>(() => ctx.Db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task FundHolding_rejects_unknown_asset_class_code()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (_, snapshotId) = await SeedFundSnapshotAsync(ctx);
+
+        var holding = new FundHolding(snapshotId, 0.05m);
+        holding.SetClassification(null, "BOGUS", null, null);
         ctx.Db.FundHoldings.Add(holding);
 
         await Should.ThrowAsync<DbUpdateException>(() => ctx.Db.SaveChangesAsync());
@@ -92,7 +114,7 @@ public sealed class ReferenceDataSeedTests
         var (_, snapshotId) = await SeedFundSnapshotAsync(ctx);
 
         var holding = new FundHolding(snapshotId, 0.05m);
-        holding.SetClassification("EQUITY", "US", "USD");
+        holding.SetClassification("EC", "EQUITY", "US", "USD");
         ctx.Db.FundHoldings.Add(holding);
 
         await ctx.Db.SaveChangesAsync();

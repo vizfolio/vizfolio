@@ -161,6 +161,7 @@ public sealed class FundsImporterTests
             Isin: null,
             IssuerCik: null,
             AssetCategory: "ZZZ",
+            AssetClass: "bogus",
             Country: "Q1",
             Currency: "ZZZ",
             Balance: null,
@@ -174,16 +175,19 @@ public sealed class FundsImporterTests
 
         var stored = await ctx.Db.FundHoldings.AsNoTracking().SingleAsync();
         stored.AssetCategoryCode.ShouldBeNull();
+        stored.AssetClassCode.ShouldBeNull();
         stored.CountryCode.ShouldBeNull();
         stored.CurrencyCode.ShouldBeNull();
 
-        result.DataCleaning.Count.ShouldBe(3);
+        result.DataCleaning.Count.ShouldBe(4);
         result.DataCleaning.ShouldContain(d =>
             d.Field == "Currency" && d.OriginalValue == "ZZZ" && d.Occurrences == 1);
         result.DataCleaning.ShouldContain(d =>
             d.Field == "Country" && d.OriginalValue == "Q1" && d.Occurrences == 1);
         result.DataCleaning.ShouldContain(d =>
             d.Field == "AssetCategory" && d.OriginalValue == "ZZZ" && d.Occurrences == 1);
+        result.DataCleaning.ShouldContain(d =>
+            d.Field == "AssetClass" && d.OriginalValue == "BOGUS" && d.Occurrences == 1);
     }
 
     [Fact]
@@ -197,7 +201,8 @@ public sealed class FundsImporterTests
         var result = await importer.ImportAsync(new FundsImportOptions());
 
         var stored = await ctx.Db.FundHoldings.AsNoTracking().SingleAsync();
-        stored.AssetCategoryCode.ShouldBe("EQUITY");
+        stored.AssetCategoryCode.ShouldBe("EC");
+        stored.AssetClassCode.ShouldBe("EQUITY");
         stored.CountryCode.ShouldBe("US");
         stored.CurrencyCode.ShouldBe("USD");
 
@@ -261,7 +266,8 @@ public sealed class FundsImporterTests
             Ticker: "AAPL",
             Isin: "US0378331005",
             IssuerCik: issuerCik,
-            AssetCategory: "equity",
+            AssetCategory: "EC",
+            AssetClass: "equity",
             Country: "US",
             Currency: "USD",
             Balance: 100m,

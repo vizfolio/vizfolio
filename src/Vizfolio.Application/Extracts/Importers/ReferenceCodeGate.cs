@@ -16,20 +16,24 @@ internal sealed class ReferenceCodeGate
     public const string CurrencyField = "Currency";
     public const string CountryField = "Country";
     public const string AssetCategoryField = "AssetCategory";
+    public const string AssetClassField = "AssetClass";
 
     private readonly IReadOnlySet<string> _currencies;
     private readonly IReadOnlySet<string> _countries;
     private readonly IReadOnlySet<string> _assetCategories;
+    private readonly IReadOnlySet<string> _assetClasses;
     private readonly Dictionary<(string Field, string Value), int> _cleaned = new();
 
     private ReferenceCodeGate(
         IReadOnlySet<string> currencies,
         IReadOnlySet<string> countries,
-        IReadOnlySet<string> assetCategories)
+        IReadOnlySet<string> assetCategories,
+        IReadOnlySet<string> assetClasses)
     {
         _currencies = currencies;
         _countries = countries;
         _assetCategories = assetCategories;
+        _assetClasses = assetClasses;
     }
 
     public static async Task<ReferenceCodeGate> LoadAsync(IAppDbContext db, CancellationToken cancellationToken)
@@ -37,11 +41,13 @@ internal sealed class ReferenceCodeGate
         var currencies = await db.Currencies.AsNoTracking().Select(c => c.Code).ToListAsync(cancellationToken);
         var countries = await db.Countries.AsNoTracking().Select(c => c.Code).ToListAsync(cancellationToken);
         var categories = await db.AssetCategories.AsNoTracking().Select(c => c.Code).ToListAsync(cancellationToken);
+        var classes = await db.AssetClasses.AsNoTracking().Select(c => c.Code).ToListAsync(cancellationToken);
 
         return new ReferenceCodeGate(
             new HashSet<string>(currencies, StringComparer.Ordinal),
             new HashSet<string>(countries, StringComparer.Ordinal),
-            new HashSet<string>(categories, StringComparer.Ordinal));
+            new HashSet<string>(categories, StringComparer.Ordinal),
+            new HashSet<string>(classes, StringComparer.Ordinal));
     }
 
     public string? AcceptCurrency(string? raw) => Accept(_currencies, CurrencyField, raw);
@@ -49,6 +55,8 @@ internal sealed class ReferenceCodeGate
     public string? AcceptCountry(string? raw) => Accept(_countries, CountryField, raw);
 
     public string? AcceptAssetCategory(string? raw) => Accept(_assetCategories, AssetCategoryField, raw);
+
+    public string? AcceptAssetClass(string? raw) => Accept(_assetClasses, AssetClassField, raw);
 
     public IReadOnlyList<DataCleaningEntry> BuildReport() => _cleaned
         .Select(kvp => new DataCleaningEntry(

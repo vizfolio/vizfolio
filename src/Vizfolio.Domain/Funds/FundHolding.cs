@@ -36,6 +36,8 @@ public sealed class FundHolding
 
     public string? AssetCategoryCode { get; private set; }
 
+    public string? AssetClassCode { get; private set; }
+
     public string? CountryCode { get; private set; }
 
     public string? CurrencyCode { get; private set; }
@@ -64,9 +66,10 @@ public sealed class FundHolding
         Units = string.IsNullOrWhiteSpace(units) ? null : units.Trim();
     }
 
-    public void SetClassification(string? assetCategoryCode, string? countryCode, string? currencyCode)
+    public void SetClassification(string? assetCategoryCode, string? assetClassCode, string? countryCode, string? currencyCode)
     {
         AssetCategoryCode = NormalizeCode(assetCategoryCode);
+        AssetClassCode = NormalizeCode(assetClassCode);
         CountryCode = NormalizeCode(countryCode);
         CurrencyCode = NormalizeCode(currencyCode);
     }

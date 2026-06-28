@@ -46,6 +46,13 @@ internal sealed class FundHoldingConfiguration : IEntityTypeConfiguration<FundHo
             .OnDelete(DeleteBehavior.Restrict)
             .IsRequired(false);
 
+        builder.Property(h => h.AssetClassCode).HasMaxLength(20);
+        builder.HasOne<AssetClass>()
+            .WithMany()
+            .HasForeignKey(h => h.AssetClassCode)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
+
         builder.Property(h => h.CountryCode).HasMaxLength(2);
         builder.HasOne<Country>()
             .WithMany()

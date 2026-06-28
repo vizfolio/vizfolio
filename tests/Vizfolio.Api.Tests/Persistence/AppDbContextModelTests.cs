@@ -161,6 +161,7 @@ public sealed class AppDbContextModelTests
     [InlineData(typeof(Currency), "Currency")]
     [InlineData(typeof(Country), "Country")]
     [InlineData(typeof(AssetCategory), "AssetCategory")]
+    [InlineData(typeof(AssetClass), "AssetClass")]
     public void Tables_use_singular_names(Type clrType, string expectedTable)
     {
         using var context = CreateContext();
@@ -174,6 +175,7 @@ public sealed class AppDbContextModelTests
     [InlineData(typeof(Currency), nameof(FundHolding.CurrencyCode))]
     [InlineData(typeof(Country), nameof(FundHolding.CountryCode))]
     [InlineData(typeof(AssetCategory), nameof(FundHolding.AssetCategoryCode))]
+    [InlineData(typeof(AssetClass), nameof(FundHolding.AssetClassCode))]
     public void FundHolding_references_reference_lookup_with_restrict_delete(Type principal, string propertyName)
     {
         using var context = CreateContext();

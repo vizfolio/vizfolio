@@ -26,5 +26,7 @@ public interface IAppDbContext
 
     DbSet<AssetCategory> AssetCategories { get; }
 
+    DbSet<AssetClass> AssetClasses { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -11,7 +11,7 @@ using Vizfolio.Infrastructure.Persistence;
 namespace Vizfolio.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260628152626_Initial")]
+    [Migration("20260628164425_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -102,6 +102,10 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AssetClassCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal?>("Balance")
                         .HasColumnType("decimal(28,4)");
 
@@ -148,6 +152,8 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasKey("FundHoldingId");
 
                     b.HasIndex("AssetCategoryCode");
+
+                    b.HasIndex("AssetClassCode");
 
                     b.HasIndex("CountryCode");
 
@@ -248,6 +254,154 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasData(
                         new
                         {
+                            Code = "EC",
+                            Description = "Common equity securities.",
+                            Name = "Equity-Common"
+                        },
+                        new
+                        {
+                            Code = "EP",
+                            Description = "Preferred equity securities.",
+                            Name = "Equity-Preferred"
+                        },
+                        new
+                        {
+                            Code = "DBT",
+                            Description = "Debt securities.",
+                            Name = "Debt"
+                        },
+                        new
+                        {
+                            Code = "SN",
+                            Description = "Structured note.",
+                            Name = "Structured Note"
+                        },
+                        new
+                        {
+                            Code = "LON",
+                            Description = "Loans and loan participations.",
+                            Name = "Loan"
+                        },
+                        new
+                        {
+                            Code = "ABS-APCP",
+                            Description = "Asset-backed commercial paper.",
+                            Name = "ABS-Asset Backed Commercial Paper"
+                        },
+                        new
+                        {
+                            Code = "ABS-CBDO",
+                            Description = "Collateralized bond or debt obligation.",
+                            Name = "ABS-Collateralized Bond/Debt Obligation"
+                        },
+                        new
+                        {
+                            Code = "ABS-MBS",
+                            Description = "Mortgage-backed security.",
+                            Name = "ABS-Mortgage Backed Security"
+                        },
+                        new
+                        {
+                            Code = "ABS-O",
+                            Description = "Other asset-backed security not otherwise classified.",
+                            Name = "ABS-Other"
+                        },
+                        new
+                        {
+                            Code = "DE",
+                            Description = "Derivative referencing equity.",
+                            Name = "Derivative-Equity"
+                        },
+                        new
+                        {
+                            Code = "DCR",
+                            Description = "Derivative referencing credit (e.g. credit default swap).",
+                            Name = "Derivative-Credit"
+                        },
+                        new
+                        {
+                            Code = "DIR",
+                            Description = "Derivative referencing interest rates.",
+                            Name = "Derivative-Interest Rate"
+                        },
+                        new
+                        {
+                            Code = "DCO",
+                            Description = "Derivative referencing a commodity.",
+                            Name = "Derivative-Commodity"
+                        },
+                        new
+                        {
+                            Code = "DFE",
+                            Description = "Derivative referencing foreign exchange.",
+                            Name = "Derivative-Foreign Exchange"
+                        },
+                        new
+                        {
+                            Code = "DOT",
+                            Description = "Derivative not otherwise classified.",
+                            Name = "Derivative-Other"
+                        },
+                        new
+                        {
+                            Code = "STIV",
+                            Description = "Money market fund, liquidity pool, or other cash management vehicle.",
+                            Name = "Short-Term Investment Vehicle"
+                        },
+                        new
+                        {
+                            Code = "RA",
+                            Description = "Repurchase or reverse repurchase agreement.",
+                            Name = "Repurchase Agreement"
+                        },
+                        new
+                        {
+                            Code = "COMD",
+                            Description = "Physical commodity or commodity-linked instrument.",
+                            Name = "Commodity"
+                        },
+                        new
+                        {
+                            Code = "RE",
+                            Description = "Direct real estate or real estate-linked investment.",
+                            Name = "Real Estate"
+                        },
+                        new
+                        {
+                            Code = "OTH",
+                            Description = "Other asset category not otherwise classified.",
+                            Name = "Other"
+                        },
+                        new
+                        {
+                            Code = "OTHER",
+                            Description = "Alias used by some N-PORT filings for OTH.",
+                            Name = "Other"
+                        });
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Reference.AssetClass", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Code");
+
+                    b.ToTable("AssetClass", (string)null);
+
+                    b.HasData(
+                        new
+                        {
                             Code = "EQUITY",
                             Description = "Equity securities (common or preferred).",
                             Name = "Equity"
@@ -266,8 +420,26 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         },
                         new
                         {
+                            Code = "CASH",
+                            Description = "Short-term investment vehicles and repurchase agreements (cash-equivalent positions).",
+                            Name = "Cash"
+                        },
+                        new
+                        {
+                            Code = "COMMODITY",
+                            Description = "Physical commodities or commodity-linked instruments.",
+                            Name = "Commodity"
+                        },
+                        new
+                        {
+                            Code = "REAL_ESTATE",
+                            Description = "Direct real estate or real estate-linked investments.",
+                            Name = "Real Estate"
+                        },
+                        new
+                        {
                             Code = "OTHER",
-                            Description = "Short-term investments, repurchase agreements, commodities, real estate, and anything not otherwise classified.",
+                            Description = "Anything not otherwise classified.",
                             Name = "Other"
                         });
                 });
@@ -3018,6 +3190,11 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasOne("Vizfolio.Domain.Reference.AssetCategory", null)
                         .WithMany()
                         .HasForeignKey("AssetCategoryCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Reference.AssetClass", null)
+                        .WithMany()
+                        .HasForeignKey("AssetClassCode")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Vizfolio.Domain.Reference.Country", null)
