@@ -8,7 +8,7 @@ internal sealed class SecurityConfiguration : IEntityTypeConfiguration<Security>
 {
     public void Configure(EntityTypeBuilder<Security> builder)
     {
-        builder.ToTable("Securities");
+        builder.ToTable("Security");
         builder.HasKey(s => s.SecurityId);
 
         builder.Property(s => s.Cik).IsRequired().HasMaxLength(10);
@@ -22,13 +22,15 @@ internal sealed class SecurityConfiguration : IEntityTypeConfiguration<Security>
 
         builder.PrimitiveCollection<List<string>>("_tickers")
             .UsePropertyAccessMode(PropertyAccessMode.Field)
-            .HasField("_tickers");
+            .HasField("_tickers")
+            .HasColumnName("Tickers");
 
         builder.Ignore(s => s.Tickers);
 
         builder.PrimitiveCollection<List<string>>("_exchanges")
             .UsePropertyAccessMode(PropertyAccessMode.Field)
-            .HasField("_exchanges");
+            .HasField("_exchanges")
+            .HasColumnName("Exchanges");
 
         builder.Ignore(s => s.Exchanges);
     }

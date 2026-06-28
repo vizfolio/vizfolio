@@ -11,12 +11,17 @@ internal sealed class FundSnapshotConfiguration : IEntityTypeConfiguration<FundS
 
     public void Configure(EntityTypeBuilder<FundSnapshot> builder)
     {
-        builder.ToTable("FundSnapshots");
+        builder.ToTable("FundSnapshot");
         builder.HasKey(s => s.FundSnapshotId);
 
         builder.Property(s => s.FundId).IsRequired();
         builder.Property(s => s.AsOf).IsRequired();
         builder.HasIndex(s => new { s.FundId, s.AsOf }).IsUnique();
+
+        builder.HasOne<Fund>()
+            .WithMany()
+            .HasForeignKey(s => s.FundId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         builder.Property(s => s.SourceFiling).IsRequired().HasMaxLength(50);
         builder.Property(s => s.SourceUrl).IsRequired().HasMaxLength(1000);
@@ -28,7 +33,7 @@ internal sealed class FundSnapshotConfiguration : IEntityTypeConfiguration<FundS
 
         builder.OwnsMany(s => s.ShareClasses, sc =>
         {
-            sc.ToTable("FundShareClasses");
+            sc.ToTable("FundShareClass");
             sc.WithOwner().HasForeignKey("FundSnapshotId");
             sc.Property<int>("Id");
             sc.HasKey("Id");
@@ -43,7 +48,7 @@ internal sealed class FundSnapshotConfiguration : IEntityTypeConfiguration<FundS
 
         builder.OwnsMany(s => s.MonthlyReturns, mr =>
         {
-            mr.ToTable("FundMonthlyReturns");
+            mr.ToTable("FundMonthlyReturn");
             mr.WithOwner().HasForeignKey("FundSnapshotId");
             mr.Property<int>("Id");
             mr.HasKey("Id");

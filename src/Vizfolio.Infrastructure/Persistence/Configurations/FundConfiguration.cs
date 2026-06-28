@@ -8,7 +8,7 @@ internal sealed class FundConfiguration : IEntityTypeConfiguration<Fund>
 {
     public void Configure(EntityTypeBuilder<Fund> builder)
     {
-        builder.ToTable("Funds");
+        builder.ToTable("Fund");
         builder.HasKey(f => f.FundId);
 
         builder.Property(f => f.SeriesId).IsRequired().HasMaxLength(20);

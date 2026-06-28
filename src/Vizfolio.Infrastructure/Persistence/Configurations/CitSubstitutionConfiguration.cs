@@ -8,7 +8,7 @@ internal sealed class CitSubstitutionConfiguration : IEntityTypeConfiguration<Ci
 {
     public void Configure(EntityTypeBuilder<CitSubstitution> builder)
     {
-        builder.ToTable("CitSubstitutions");
+        builder.ToTable("CitSubstitution");
         builder.HasKey(c => c.CitSubstitutionId);
 
         builder.Property(c => c.SubstituteTicker).IsRequired().HasMaxLength(20);
@@ -26,7 +26,8 @@ internal sealed class CitSubstitutionConfiguration : IEntityTypeConfiguration<Ci
 
         builder.PrimitiveCollection<List<string>>("_patterns")
             .UsePropertyAccessMode(PropertyAccessMode.Field)
-            .HasField("_patterns");
+            .HasField("_patterns")
+            .HasColumnName("Patterns");
 
         builder.Ignore(c => c.Patterns);
     }

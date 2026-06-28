@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Vizfolio.Domain.Funds;
+using Vizfolio.Domain.Securities;
 
 namespace Vizfolio.Infrastructure.Persistence.Configurations;
 
@@ -11,14 +12,22 @@ internal sealed class FundHoldingConfiguration : IEntityTypeConfiguration<FundHo
 
     public void Configure(EntityTypeBuilder<FundHolding> builder)
     {
-        builder.ToTable("FundHoldings");
+        builder.ToTable("FundHolding");
         builder.HasKey(h => h.FundHoldingId);
 
         builder.Property(h => h.FundSnapshotId).IsRequired();
-        builder.HasIndex(h => h.FundSnapshotId);
+
+        builder.HasOne<FundSnapshot>()
+            .WithMany()
+            .HasForeignKey(h => h.FundSnapshotId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         builder.Property(h => h.SecurityId);
-        builder.HasIndex(h => h.SecurityId);
+        builder.HasOne<Security>()
+            .WithMany()
+            .HasForeignKey(h => h.SecurityId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
 
         builder.Property(h => h.Weight).HasColumnType(PercentageType).IsRequired();
         builder.Property(h => h.FairValueUsd).HasColumnType(MoneyType);

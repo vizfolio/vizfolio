@@ -93,4 +93,64 @@ public sealed class AppDbContextModelTests
 
         created.ShouldBeTrue();
     }
+
+    [Fact]
+    public void FundSnapshot_cascade_deletes_with_Fund()
+    {
+        using var context = CreateContext();
+
+        var snapshot = context.Model.FindEntityType(typeof(FundSnapshot))!;
+        var fk = snapshot.GetForeignKeys()
+            .FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(Fund));
+
+        fk.ShouldNotBeNull();
+        fk.Properties.ShouldHaveSingleItem().Name.ShouldBe(nameof(FundSnapshot.FundId));
+        fk.DeleteBehavior.ShouldBe(DeleteBehavior.Cascade);
+        fk.IsRequired.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void FundHolding_cascade_deletes_with_FundSnapshot()
+    {
+        using var context = CreateContext();
+
+        var holding = context.Model.FindEntityType(typeof(FundHolding))!;
+        var fk = holding.GetForeignKeys()
+            .FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(FundSnapshot));
+
+        fk.ShouldNotBeNull();
+        fk.Properties.ShouldHaveSingleItem().Name.ShouldBe(nameof(FundHolding.FundSnapshotId));
+        fk.DeleteBehavior.ShouldBe(DeleteBehavior.Cascade);
+        fk.IsRequired.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void FundHolding_optionally_references_Security_with_restrict_delete()
+    {
+        using var context = CreateContext();
+
+        var holding = context.Model.FindEntityType(typeof(FundHolding))!;
+        var fk = holding.GetForeignKeys()
+            .FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(Security));
+
+        fk.ShouldNotBeNull();
+        fk.Properties.ShouldHaveSingleItem().Name.ShouldBe(nameof(FundHolding.SecurityId));
+        fk.DeleteBehavior.ShouldBe(DeleteBehavior.Restrict);
+        fk.IsRequired.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(typeof(Fund), "Fund")]
+    [InlineData(typeof(FundSnapshot), "FundSnapshot")]
+    [InlineData(typeof(FundHolding), "FundHolding")]
+    [InlineData(typeof(Security), "Security")]
+    [InlineData(typeof(CitSubstitution), "CitSubstitution")]
+    public void Tables_use_singular_names(Type clrType, string expectedTable)
+    {
+        using var context = CreateContext();
+
+        var entity = context.Model.FindEntityType(clrType)!;
+
+        entity.GetTableName().ShouldBe(expectedTable);
+    }
 }
