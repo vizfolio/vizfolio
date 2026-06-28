@@ -32,18 +32,59 @@ public sealed class QfxFileParser : IPortfolioFileParser
         var doc = new XmlDocument();
         doc.LoadXml(body);
 
-        var institution = SelectText(doc, "//FI/ORG");
-        var accountNumber = SelectText(doc, "//INVACCTFROM/ACCTID")
-                          ?? SelectText(doc, "//BANKACCTFROM/ACCTID")
-                          ?? SelectText(doc, "//CCACCTFROM/ACCTID");
-
         var securityList = BuildSecurityList(doc);
+        var statements = new List<ParsedAccountStatement>();
 
-        var transactions = new List<ParsedTransaction>();
-        ParseInvestmentTransactions(doc, transactions, securityList);
-        ParseBankTransactions(doc, transactions);
+        AppendStatements(doc, "//INVSTMTRS", ".//INVACCTFROM", "BROKERID",
+            (stmt, txs) =>
+            {
+                var invList = stmt.SelectSingleNode(".//INVTRANLIST");
+                if (invList is not null) ParseInvestmentTransactions(invList, txs, securityList);
+            },
+            statements);
 
-        return new ParsedPortfolioFile(SourceSystem, institution, accountNumber, transactions);
+        AppendStatements(doc, "//STMTRS", ".//BANKACCTFROM", "BANKID",
+            (stmt, txs) =>
+            {
+                var bankList = stmt.SelectSingleNode(".//BANKTRANLIST");
+                if (bankList is not null) ParseBankTransactions(bankList, txs);
+            },
+            statements);
+
+        AppendStatements(doc, "//CCSTMTRS", ".//CCACCTFROM", institutionCodeChild: null,
+            (stmt, txs) =>
+            {
+                var bankList = stmt.SelectSingleNode(".//BANKTRANLIST");
+                if (bankList is not null) ParseBankTransactions(bankList, txs);
+            },
+            statements);
+
+        return new ParsedPortfolioFile(SourceSystem, statements);
+    }
+
+    private static void AppendStatements(
+        XmlDocument doc,
+        string statementXPath,
+        string acctFromXPath,
+        string? institutionCodeChild,
+        Action<XmlNode, List<ParsedTransaction>> populateTransactions,
+        List<ParsedAccountStatement> sink)
+    {
+        var nodes = doc.SelectNodes(statementXPath);
+        if (nodes is null) return;
+
+        foreach (XmlNode stmt in nodes)
+        {
+            var acctFrom = stmt.SelectSingleNode(acctFromXPath);
+            var institutionCode = institutionCodeChild is null
+                ? null
+                : NormalizeCode(SelectText(acctFrom, institutionCodeChild));
+            var accountNumber = SelectText(acctFrom, "ACCTID");
+
+            var transactions = new List<ParsedTransaction>();
+            populateTransactions(stmt, transactions);
+            sink.Add(new ParsedAccountStatement(institutionCode, accountNumber, transactions));
+        }
     }
 
     private static Dictionary<string, string> BuildSecurityList(XmlDocument doc)
@@ -66,13 +107,10 @@ public sealed class QfxFileParser : IPortfolioFileParser
     }
 
     private static void ParseInvestmentTransactions(
-        XmlDocument doc,
+        XmlNode invList,
         List<ParsedTransaction> transactions,
         IReadOnlyDictionary<string, string> securityList)
     {
-        var invList = doc.SelectSingleNode("//INVTRANLIST");
-        if (invList is null) return;
-
         foreach (XmlNode node in invList.ChildNodes)
         {
             if (node.NodeType != XmlNodeType.Element) continue;
@@ -89,11 +127,8 @@ public sealed class QfxFileParser : IPortfolioFileParser
         }
     }
 
-    private static void ParseBankTransactions(XmlDocument doc, List<ParsedTransaction> transactions)
+    private static void ParseBankTransactions(XmlNode bankList, List<ParsedTransaction> transactions)
     {
-        var bankList = doc.SelectSingleNode("//BANKTRANLIST");
-        if (bankList is null) return;
-
         foreach (XmlNode node in bankList.ChildNodes)
         {
             if (node.NodeType != XmlNodeType.Element) continue;
@@ -351,6 +386,12 @@ public sealed class QfxFileParser : IPortfolioFileParser
         return string.IsNullOrEmpty(text) ? null : text;
     }
 
+    private static string? NormalizeCode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        return raw.Trim().ToLowerInvariant();
+    }
+
     private static DateOnly ParseDateOnly(string? raw)
     {
         var parsed = TryParseDateOnly(raw);
@@ -373,4 +414,5 @@ public sealed class QfxFileParser : IPortfolioFileParser
         if (string.IsNullOrWhiteSpace(raw)) return null;
         return decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
     }
+
 }

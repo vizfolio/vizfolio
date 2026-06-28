@@ -7,7 +7,7 @@ public sealed class Account
 
     private Account() { }
 
-    public Account(Guid portfolioId, string name, string institution, string accountNumber, string? accountType = null)
+    public Account(Guid portfolioId, string name, string institutionCode, string accountNumber, string? accountType = null)
     {
         if (portfolioId == Guid.Empty)
             throw new ArgumentException("Portfolio ID is required.", nameof(portfolioId));
@@ -15,9 +15,17 @@ public sealed class Account
         AccountId = Guid.NewGuid();
         PortfolioId = portfolioId;
         Rename(name);
-        SetInstitution(institution);
+        SetInstitutionCode(institutionCode);
         SetAccountNumber(accountNumber);
         SetAccountType(accountType);
+    }
+
+    public static Account FromImport(Guid portfolioId, string institutionCode, string accountNumber)
+    {
+        var normalizedCode = (institutionCode ?? string.Empty).Trim().ToLowerInvariant();
+        var normalizedNumber = (accountNumber ?? string.Empty).Trim();
+        var name = $"{normalizedCode} {normalizedNumber}".Trim();
+        return new Account(portfolioId, name, normalizedCode, normalizedNumber);
     }
 
     public Guid AccountId { get; private set; }
@@ -26,7 +34,7 @@ public sealed class Account
 
     public string Name { get; private set; } = string.Empty;
 
-    public string Institution { get; private set; } = string.Empty;
+    public string InstitutionCode { get; private set; } = string.Empty;
 
     public string AccountNumber { get; private set; } = string.Empty;
 
@@ -51,12 +59,12 @@ public sealed class Account
         AccountType = string.IsNullOrWhiteSpace(accountType) ? null : accountType.Trim();
     }
 
-    private void SetInstitution(string institution)
+    private void SetInstitutionCode(string institutionCode)
     {
-        if (string.IsNullOrWhiteSpace(institution))
-            throw new ArgumentException("Institution is required.", nameof(institution));
+        if (string.IsNullOrWhiteSpace(institutionCode))
+            throw new ArgumentException("Institution code is required.", nameof(institutionCode));
 
-        Institution = institution.Trim();
+        InstitutionCode = institutionCode.Trim().ToLowerInvariant();
     }
 
     private void SetAccountNumber(string accountNumber)

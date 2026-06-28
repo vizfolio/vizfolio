@@ -13,12 +13,12 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
 
         builder.Property(a => a.PortfolioId).IsRequired();
         builder.Property(a => a.Name).IsRequired().HasMaxLength(200);
-        builder.Property(a => a.Institution).IsRequired().HasMaxLength(100);
+        builder.Property(a => a.InstitutionCode).IsRequired().HasMaxLength(100);
         builder.Property(a => a.AccountNumber).IsRequired().HasMaxLength(50);
         builder.Property(a => a.AccountType).HasMaxLength(50);
         builder.Property(a => a.CreatedAt).IsRequired();
 
-        builder.HasIndex(a => new { a.PortfolioId, a.Institution, a.AccountNumber }).IsUnique();
+        builder.HasIndex(a => new { a.PortfolioId, a.InstitutionCode, a.AccountNumber }).IsUnique();
 
         builder.HasOne<Portfolio>()
             .WithMany(p => p.Accounts)

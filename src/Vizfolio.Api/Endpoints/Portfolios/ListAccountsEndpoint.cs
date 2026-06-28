@@ -45,7 +45,7 @@ public sealed class ListAccountsEndpoint : Endpoint<ListAccountsRequest, IReadOn
                 a.AccountId,
                 a.PortfolioId,
                 a.Name,
-                a.Institution,
+                a.InstitutionCode,
                 a.AccountNumber,
                 a.AccountType,
                 a.CreatedAt,

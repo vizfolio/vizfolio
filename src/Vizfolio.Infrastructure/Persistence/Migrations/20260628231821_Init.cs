@@ -170,7 +170,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     AccountId = table.Column<Guid>(type: "TEXT", nullable: false),
                     PortfolioId = table.Column<Guid>(type: "TEXT", nullable: false),
                     Name = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    Institution = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
+                    InstitutionCode = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     AccountNumber = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
                     AccountType = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
@@ -885,9 +885,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_Account_PortfolioId_Institution_AccountNumber",
+                name: "IX_Account_PortfolioId_InstitutionCode_AccountNumber",
                 table: "Account",
-                columns: new[] { "PortfolioId", "Institution", "AccountNumber" },
+                columns: new[] { "PortfolioId", "InstitutionCode", "AccountNumber" },
                 unique: true);
 
             migrationBuilder.CreateIndex(

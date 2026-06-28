@@ -27,7 +27,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
         _logger = logger;
     }
 
-    public async Task<PortfolioImportResult> ImportAsync(
+    public async Task<PortfolioImportResult> ImportToAccountAsync(
         Guid accountId,
         Stream fileStream,
         string fileName,
@@ -35,41 +35,122 @@ public sealed class PortfolioImportService : IPortfolioImportService
     {
         var stopwatch = Stopwatch.StartNew();
 
-        var accountExists = await _db.Accounts.AsNoTracking()
-            .AnyAsync(a => a.AccountId == accountId, cancellationToken);
-        if (!accountExists)
+        var account = await _db.Accounts
+            .FirstOrDefaultAsync(a => a.AccountId == accountId, cancellationToken);
+        if (account is null)
             return PortfolioImportResult.AccountNotFound(stopwatch.Elapsed);
 
-        await using var buffer = new MemoryStream();
-        await fileStream.CopyToAsync(buffer, cancellationToken);
+        var (parsed, missing) = await ParseAsync(fileStream, fileName, cancellationToken);
+        if (missing is not null)
+            return missing(stopwatch.Elapsed);
 
-        IPortfolioFileParser? chosen = null;
-        foreach (var parser in _parsers)
-        {
-            buffer.Position = 0;
-            if (await parser.CanParseAsync(buffer, fileName, cancellationToken))
-            {
-                chosen = parser;
-                break;
-            }
-        }
+        if (parsed!.Statements.Any(s => s.InstitutionCode is not null || s.AccountNumber is not null))
+            return PortfolioImportResult.FileHasAccountInfo(parsed.SourceSystem, stopwatch.Elapsed);
 
-        if (chosen is null)
-        {
-            _logger.LogWarning("No parser matched uploaded file {FileName} for account {AccountId}", fileName, accountId);
-            return PortfolioImportResult.UnsupportedFormat(stopwatch.Elapsed);
-        }
+        var allTransactions = parsed.Statements.SelectMany(s => s.Transactions).ToList();
+        var mergedStatement = new ParsedAccountStatement(
+            InstitutionCode: null,
+            AccountNumber: null,
+            Transactions: allTransactions);
 
-        buffer.Position = 0;
-        var parsed = await chosen.ParseAsync(buffer, fileName, cancellationToken);
+        var currencySet = await LoadCurrenciesAsync(cancellationToken);
+        var accountResult = await ImportStatementAsync(
+            account, parsed.SourceSystem, mergedStatement, accountCreated: false, currencySet, cancellationToken);
 
-        var existingKeys = await _db.AccountTransactions
-            .Where(t => t.AccountId == accountId && t.SourceSystem == parsed.SourceSystem)
-            .Select(t => t.ExternalId)
+        if (HasPendingChanges())
+            await _db.SaveChangesAsync(cancellationToken);
+
+        stopwatch.Stop();
+        return new PortfolioImportResult(
+            Status: PortfolioImportStatus.Success,
+            SourceSystem: parsed.SourceSystem,
+            Accounts: [accountResult],
+            Duration: stopwatch.Elapsed);
+    }
+
+    public async Task<PortfolioImportResult> ImportToPortfolioAsync(
+        Guid portfolioId,
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        var portfolioExists = await _db.Portfolios.AsNoTracking()
+            .AnyAsync(p => p.PortfolioId == portfolioId, cancellationToken);
+        if (!portfolioExists)
+            return PortfolioImportResult.PortfolioNotFound(stopwatch.Elapsed);
+
+        var (parsed, missing) = await ParseAsync(fileStream, fileName, cancellationToken);
+        if (missing is not null)
+            return missing(stopwatch.Elapsed);
+
+        var identifiable = parsed!.Statements
+            .Where(s => !string.IsNullOrWhiteSpace(s.InstitutionCode) && !string.IsNullOrWhiteSpace(s.AccountNumber))
+            .ToList();
+
+        if (identifiable.Count == 0)
+            return PortfolioImportResult.FileHasNoAccountInfo(parsed.SourceSystem, stopwatch.Elapsed);
+
+        var existingAccounts = await _db.Accounts
+            .Where(a => a.PortfolioId == portfolioId)
             .ToListAsync(cancellationToken);
+        var accountByKey = existingAccounts.ToDictionary(
+            a => AccountKey(a.InstitutionCode, a.AccountNumber),
+            a => a);
+
+        var currencySet = await LoadCurrenciesAsync(cancellationToken);
+        var perAccountResults = new List<AccountImportResult>(identifiable.Count);
+
+        foreach (var statement in identifiable)
+        {
+            var key = AccountKey(statement.InstitutionCode!, statement.AccountNumber!);
+            var created = false;
+            if (!accountByKey.TryGetValue(key, out var account))
+            {
+                account = Account.FromImport(portfolioId, statement.InstitutionCode!, statement.AccountNumber!);
+                _db.Accounts.Add(account);
+                accountByKey[key] = account;
+                created = true;
+            }
+
+            var result = await ImportStatementAsync(
+                account, parsed.SourceSystem, statement, accountCreated: created, currencySet, cancellationToken);
+            perAccountResults.Add(result);
+        }
+
+        if (HasPendingChanges())
+            await _db.SaveChangesAsync(cancellationToken);
+
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "Imported {Inserted} transactions across {AccountCount} accounts in portfolio {PortfolioId} from {Source}",
+            perAccountResults.Sum(r => r.Inserted), perAccountResults.Count, portfolioId, parsed.SourceSystem);
+
+        return new PortfolioImportResult(
+            Status: PortfolioImportStatus.Success,
+            SourceSystem: parsed.SourceSystem,
+            Accounts: perAccountResults,
+            Duration: stopwatch.Elapsed);
+    }
+
+    private async Task<AccountImportResult> ImportStatementAsync(
+        Account account,
+        string sourceSystem,
+        ParsedAccountStatement statement,
+        bool accountCreated,
+        IReadOnlySet<string> validCurrencies,
+        CancellationToken cancellationToken)
+    {
+        var existingKeys = accountCreated
+            ? new List<string>()
+            : await _db.AccountTransactions
+                .Where(t => t.AccountId == account.AccountId && t.SourceSystem == sourceSystem)
+                .Select(t => t.ExternalId)
+                .ToListAsync(cancellationToken);
         var existing = existingKeys.ToHashSet(StringComparer.Ordinal);
 
-        var tickerSet = parsed.Transactions
+        var tickerSet = statement.Transactions
             .Select(t => t.Ticker)
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Select(t => t!.Trim().ToUpperInvariant())
@@ -77,23 +158,19 @@ public sealed class PortfolioImportService : IPortfolioImportService
             .ToList();
 
         var resolver = new AccountHoldingResolver(_db, _logger);
-        await resolver.PrimeAsync(accountId, tickerSet, cancellationToken);
-
-        var validCurrencies = await _db.Currencies.AsNoTracking()
-            .Select(c => c.Code).ToListAsync(cancellationToken);
-        var currencySet = validCurrencies.ToHashSet(StringComparer.Ordinal);
+        await resolver.PrimeAsync(account.AccountId, tickerSet, cancellationToken);
 
         var failures = new List<PortfolioImportFailure>();
         var inserted = 0;
         var skipped = 0;
 
-        foreach (var (parsedTx, index) in parsed.Transactions.Select((t, i) => (t, i)))
+        foreach (var (parsedTx, index) in statement.Transactions.Select((t, i) => (t, i)))
         {
             try
             {
                 var externalId = !string.IsNullOrWhiteSpace(parsedTx.ExternalId)
                     ? parsedTx.ExternalId!.Trim()
-                    : ComputeHash(accountId, parsedTx);
+                    : ComputeHash(account.AccountId, parsedTx);
 
                 if (existing.Contains(externalId))
                 {
@@ -102,8 +179,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 }
 
                 var entity = new AccountTransaction(
-                    accountId: accountId,
-                    sourceSystem: parsed.SourceSystem,
+                    accountId: account.AccountId,
+                    sourceSystem: sourceSystem,
                     externalId: externalId,
                     type: parsedTx.Type,
                     tradeDate: parsedTx.TradeDate,
@@ -111,10 +188,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
                 entity.SetSecurityReference(parsedTx.Ticker, parsedTx.Cusip);
                 entity.SetTradeDetails(parsedTx.Quantity, parsedTx.Price, parsedTx.Fees, parsedTx.SettlementDate);
-
-                var currency = NormalizeCurrency(parsedTx.CurrencyCode, currencySet);
-                entity.SetCurrency(currency);
-
+                entity.SetCurrency(NormalizeCurrency(parsedTx.CurrencyCode, validCurrencies));
                 entity.SetMemo(parsedTx.Memo);
 
                 if (!string.IsNullOrWhiteSpace(entity.Ticker))
@@ -136,26 +210,61 @@ public sealed class PortfolioImportService : IPortfolioImportService
             }
         }
 
-        if (inserted > 0)
-            await _db.SaveChangesAsync(cancellationToken);
-
-        stopwatch.Stop();
-        _logger.LogInformation(
-            "Imported {Inserted} transactions ({Skipped} skipped, {Failed} failed) for account {AccountId} from {Source}",
-            inserted, skipped, failures.Count, accountId, parsed.SourceSystem);
-
-        return new PortfolioImportResult(
-            Status: PortfolioImportStatus.Success,
-            SourceSystem: parsed.SourceSystem,
-            SourceInstitution: parsed.SourceInstitution,
-            SourceAccountNumber: parsed.SourceAccountNumber,
-            Considered: parsed.Transactions.Count,
+        return new AccountImportResult(
+            AccountId: account.AccountId,
+            Created: accountCreated,
+            InstitutionCode: account.InstitutionCode,
+            AccountNumber: account.AccountNumber,
+            Considered: statement.Transactions.Count,
             Inserted: inserted,
             Skipped: skipped,
             Failed: failures.Count,
-            Failures: failures,
-            Duration: stopwatch.Elapsed);
+            Failures: failures);
     }
+
+    private async Task<(ParsedPortfolioFile? Parsed, Func<TimeSpan, PortfolioImportResult>? Missing)> ParseAsync(
+        Stream fileStream, string fileName, CancellationToken cancellationToken)
+    {
+        await using var buffer = new MemoryStream();
+        await fileStream.CopyToAsync(buffer, cancellationToken);
+
+        IPortfolioFileParser? chosen = null;
+        foreach (var parser in _parsers)
+        {
+            buffer.Position = 0;
+            if (await parser.CanParseAsync(buffer, fileName, cancellationToken))
+            {
+                chosen = parser;
+                break;
+            }
+        }
+
+        if (chosen is null)
+        {
+            _logger.LogWarning("No parser matched uploaded file {FileName}", fileName);
+            return (null, PortfolioImportResult.UnsupportedFormat);
+        }
+
+        buffer.Position = 0;
+        var parsed = await chosen.ParseAsync(buffer, fileName, cancellationToken);
+        return (parsed, null);
+    }
+
+    private async Task<HashSet<string>> LoadCurrenciesAsync(CancellationToken cancellationToken)
+    {
+        var codes = await _db.Currencies.AsNoTracking()
+            .Select(c => c.Code).ToListAsync(cancellationToken);
+        return codes.ToHashSet(StringComparer.Ordinal);
+    }
+
+    private bool HasPendingChanges()
+    {
+        if (_db is DbContext ctx) return ctx.ChangeTracker.HasChanges();
+        return true;
+    }
+
+    private static string AccountKey(string institutionCode, string accountNumber) =>
+        $"{institutionCode.ToLowerInvariant()}|{accountNumber}";
 
     private static string? NormalizeCurrency(string? raw, IReadOnlySet<string> validCodes)
     {

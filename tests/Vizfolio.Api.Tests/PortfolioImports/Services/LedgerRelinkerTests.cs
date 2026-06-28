@@ -210,7 +210,7 @@ public sealed class LedgerRelinkerTests
         var portfolio = ctx.Db.Portfolios.Local.FirstOrDefault() ?? new Portfolio("Test");
         if (!ctx.Db.Portfolios.Local.Contains(portfolio))
             ctx.Db.Portfolios.Add(portfolio);
-        var account = new Account(portfolio.PortfolioId, "Brokerage", "Fidelity", accountNumber);
+        var account = new Account(portfolio.PortfolioId, "Brokerage", "fidelity.com", accountNumber);
         ctx.Db.Accounts.Add(account);
         await ctx.Db.SaveChangesAsync();
         return account;

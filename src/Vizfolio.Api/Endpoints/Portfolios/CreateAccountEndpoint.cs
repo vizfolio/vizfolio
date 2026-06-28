@@ -9,7 +9,7 @@ namespace Vizfolio.Api.Endpoints.Portfolios;
 public sealed record CreateAccountRequest(
     Guid PortfolioId,
     string Name,
-    string Institution,
+    string InstitutionCode,
     string AccountNumber,
     string? AccountType);
 
@@ -34,10 +34,11 @@ public sealed class CreateAccountEndpoint : Endpoint<CreateAccountRequest, Accou
         Summary(s =>
         {
             s.Summary = "Add a brokerage account to a portfolio.";
-            s.Description = "Accounts are uniquely identified within a portfolio by (institution, accountNumber). " +
+            s.Description = "Accounts are uniquely identified within a portfolio by (institutionCode, accountNumber). " +
+                             "InstitutionCode mirrors OFX `BROKERID` / `BANKID` (e.g. `vanguard.com`) and is normalized to lower-case. " +
                              "AccountType is free-form (e.g. 'Brokerage', 'Roth IRA').";
             s.ExampleRequest = new CreateAccountRequest(
-                Guid.Empty, "Fidelity Brokerage", "Fidelity", "1234", "Brokerage");
+                Guid.Empty, "Fidelity Brokerage", "fidelity.com", "1234", "Brokerage");
         });
     }
 
@@ -51,11 +52,11 @@ public sealed class CreateAccountEndpoint : Endpoint<CreateAccountRequest, Accou
             return;
         }
 
-        var institution = req.Institution?.Trim() ?? string.Empty;
+        var institutionCode = (req.InstitutionCode ?? string.Empty).Trim().ToLowerInvariant();
         var accountNumber = req.AccountNumber?.Trim() ?? string.Empty;
         var duplicate = await _db.Accounts.AsNoTracking()
             .AnyAsync(a => a.PortfolioId == req.PortfolioId
-                && a.Institution == institution
+                && a.InstitutionCode == institutionCode
                 && a.AccountNumber == accountNumber, ct);
         if (duplicate)
         {
@@ -63,12 +64,12 @@ public sealed class CreateAccountEndpoint : Endpoint<CreateAccountRequest, Accou
             return;
         }
 
-        var account = new Account(req.PortfolioId, req.Name, institution, accountNumber, req.AccountType);
+        var account = new Account(req.PortfolioId, req.Name, institutionCode, accountNumber, req.AccountType);
         _db.Accounts.Add(account);
         await _db.SaveChangesAsync(ct);
 
         var response = new AccountResponse(
-            account.AccountId, account.PortfolioId, account.Name, account.Institution,
+            account.AccountId, account.PortfolioId, account.Name, account.InstitutionCode,
             account.AccountNumber, account.AccountType, account.CreatedAt, 0);
 
         await Send.CreatedAtAsync<GetAccountEndpoint>(

@@ -43,10 +43,13 @@ public sealed class CsvFileParserTests
         var parsed = await parser.ParseAsync(stream, "sample.csv", CancellationToken.None);
 
         parsed.SourceSystem.ShouldBe("CSV");
-        parsed.SourceInstitution.ShouldBeNull();
-        parsed.Transactions.Count.ShouldBe(2);
+        parsed.Statements.Count.ShouldBe(1);
+        var statement = parsed.Statements[0];
+        statement.InstitutionCode.ShouldBeNull();
+        statement.AccountNumber.ShouldBeNull();
+        statement.Transactions.Count.ShouldBe(2);
 
-        var buy = parsed.Transactions[0];
+        var buy = statement.Transactions[0];
         buy.Type.ShouldBe(TransactionType.Buy);
         buy.TradeDate.ShouldBe(new DateOnly(2026, 6, 1));
         buy.Ticker.ShouldBe("voo");
@@ -57,7 +60,7 @@ public sealed class CsvFileParserTests
         buy.Memo.ShouldBe("hello, world");
         buy.ExternalId.ShouldBe("ext-1");
 
-        var div = parsed.Transactions[1];
+        var div = statement.Transactions[1];
         div.Type.ShouldBe(TransactionType.Dividend);
         div.Amount.ShouldBe(5.25m);
         div.ExternalId.ShouldBeNull();

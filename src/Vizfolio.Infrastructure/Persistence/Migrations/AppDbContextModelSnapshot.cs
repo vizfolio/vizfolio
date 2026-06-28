@@ -228,7 +228,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Institution")
+                    b.Property<string>("InstitutionCode")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
@@ -243,7 +243,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
                     b.HasKey("AccountId");
 
-                    b.HasIndex("PortfolioId", "Institution", "AccountNumber")
+                    b.HasIndex("PortfolioId", "InstitutionCode", "AccountNumber")
                         .IsUnique();
 
                     b.ToTable("Account", (string)null);

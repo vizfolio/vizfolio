@@ -47,8 +47,9 @@ erDiagram
     Account {
         Guid     AccountId          PK
         Guid     PortfolioId        FK
-        string   Institution
-        string   AccountNumber
+        string   InstitutionCode        "OFX BROKERID / BANKID; lower-cased"
+        string   AccountNumber          "OFX ACCTID"
+        string   Name                   "user-visible label; defaults to '{InstitutionCode} {AccountNumber}' on auto-import"
     }
 
     AccountTransaction {
@@ -141,7 +142,7 @@ erDiagram
 
 ## Aggregates and what each cluster is for
 
-**Portfolio → Account → AccountTransaction** is the user's ledger. A `Portfolio` is a logical grouping; an `Account` is one brokerage/institution account inside it; an `AccountTransaction` is one row in that account's history. Transactions are uniquely identified within an account by `(AccountId, SourceSystem, ExternalId)` so re-imports are idempotent.
+**Portfolio → Account → AccountTransaction** is the user's ledger. A `Portfolio` is a logical grouping; an `Account` is one brokerage/institution account inside it; an `AccountTransaction` is one row in that account's history. Transactions are uniquely identified within an account by `(AccountId, SourceSystem, ExternalId)` so re-imports are idempotent. Accounts are uniquely identified within a portfolio by `(PortfolioId, InstitutionCode, AccountNumber)` — `InstitutionCode` is the OFX `BROKERID` / `BANKID` (e.g. `vanguard.com`), normalized to lower case, and `AccountNumber` is the OFX `ACCTID`. The portfolio-scoped import endpoint (`POST /portfolios/{id}/imports`) uses this pair to find-or-create an account per `<INVSTMTRS>` block in a multi-account QFX file.
 
 **AccountHolding** is what an account holds — one row per tradeable asset *within an account*. The `Kind` discriminator selects between `Security`, `Fund`, `Crypto`, `Cash`, and `Other`; for `Security`/`Fund` the corresponding nullable FK is populated. Crypto/Cash/Other carry their symbol + classification on `AccountHolding` itself without a sibling reference entity. Holdings are created lazily — either during import (`PortfolioImportService`) or after the fact (`LedgerRelinker`) — by `Vizfolio.Application.Portfolios.AccountHoldingResolver`, which resolves a ticker to a `Security` or to the latest `FundSnapshot`'s `ShareClass.Ticker`. The resolver is primed per-account, so the same security imported into two different accounts produces two distinct `AccountHolding` rows.
 

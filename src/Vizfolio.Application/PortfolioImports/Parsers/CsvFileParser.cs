@@ -70,7 +70,8 @@ public sealed class CsvFileParser : IPortfolioFileParser
                 Memo: memo));
         }
 
-        return new ParsedPortfolioFile(SourceSystem, null, null, transactions);
+        var statement = new ParsedAccountStatement(InstitutionCode: null, AccountNumber: null, transactions);
+        return new ParsedPortfolioFile(SourceSystem, [statement]);
     }
 
     private static Dictionary<string, int> BuildIndexMap(IReadOnlyList<string> headers)

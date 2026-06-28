@@ -6,7 +6,7 @@ public sealed record AccountResponse(
     Guid AccountId,
     Guid PortfolioId,
     string Name,
-    string Institution,
+    string InstitutionCode,
     string AccountNumber,
     string? AccountType,
     DateTimeOffset CreatedAt,
