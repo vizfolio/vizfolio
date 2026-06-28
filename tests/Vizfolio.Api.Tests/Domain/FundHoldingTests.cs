@@ -1,5 +1,5 @@
 using Shouldly;
-using Vizfolio.Domain.Holdings;
+using Vizfolio.Domain.Funds;
 
 namespace Vizfolio.Api.Tests.Domain;
 

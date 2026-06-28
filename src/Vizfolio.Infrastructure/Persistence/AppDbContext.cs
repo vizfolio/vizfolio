@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Domain.Funds;
-using Vizfolio.Domain.Holdings;
 using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Securities;
 

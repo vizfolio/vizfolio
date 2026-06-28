@@ -1,6 +1,6 @@
 using Vizfolio.Domain.Common;
 
-namespace Vizfolio.Domain.Holdings;
+namespace Vizfolio.Domain.Funds;
 
 public sealed class FundHolding : Entity
 {

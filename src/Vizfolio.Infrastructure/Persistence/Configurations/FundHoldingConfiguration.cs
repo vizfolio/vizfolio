@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Vizfolio.Domain.Holdings;
+using Vizfolio.Domain.Funds;
 
 namespace Vizfolio.Infrastructure.Persistence.Configurations;
 

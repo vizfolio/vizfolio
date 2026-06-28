@@ -2,7 +2,6 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Vizfolio.Domain.Funds;
-using Vizfolio.Domain.Holdings;
 using Vizfolio.Domain.Securities;
 using Vizfolio.Infrastructure.Persistence;
 
