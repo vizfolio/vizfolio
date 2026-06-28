@@ -47,7 +47,7 @@ public sealed class AccountTransaction
 
     public string? Cusip { get; private set; }
 
-    public Guid? InstrumentId { get; private set; }
+    public Guid? AccountHoldingId { get; private set; }
 
     public decimal? Quantity { get; private set; }
 
@@ -69,12 +69,12 @@ public sealed class AccountTransaction
         Cusip = string.IsNullOrWhiteSpace(cusip) ? null : cusip.Trim().ToUpperInvariant();
     }
 
-    public void LinkToInstrument(Guid instrumentId)
+    public void LinkToHolding(Guid accountHoldingId)
     {
-        if (instrumentId == Guid.Empty)
-            throw new ArgumentException("Instrument ID is required.", nameof(instrumentId));
+        if (accountHoldingId == Guid.Empty)
+            throw new ArgumentException("Account holding ID is required.", nameof(accountHoldingId));
 
-        InstrumentId = instrumentId;
+        AccountHoldingId = accountHoldingId;
     }
 
     public void SetTradeDetails(decimal? quantity, decimal? price, decimal? fees, DateOnly? settlementDate)

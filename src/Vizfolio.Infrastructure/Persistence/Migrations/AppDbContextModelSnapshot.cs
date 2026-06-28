@@ -210,10 +210,52 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.ToTable("FundSnapshot", (string)null);
                 });
 
-            modelBuilder.Entity("Vizfolio.Domain.Instruments.Instrument", b =>
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
                 {
-                    b.Property<Guid>("InstrumentId")
+                    b.Property<Guid>("AccountId")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountType")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Institution")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AccountId");
+
+                    b.HasIndex("PortfolioId", "Institution", "AccountNumber")
+                        .IsUnique();
+
+                    b.ToTable("Account", (string)null);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHolding", b =>
+                {
+                    b.Property<Guid>("AccountHoldingId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("AssetCategoryCode")
@@ -258,7 +300,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.HasKey("InstrumentId");
+                    b.HasKey("AccountHoldingId");
+
+                    b.HasIndex("AccountId");
 
                     b.HasIndex("AssetCategoryCode");
 
@@ -272,52 +316,16 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Symbol");
 
-                    b.ToTable("Instrument", (string)null);
-                });
-
-            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
-                {
-                    b.Property<Guid>("AccountId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AccountNumber")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AccountType")
-                        .HasMaxLength(50)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Institution")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("PortfolioId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("AccountId");
-
-                    b.HasIndex("PortfolioId", "Institution", "AccountNumber")
-                        .IsUnique();
-
-                    b.ToTable("Account", (string)null);
+                    b.ToTable("AccountHolding", (string)null);
                 });
 
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountTransaction", b =>
                 {
                     b.Property<Guid>("AccountTransactionId")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AccountHoldingId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("AccountId")
@@ -343,9 +351,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(28,4)");
 
                     b.Property<DateTimeOffset>("ImportedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("InstrumentId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Memo")
@@ -380,9 +385,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
                     b.HasKey("AccountTransactionId");
 
-                    b.HasIndex("CurrencyCode");
+                    b.HasIndex("AccountHoldingId");
 
-                    b.HasIndex("InstrumentId");
+                    b.HasIndex("CurrencyCode");
 
                     b.HasIndex("Ticker");
 
@@ -3478,8 +3483,23 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.Navigation("ShareClasses");
                 });
 
-            modelBuilder.Entity("Vizfolio.Domain.Instruments.Instrument", b =>
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
                 {
+                    b.HasOne("Vizfolio.Domain.Portfolios.Portfolio", null)
+                        .WithMany("Accounts")
+                        .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHolding", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Portfolios.Account", null)
+                        .WithMany("Holdings")
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Vizfolio.Domain.Reference.AssetCategory", null)
                         .WithMany()
                         .HasForeignKey("AssetCategoryCode")
@@ -3506,17 +3526,13 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
-            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
-                {
-                    b.HasOne("Vizfolio.Domain.Portfolios.Portfolio", null)
-                        .WithMany("Accounts")
-                        .HasForeignKey("PortfolioId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountTransaction", b =>
                 {
+                    b.HasOne("Vizfolio.Domain.Portfolios.AccountHolding", null)
+                        .WithMany()
+                        .HasForeignKey("AccountHoldingId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Vizfolio.Domain.Portfolios.Account", null)
                         .WithMany("Transactions")
                         .HasForeignKey("AccountId")
@@ -3526,11 +3542,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasOne("Vizfolio.Domain.Reference.Currency", null)
                         .WithMany()
                         .HasForeignKey("CurrencyCode")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("Vizfolio.Domain.Instruments.Instrument", null)
-                        .WithMany()
-                        .HasForeignKey("InstrumentId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -3544,6 +3555,8 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
                 {
+                    b.Navigation("Holdings");
+
                     b.Navigation("Transactions");
                 });
 

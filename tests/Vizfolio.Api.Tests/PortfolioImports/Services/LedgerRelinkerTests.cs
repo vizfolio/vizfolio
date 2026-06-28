@@ -4,7 +4,6 @@ using Shouldly;
 using Vizfolio.Api.Tests.Extracts;
 using Vizfolio.Application.PortfolioImports.Services;
 using Vizfolio.Domain.Funds;
-using Vizfolio.Domain.Instruments;
 using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Securities;
 
@@ -24,7 +23,7 @@ public sealed class LedgerRelinkerTests
     }
 
     [Fact]
-    public async Task RelinkAsync_links_unlinked_transactions_to_security_and_creates_instrument()
+    public async Task RelinkAsync_links_unlinked_transactions_to_security_and_creates_holding()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
@@ -44,13 +43,14 @@ public sealed class LedgerRelinkerTests
 
         linked.ShouldBe(1);
         var stored = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync();
-        stored.InstrumentId.ShouldNotBeNull();
+        stored.AccountHoldingId.ShouldNotBeNull();
 
-        var instrument = await ctx.Db.Instruments.AsNoTracking().SingleAsync();
-        instrument.InstrumentId.ShouldBe(stored.InstrumentId!.Value);
-        instrument.Kind.ShouldBe(InstrumentKind.Security);
-        instrument.SecurityId.ShouldBe(security.SecurityId);
-        instrument.Symbol.ShouldBe("VOO");
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.AccountHoldingId.ShouldBe(stored.AccountHoldingId!.Value);
+        holding.AccountId.ShouldBe(account.AccountId);
+        holding.Kind.ShouldBe(AccountHoldingKind.Security);
+        holding.SecurityId.ShouldBe(security.SecurityId);
+        holding.Symbol.ShouldBe("VOO");
     }
 
     [Fact]
@@ -79,13 +79,14 @@ public sealed class LedgerRelinkerTests
 
         linked.ShouldBe(1);
         var stored = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync();
-        stored.InstrumentId.ShouldNotBeNull();
+        stored.AccountHoldingId.ShouldNotBeNull();
 
-        var instrument = await ctx.Db.Instruments.AsNoTracking().SingleAsync();
-        instrument.InstrumentId.ShouldBe(stored.InstrumentId!.Value);
-        instrument.Kind.ShouldBe(InstrumentKind.Fund);
-        instrument.FundId.ShouldBe(fund.FundId);
-        instrument.Symbol.ShouldBe("VFIAX");
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.AccountHoldingId.ShouldBe(stored.AccountHoldingId!.Value);
+        holding.AccountId.ShouldBe(account.AccountId);
+        holding.Kind.ShouldBe(AccountHoldingKind.Fund);
+        holding.FundId.ShouldBe(fund.FundId);
+        holding.Symbol.ShouldBe("VFIAX");
     }
 
     [Fact]
@@ -115,14 +116,14 @@ public sealed class LedgerRelinkerTests
         var linked = await relinker.RelinkAsync();
 
         linked.ShouldBe(1);
-        var instrument = await ctx.Db.Instruments.AsNoTracking().SingleAsync();
-        instrument.Kind.ShouldBe(InstrumentKind.Security);
-        instrument.SecurityId.ShouldBe(security.SecurityId);
-        instrument.FundId.ShouldBeNull();
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.Kind.ShouldBe(AccountHoldingKind.Security);
+        holding.SecurityId.ShouldBe(security.SecurityId);
+        holding.FundId.ShouldBeNull();
     }
 
     [Fact]
-    public async Task RelinkAsync_is_idempotent_and_reuses_existing_instrument()
+    public async Task RelinkAsync_is_idempotent_and_reuses_existing_holding_within_account()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
@@ -147,11 +148,38 @@ public sealed class LedgerRelinkerTests
         var rerunLinked = await relinker.RelinkAsync();
         rerunLinked.ShouldBe(1);
 
-        var instruments = await ctx.Db.Instruments.AsNoTracking().ToListAsync();
-        instruments.Count.ShouldBe(1);
+        var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
+        holdings.Count.ShouldBe(1);
 
         var transactions = await ctx.Db.AccountTransactions.AsNoTracking().ToListAsync();
-        transactions.ShouldAllBe(t => t.InstrumentId == instruments[0].InstrumentId);
+        transactions.ShouldAllBe(t => t.AccountHoldingId == holdings[0].AccountHoldingId);
+    }
+
+    [Fact]
+    public async Task RelinkAsync_creates_separate_holdings_per_account_for_same_security()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var first = await SeedAccountAsync(ctx);
+        var second = await SeedAccountAsync(ctx, accountNumber: "5678");
+
+        var security = new Security("0000102909", DateTimeOffset.UtcNow);
+        security.SetTickers(new[] { "VOO" });
+        ctx.Db.Securities.Add(security);
+
+        var firstTx = NewTransaction(first.AccountId, "ext-1");
+        firstTx.SetSecurityReference("VOO", null);
+        var secondTx = NewTransaction(second.AccountId, "ext-2");
+        secondTx.SetSecurityReference("VOO", null);
+        ctx.Db.AccountTransactions.AddRange(firstTx, secondTx);
+        await ctx.Db.SaveChangesAsync();
+
+        var relinker = new LedgerRelinker(ctx.Db, NullLogger<LedgerRelinker>.Instance);
+        (await relinker.RelinkAsync()).ShouldBe(2);
+
+        var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
+        holdings.Count.ShouldBe(2);
+        holdings.Select(h => h.AccountId).ShouldBe(new[] { first.AccountId, second.AccountId }, ignoreOrder: true);
+        holdings.ShouldAllBe(h => h.SecurityId == security.SecurityId);
     }
 
     [Fact]
@@ -170,18 +198,19 @@ public sealed class LedgerRelinkerTests
 
         linked.ShouldBe(0);
         var stored = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync();
-        stored.InstrumentId.ShouldBeNull();
-        (await ctx.Db.Instruments.AsNoTracking().AnyAsync()).ShouldBeFalse();
+        stored.AccountHoldingId.ShouldBeNull();
+        (await ctx.Db.AccountHoldings.AsNoTracking().AnyAsync()).ShouldBeFalse();
     }
 
     private static AccountTransaction NewTransaction(Guid accountId, string externalId) =>
         new(accountId, "CSV", externalId, TransactionType.Buy, new DateOnly(2026, 6, 1), -100m);
 
-    private static async Task<Account> SeedAccountAsync(TestDbContext ctx)
+    private static async Task<Account> SeedAccountAsync(TestDbContext ctx, string accountNumber = "1234")
     {
-        var portfolio = new Portfolio("Test");
-        ctx.Db.Portfolios.Add(portfolio);
-        var account = new Account(portfolio.PortfolioId, "Brokerage", "Fidelity", "1234");
+        var portfolio = ctx.Db.Portfolios.Local.FirstOrDefault() ?? new Portfolio("Test");
+        if (!ctx.Db.Portfolios.Local.Contains(portfolio))
+            ctx.Db.Portfolios.Add(portfolio);
+        var account = new Account(portfolio.PortfolioId, "Brokerage", "Fidelity", accountNumber);
         ctx.Db.Accounts.Add(account);
         await ctx.Db.SaveChangesAsync();
         return account;

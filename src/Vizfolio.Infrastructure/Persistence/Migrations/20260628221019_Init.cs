@@ -187,58 +187,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Instrument",
-                columns: table => new
-                {
-                    InstrumentId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Kind = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
-                    Symbol = table.Column<string>(type: "TEXT", maxLength: 32, nullable: true),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
-                    Isin = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
-                    Cusip = table.Column<string>(type: "TEXT", maxLength: 9, nullable: true),
-                    AssetCategoryCode = table.Column<string>(type: "TEXT", maxLength: 10, nullable: true),
-                    AssetClassCode = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
-                    CurrencyCode = table.Column<string>(type: "TEXT", maxLength: 3, nullable: true),
-                    SecurityId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    FundId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Instrument", x => x.InstrumentId);
-                    table.ForeignKey(
-                        name: "FK_Instrument_AssetCategory_AssetCategoryCode",
-                        column: x => x.AssetCategoryCode,
-                        principalTable: "AssetCategory",
-                        principalColumn: "Code",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Instrument_AssetClass_AssetClassCode",
-                        column: x => x.AssetClassCode,
-                        principalTable: "AssetClass",
-                        principalColumn: "Code",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Instrument_Currency_CurrencyCode",
-                        column: x => x.CurrencyCode,
-                        principalTable: "Currency",
-                        principalColumn: "Code",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Instrument_Fund_FundId",
-                        column: x => x.FundId,
-                        principalTable: "Fund",
-                        principalColumn: "FundId",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_Instrument_Security_SecurityId",
-                        column: x => x.SecurityId,
-                        principalTable: "Security",
-                        principalColumn: "SecurityId",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "FundHolding",
                 columns: table => new
                 {
@@ -345,6 +293,65 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "AccountHolding",
+                columns: table => new
+                {
+                    AccountHoldingId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AccountId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Kind = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
+                    Symbol = table.Column<string>(type: "TEXT", maxLength: 32, nullable: true),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
+                    Isin = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
+                    Cusip = table.Column<string>(type: "TEXT", maxLength: 9, nullable: true),
+                    AssetCategoryCode = table.Column<string>(type: "TEXT", maxLength: 10, nullable: true),
+                    AssetClassCode = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
+                    CurrencyCode = table.Column<string>(type: "TEXT", maxLength: 3, nullable: true),
+                    SecurityId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    FundId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AccountHolding", x => x.AccountHoldingId);
+                    table.ForeignKey(
+                        name: "FK_AccountHolding_Account_AccountId",
+                        column: x => x.AccountId,
+                        principalTable: "Account",
+                        principalColumn: "AccountId",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_AccountHolding_AssetCategory_AssetCategoryCode",
+                        column: x => x.AssetCategoryCode,
+                        principalTable: "AssetCategory",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_AccountHolding_AssetClass_AssetClassCode",
+                        column: x => x.AssetClassCode,
+                        principalTable: "AssetClass",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_AccountHolding_Currency_CurrencyCode",
+                        column: x => x.CurrencyCode,
+                        principalTable: "Currency",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_AccountHolding_Fund_FundId",
+                        column: x => x.FundId,
+                        principalTable: "Fund",
+                        principalColumn: "FundId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_AccountHolding_Security_SecurityId",
+                        column: x => x.SecurityId,
+                        principalTable: "Security",
+                        principalColumn: "SecurityId",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "AccountTransaction",
                 columns: table => new
                 {
@@ -357,7 +364,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     SettlementDate = table.Column<DateOnly>(type: "TEXT", nullable: true),
                     Ticker = table.Column<string>(type: "TEXT", maxLength: 20, nullable: true),
                     Cusip = table.Column<string>(type: "TEXT", maxLength: 9, nullable: true),
-                    InstrumentId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    AccountHoldingId = table.Column<Guid>(type: "TEXT", nullable: true),
                     Quantity = table.Column<decimal>(type: "decimal(28,8)", nullable: true),
                     Price = table.Column<decimal>(type: "decimal(28,8)", nullable: true),
                     Amount = table.Column<decimal>(type: "decimal(28,4)", nullable: false),
@@ -370,6 +377,12 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_AccountTransaction", x => x.AccountTransactionId);
                     table.ForeignKey(
+                        name: "FK_AccountTransaction_AccountHolding_AccountHoldingId",
+                        column: x => x.AccountHoldingId,
+                        principalTable: "AccountHolding",
+                        principalColumn: "AccountHoldingId",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
                         name: "FK_AccountTransaction_Account_AccountId",
                         column: x => x.AccountId,
                         principalTable: "Account",
@@ -380,12 +393,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         column: x => x.CurrencyCode,
                         principalTable: "Currency",
                         principalColumn: "Code",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_AccountTransaction_Instrument_InstrumentId",
-                        column: x => x.InstrumentId,
-                        principalTable: "Instrument",
-                        principalColumn: "InstrumentId",
                         onDelete: ReferentialAction.Restrict);
                 });
 
@@ -884,6 +891,46 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_AccountId",
+                table: "AccountHolding",
+                column: "AccountId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_AssetCategoryCode",
+                table: "AccountHolding",
+                column: "AssetCategoryCode");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_AssetClassCode",
+                table: "AccountHolding",
+                column: "AssetClassCode");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_CurrencyCode",
+                table: "AccountHolding",
+                column: "CurrencyCode");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_FundId",
+                table: "AccountHolding",
+                column: "FundId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_SecurityId",
+                table: "AccountHolding",
+                column: "SecurityId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHolding_Symbol",
+                table: "AccountHolding",
+                column: "Symbol");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountTransaction_AccountHoldingId",
+                table: "AccountTransaction",
+                column: "AccountHoldingId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_AccountTransaction_AccountId_SourceSystem_ExternalId",
                 table: "AccountTransaction",
                 columns: new[] { "AccountId", "SourceSystem", "ExternalId" },
@@ -898,11 +945,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 name: "IX_AccountTransaction_CurrencyCode",
                 table: "AccountTransaction",
                 column: "CurrencyCode");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_AccountTransaction_InstrumentId",
-                table: "AccountTransaction",
-                column: "InstrumentId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AccountTransaction_Ticker",
@@ -973,36 +1015,6 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_Instrument_AssetCategoryCode",
-                table: "Instrument",
-                column: "AssetCategoryCode");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Instrument_AssetClassCode",
-                table: "Instrument",
-                column: "AssetClassCode");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Instrument_CurrencyCode",
-                table: "Instrument",
-                column: "CurrencyCode");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Instrument_FundId",
-                table: "Instrument",
-                column: "FundId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Instrument_SecurityId",
-                table: "Instrument",
-                column: "SecurityId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Instrument_Symbol",
-                table: "Instrument",
-                column: "Symbol");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_Security_Cik",
                 table: "Security",
                 column: "Cik",
@@ -1033,16 +1045,13 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 name: "FundShareClass");
 
             migrationBuilder.DropTable(
-                name: "Account");
-
-            migrationBuilder.DropTable(
-                name: "Instrument");
+                name: "AccountHolding");
 
             migrationBuilder.DropTable(
                 name: "FundSnapshot");
 
             migrationBuilder.DropTable(
-                name: "Portfolio");
+                name: "Account");
 
             migrationBuilder.DropTable(
                 name: "AssetCategory");
@@ -1058,6 +1067,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "Fund");
+
+            migrationBuilder.DropTable(
+                name: "Portfolio");
 
             migrationBuilder.DropTable(
                 name: "Country");

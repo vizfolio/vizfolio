@@ -30,6 +30,12 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
             .HasForeignKey(t => t.AccountId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasMany(a => a.Holdings)
+            .WithOne()
+            .HasForeignKey(h => h.AccountId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.Navigation(a => a.Transactions).UsePropertyAccessMode(PropertyAccessMode.Field);
+        builder.Navigation(a => a.Holdings).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

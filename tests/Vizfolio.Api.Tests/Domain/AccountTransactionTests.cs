@@ -69,30 +69,30 @@ public sealed class AccountTransactionTests
     }
 
     [Fact]
-    public void InstrumentId_is_null_by_default()
+    public void AccountHoldingId_is_null_by_default()
     {
         var tx = NewTx();
 
-        tx.InstrumentId.ShouldBeNull();
+        tx.AccountHoldingId.ShouldBeNull();
     }
 
     [Fact]
-    public void LinkToInstrument_assigns_id()
+    public void LinkToHolding_assigns_id()
     {
         var tx = NewTx();
-        var instrumentId = Guid.NewGuid();
+        var holdingId = Guid.NewGuid();
 
-        tx.LinkToInstrument(instrumentId);
+        tx.LinkToHolding(holdingId);
 
-        tx.InstrumentId.ShouldBe(instrumentId);
+        tx.AccountHoldingId.ShouldBe(holdingId);
     }
 
     [Fact]
-    public void LinkToInstrument_rejects_empty_id()
+    public void LinkToHolding_rejects_empty_id()
     {
         var tx = NewTx();
 
-        Should.Throw<ArgumentException>(() => tx.LinkToInstrument(Guid.Empty));
+        Should.Throw<ArgumentException>(() => tx.LinkToHolding(Guid.Empty));
     }
 
     [Fact]

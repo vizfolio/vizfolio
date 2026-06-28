@@ -103,7 +103,7 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task ImportAsync_links_transactions_to_security_instrument_when_ticker_matches()
+    public async Task ImportAsync_links_transactions_to_security_holding_when_ticker_matches()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
@@ -116,13 +116,45 @@ public sealed class PortfolioImportServiceTests
         var service = NewService(ctx);
         await service.ImportAsync(account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
 
-        var instrument = await ctx.Db.Instruments.AsNoTracking().SingleAsync();
-        instrument.Kind.ShouldBe(Vizfolio.Domain.Instruments.InstrumentKind.Security);
-        instrument.SecurityId.ShouldBe(security.SecurityId);
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.AccountId.ShouldBe(account.AccountId);
+        holding.Kind.ShouldBe(AccountHoldingKind.Security);
+        holding.SecurityId.ShouldBe(security.SecurityId);
 
         var rows = await ctx.Db.AccountTransactions.AsNoTracking()
             .Where(t => t.AccountId == account.AccountId).ToListAsync();
-        rows.ShouldAllBe(t => t.InstrumentId == instrument.InstrumentId);
+        rows.ShouldAllBe(t => t.AccountHoldingId == holding.AccountHoldingId);
+    }
+
+    [Fact]
+    public async Task ImportAsync_creates_separate_holdings_per_account_for_same_ticker()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var first = await SeedAccountAsync(ctx, accountNumber: "1111");
+        var second = await SeedAccountAsync(ctx, accountNumber: "2222");
+
+        var security = new Security("0000102909", DateTimeOffset.UtcNow);
+        security.SetTickers(new[] { "VOO" });
+        ctx.Db.Securities.Add(security);
+        await ctx.Db.SaveChangesAsync();
+
+        var service = NewService(ctx);
+        await service.ImportAsync(first.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
+        await service.ImportAsync(second.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
+
+        var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
+        holdings.Count.ShouldBe(2);
+        holdings.Select(h => h.AccountId).ShouldBe(new[] { first.AccountId, second.AccountId }, ignoreOrder: true);
+        holdings.ShouldAllBe(h => h.SecurityId == security.SecurityId);
+
+        var firstHolding = holdings.Single(h => h.AccountId == first.AccountId);
+        var secondHolding = holdings.Single(h => h.AccountId == second.AccountId);
+        var firstRows = await ctx.Db.AccountTransactions.AsNoTracking()
+            .Where(t => t.AccountId == first.AccountId).ToListAsync();
+        var secondRows = await ctx.Db.AccountTransactions.AsNoTracking()
+            .Where(t => t.AccountId == second.AccountId).ToListAsync();
+        firstRows.ShouldAllBe(t => t.AccountHoldingId == firstHolding.AccountHoldingId);
+        secondRows.ShouldAllBe(t => t.AccountHoldingId == secondHolding.AccountHoldingId);
     }
 
     [Fact]

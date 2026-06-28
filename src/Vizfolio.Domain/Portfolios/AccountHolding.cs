@@ -1,19 +1,25 @@
-namespace Vizfolio.Domain.Instruments;
+namespace Vizfolio.Domain.Portfolios;
 
-public sealed class Instrument
+public sealed class AccountHolding
 {
-    private Instrument() { }
+    private AccountHolding() { }
 
-    public Instrument(InstrumentKind kind)
+    public AccountHolding(Guid accountId, AccountHoldingKind kind)
     {
-        InstrumentId = Guid.NewGuid();
+        if (accountId == Guid.Empty)
+            throw new ArgumentException("Account ID is required.", nameof(accountId));
+
+        AccountHoldingId = Guid.NewGuid();
+        AccountId = accountId;
         Kind = kind;
         CreatedAt = DateTimeOffset.UtcNow;
     }
 
-    public Guid InstrumentId { get; private set; }
+    public Guid AccountHoldingId { get; private set; }
 
-    public InstrumentKind Kind { get; private set; }
+    public Guid AccountId { get; private set; }
+
+    public AccountHoldingKind Kind { get; private set; }
 
     public string? Symbol { get; private set; }
 
@@ -62,9 +68,9 @@ public sealed class Instrument
 
     public void LinkToSecurity(Guid securityId)
     {
-        if (Kind != InstrumentKind.Security)
+        if (Kind != AccountHoldingKind.Security)
             throw new InvalidOperationException(
-                $"Cannot link to a Security when instrument kind is {Kind}.");
+                $"Cannot link to a Security when holding kind is {Kind}.");
         if (securityId == Guid.Empty)
             throw new ArgumentException("Security ID is required.", nameof(securityId));
 
@@ -73,9 +79,9 @@ public sealed class Instrument
 
     public void LinkToFund(Guid fundId)
     {
-        if (Kind != InstrumentKind.Fund)
+        if (Kind != AccountHoldingKind.Fund)
             throw new InvalidOperationException(
-                $"Cannot link to a Fund when instrument kind is {Kind}.");
+                $"Cannot link to a Fund when holding kind is {Kind}.");
         if (fundId == Guid.Empty)
             throw new ArgumentException("Fund ID is required.", nameof(fundId));
 

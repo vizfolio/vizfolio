@@ -9,17 +9,18 @@ erDiagram
     %% Portfolio aggregate
     Portfolio    ||--o{ Account              : "owns"
     Account      ||--o{ AccountTransaction   : "ledger"
+    Account      ||--o{ AccountHolding       : "holdings"
 
-    %% Transaction → Instrument is how transactions point at *anything* tradeable
-    AccountTransaction }o--o| Instrument     : "links to"
+    %% Transaction → AccountHolding is how transactions point at *anything* tradeable
+    AccountTransaction }o--o| AccountHolding : "links to"
     AccountTransaction }o--o| Currency       : "denominated in"
 
-    %% Instrument is the unified asset reference (Security / Fund / Crypto / Cash / Other)
-    Instrument   }o--o| Security             : "wraps when Kind=Security"
-    Instrument   }o--o| Fund                 : "wraps when Kind=Fund"
-    Instrument   }o--o| AssetCategory        : "classified as"
-    Instrument   }o--o| AssetClass           : "classified as"
-    Instrument   }o--o| Currency             : "native currency"
+    %% AccountHolding is the per-account asset reference (Security / Fund / Crypto / Cash / Other)
+    AccountHolding }o--o| Security           : "wraps when Kind=Security"
+    AccountHolding }o--o| Fund               : "wraps when Kind=Fund"
+    AccountHolding }o--o| AssetCategory      : "classified as"
+    AccountHolding }o--o| AssetClass         : "classified as"
+    AccountHolding }o--o| Currency           : "native currency"
 
     %% Security reference data
     Security     }o--o| Country              : "country code"
@@ -53,19 +54,20 @@ erDiagram
     AccountTransaction {
         Guid     AccountTransactionId PK
         Guid     AccountId           FK
-        Guid     InstrumentId        FK "nullable; backfilled by LedgerRelinker"
+        Guid     AccountHoldingId    FK "nullable; backfilled by LedgerRelinker"
         string   SourceSystem            "uppercase normalized"
         string   ExternalId              "unique with AccountId + SourceSystem"
         string   Type                    "enum stored as string"
         DateOnly TradeDate
         decimal  Amount
-        string   Ticker                  "raw from import; used to resolve Instrument"
+        string   Ticker                  "raw from import; used to resolve AccountHolding"
         string   Cusip
         string   CurrencyCode        FK
     }
 
-    Instrument {
-        Guid     InstrumentId        PK
+    AccountHolding {
+        Guid     AccountHoldingId    PK
+        Guid     AccountId           FK "owning account (cascade delete)"
         string   Kind                    "Security|Fund|Crypto|Cash|Other"
         Guid     SecurityId          FK "set iff Kind=Security"
         Guid     FundId              FK "set iff Kind=Fund"
@@ -141,13 +143,15 @@ erDiagram
 
 **Portfolio → Account → AccountTransaction** is the user's ledger. A `Portfolio` is a logical grouping; an `Account` is one brokerage/institution account inside it; an `AccountTransaction` is one row in that account's history. Transactions are uniquely identified within an account by `(AccountId, SourceSystem, ExternalId)` so re-imports are idempotent.
 
-**Instrument** is the single thing transactions point at when they reference a tradeable asset. The `Kind` discriminator selects between `Security`, `Fund`, `Crypto`, `Cash`, and `Other`; for `Security`/`Fund` the corresponding nullable FK is populated. Crypto/Cash/Other carry their symbol + classification on `Instrument` itself without a sibling reference entity. Instruments are created lazily — either during import (`PortfolioImportService`) or after the fact (`LedgerRelinker`) — by `Vizfolio.Application.Instruments.InstrumentResolver`, which resolves a ticker to a `Security` or to the latest `FundSnapshot`'s `ShareClass.Ticker`.
+**AccountHolding** is what an account holds — one row per tradeable asset *within an account*. The `Kind` discriminator selects between `Security`, `Fund`, `Crypto`, `Cash`, and `Other`; for `Security`/`Fund` the corresponding nullable FK is populated. Crypto/Cash/Other carry their symbol + classification on `AccountHolding` itself without a sibling reference entity. Holdings are created lazily — either during import (`PortfolioImportService`) or after the fact (`LedgerRelinker`) — by `Vizfolio.Application.Portfolios.AccountHoldingResolver`, which resolves a ticker to a `Security` or to the latest `FundSnapshot`'s `ShareClass.Ticker`. The resolver is primed per-account, so the same security imported into two different accounts produces two distinct `AccountHolding` rows.
+
+There is intentionally **no DB-level uniqueness** on `(AccountId, SecurityId)` or `(AccountId, FundId)`. Real-world brokerage exports sometimes blend two sub-accounts (e.g. taxable + IRA) under one imported account and report the same fund twice; we want room to model that case without a schema fight. The resolver still dedupes within a single priming pass, so a normal import does not create duplicates.
 
 **Security** is reference data from SEC EDGAR keyed on `Cik`. Multiple tickers per issuer are stored as a JSON primitive collection (`Tickers`). The relinkers match transactions/holdings to securities by ticker or CIK.
 
 **Fund → FundSnapshot** is point-in-time reference data, also from EDGAR. `FundSnapshot.ShareClasses` and `MonthlyReturns` are EF Core *owned collections* — they have surrogate `int Id` PKs and only exist in the context of their parent snapshot (CASCADE delete). `FundHolding` is a normal entity (not owned) because it can be linked to a `Security`.
 
-**FundHolding.SecurityId** is nullable on purpose: many fund holdings don't correspond to any SEC-filed security (foreign equities, derivatives, cash positions). `IssuerCik` is captured for post-import relinking by `HoldingRelinker`. This is the same dual-identity pattern as `AccountTransaction` had before the Instrument refactor.
+**FundHolding.SecurityId** is nullable on purpose: many fund holdings don't correspond to any SEC-filed security (foreign equities, derivatives, cash positions). `IssuerCik` is captured for post-import relinking by `HoldingRelinker`. This is the same dual-identity pattern as `AccountTransaction` had before the AccountHolding refactor.
 
 **Reference tables** (`AssetCategory`, `AssetClass`, `Country`, `Currency`) are seeded via EF Core `HasData` (see `*Seed.cs` and the `Init` migration's `InsertData` calls). All FKs to them use `DeleteBehavior.Restrict`.
 
@@ -157,10 +161,10 @@ erDiagram
 
 | Topic                                            | Source                                                                  |
 | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Domain classes                                   | `src/Vizfolio.Domain/{Portfolios,Instruments,Securities,Funds,Reference}/` |
+| Domain classes                                   | `src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference}/`             |
 | EF mappings, table/column names, indexes         | `src/Vizfolio.Infrastructure/Persistence/Configurations/`                  |
 | Reference-data seeds                             | `src/Vizfolio.Infrastructure/Persistence/Seeding/`                         |
 | Current schema as SQL                            | `src/Vizfolio.Infrastructure/Persistence/Migrations/*_Init.cs`             |
-| Resolving a transaction's instrument             | `src/Vizfolio.Application/Instruments/InstrumentResolver.cs`               |
-| Backfilling existing transactions to Instruments | `src/Vizfolio.Application/PortfolioImports/Services/LedgerRelinker.cs`     |
+| Resolving a transaction's holding                | `src/Vizfolio.Application/Portfolios/AccountHoldingResolver.cs`            |
+| Backfilling existing transactions to Holdings    | `src/Vizfolio.Application/PortfolioImports/Services/LedgerRelinker.cs`     |
 | Backfilling fund holdings to Securities          | `src/Vizfolio.Application/Extracts/Importers/HoldingRelinker.cs`           |

@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Domain.Funds;
-using Vizfolio.Domain.Instruments;
 using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
@@ -17,7 +16,7 @@ public interface IAppDbContext
 
     DbSet<Security> Securities { get; }
 
-    DbSet<Instrument> Instruments { get; }
+    DbSet<AccountHolding> AccountHoldings { get; }
 
     DbSet<Fund> Funds { get; }
 

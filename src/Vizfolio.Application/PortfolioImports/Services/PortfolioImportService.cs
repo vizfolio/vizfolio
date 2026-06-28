@@ -4,9 +4,9 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Vizfolio.Application.Abstractions;
-using Vizfolio.Application.Instruments;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
+using Vizfolio.Application.Portfolios;
 using Vizfolio.Domain.Portfolios;
 
 namespace Vizfolio.Application.PortfolioImports.Services;
@@ -76,8 +76,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
             .Distinct()
             .ToList();
 
-        var resolver = new InstrumentResolver(_db, _logger);
-        await resolver.PrimeAsync(tickerSet, cancellationToken);
+        var resolver = new AccountHoldingResolver(_db, _logger);
+        await resolver.PrimeAsync(accountId, tickerSet, cancellationToken);
 
         var validCurrencies = await _db.Currencies.AsNoTracking()
             .Select(c => c.Code).ToListAsync(cancellationToken);
@@ -119,9 +119,9 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
                 if (!string.IsNullOrWhiteSpace(entity.Ticker))
                 {
-                    var instrument = resolver.ResolveByTicker(entity.Ticker!, entity.Cusip, entity.CurrencyCode);
-                    if (instrument is not null)
-                        entity.LinkToInstrument(instrument.InstrumentId);
+                    var holding = resolver.ResolveByTicker(entity.Ticker!, entity.Cusip, entity.CurrencyCode);
+                    if (holding is not null)
+                        entity.LinkToHolding(holding.AccountHoldingId);
                 }
 
                 _db.AccountTransactions.Add(entity);

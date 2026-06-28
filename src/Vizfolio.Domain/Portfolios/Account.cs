@@ -3,6 +3,7 @@ namespace Vizfolio.Domain.Portfolios;
 public sealed class Account
 {
     private readonly List<AccountTransaction> _transactions = [];
+    private readonly List<AccountHolding> _holdings = [];
 
     private Account() { }
 
@@ -34,6 +35,8 @@ public sealed class Account
     public DateTimeOffset CreatedAt { get; private set; } = DateTimeOffset.UtcNow;
 
     public IReadOnlyList<AccountTransaction> Transactions => _transactions;
+
+    public IReadOnlyList<AccountHolding> Holdings => _holdings;
 
     public void Rename(string name)
     {
