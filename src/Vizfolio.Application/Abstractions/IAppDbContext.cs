@@ -18,5 +18,7 @@ public interface IAppDbContext
 
     DbSet<Holding> Holdings { get; }
 
+    DbSet<CitSubstitution> CitSubstitutions { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

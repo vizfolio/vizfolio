@@ -23,6 +23,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<Holding> Holdings => Set<Holding>();
 
+    public DbSet<CitSubstitution> CitSubstitutions => Set<CitSubstitution>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

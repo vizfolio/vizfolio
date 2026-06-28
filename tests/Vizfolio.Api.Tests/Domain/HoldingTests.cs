@@ -78,4 +78,42 @@ public sealed class HoldingTests
         holding.Country.ShouldBe("US");
         holding.Currency.ShouldBe("USD");
     }
+
+    [Fact]
+    public void CitSubstitutionId_defaults_to_null()
+    {
+        var holding = new Holding(SampleSnapshotId, 0.05m);
+
+        holding.CitSubstitutionId.ShouldBeNull();
+    }
+
+    [Fact]
+    public void LinkToCitSubstitution_rejects_empty_id()
+    {
+        var holding = new Holding(SampleSnapshotId, 0.05m);
+
+        Should.Throw<ArgumentException>(() => holding.LinkToCitSubstitution(Guid.Empty));
+    }
+
+    [Fact]
+    public void LinkToCitSubstitution_assigns_id()
+    {
+        var holding = new Holding(SampleSnapshotId, 0.05m);
+        var citSubstitutionId = Guid.NewGuid();
+
+        holding.LinkToCitSubstitution(citSubstitutionId);
+
+        holding.CitSubstitutionId.ShouldBe(citSubstitutionId);
+    }
+
+    [Fact]
+    public void ClearCitSubstitution_resets_id_to_null()
+    {
+        var holding = new Holding(SampleSnapshotId, 0.05m);
+        holding.LinkToCitSubstitution(Guid.NewGuid());
+
+        holding.ClearCitSubstitution();
+
+        holding.CitSubstitutionId.ShouldBeNull();
+    }
 }

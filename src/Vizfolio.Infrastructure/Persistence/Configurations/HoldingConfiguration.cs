@@ -20,6 +20,13 @@ internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
         builder.Property(h => h.SecurityId);
         builder.HasIndex(h => h.SecurityId);
 
+        builder.Property(h => h.CitSubstitutionId);
+        builder.HasIndex(h => h.CitSubstitutionId);
+        builder.HasOne<Vizfolio.Domain.Funds.CitSubstitution>()
+            .WithMany()
+            .HasForeignKey(h => h.CitSubstitutionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.Property(h => h.Weight).HasColumnType(PercentageType).IsRequired();
         builder.Property(h => h.FairValueUsd).HasColumnType(MoneyType);
         builder.Property(h => h.Balance).HasColumnType(MoneyType);

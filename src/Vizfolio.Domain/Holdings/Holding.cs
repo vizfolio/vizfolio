@@ -19,6 +19,8 @@ public sealed class Holding : Entity
 
     public Guid? SecurityId { get; private set; }
 
+    public Guid? CitSubstitutionId { get; private set; }
+
     public decimal Weight { get; private set; }
 
     public decimal? FairValueUsd { get; private set; }
@@ -46,6 +48,16 @@ public sealed class Holding : Entity
 
         SecurityId = securityId;
     }
+
+    public void LinkToCitSubstitution(Guid citSubstitutionId)
+    {
+        if (citSubstitutionId == Guid.Empty)
+            throw new ArgumentException("CIT substitution ID is required.", nameof(citSubstitutionId));
+
+        CitSubstitutionId = citSubstitutionId;
+    }
+
+    public void ClearCitSubstitution() => CitSubstitutionId = null;
 
     public void SetIdentifiers(string? name, string? ticker, string? isin)
     {
