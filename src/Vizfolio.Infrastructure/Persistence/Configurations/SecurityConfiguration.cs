@@ -9,7 +9,7 @@ internal sealed class SecurityConfiguration : IEntityTypeConfiguration<Security>
     public void Configure(EntityTypeBuilder<Security> builder)
     {
         builder.ToTable("Securities");
-        builder.HasKey(s => s.Id);
+        builder.HasKey(s => s.SecurityId);
 
         builder.Property(s => s.Cik).IsRequired().HasMaxLength(10);
         builder.HasIndex(s => s.Cik).IsUnique();

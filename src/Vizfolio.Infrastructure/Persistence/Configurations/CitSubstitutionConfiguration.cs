@@ -9,7 +9,7 @@ internal sealed class CitSubstitutionConfiguration : IEntityTypeConfiguration<Ci
     public void Configure(EntityTypeBuilder<CitSubstitution> builder)
     {
         builder.ToTable("CitSubstitutions");
-        builder.HasKey(c => c.Id);
+        builder.HasKey(c => c.CitSubstitutionId);
 
         builder.Property(c => c.SubstituteTicker).IsRequired().HasMaxLength(20);
         builder.HasIndex(c => c.SubstituteTicker);

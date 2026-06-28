@@ -1,15 +1,16 @@
-using Vizfolio.Domain.Common;
-
 namespace Vizfolio.Domain.Funds;
 
-public sealed class Fund : Entity
+public sealed class Fund
 {
     private Fund() { }
 
     public Fund(string seriesId)
     {
+        FundId = Guid.NewGuid();
         SeriesId = NormalizeSeriesId(seriesId);
     }
+
+    public Guid FundId { get; private set; }
 
     public string SeriesId { get; private set; } = string.Empty;
 

@@ -1,15 +1,16 @@
-using Vizfolio.Domain.Common;
-
 namespace Vizfolio.Domain.Portfolios;
 
-public sealed class Portfolio : Entity
+public sealed class Portfolio
 {
     private Portfolio() { }
 
     public Portfolio(string name)
     {
+        PortfolioId = Guid.NewGuid();
         Rename(name);
     }
+
+    public Guid PortfolioId { get; private set; }
 
     public string Name { get; private set; } = string.Empty;
 

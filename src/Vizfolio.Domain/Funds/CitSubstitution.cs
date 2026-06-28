@@ -1,8 +1,6 @@
-using Vizfolio.Domain.Common;
-
 namespace Vizfolio.Domain.Funds;
 
-public sealed class CitSubstitution : Entity
+public sealed class CitSubstitution
 {
     private readonly List<string> _patterns = [];
 
@@ -20,12 +18,15 @@ public sealed class CitSubstitution : Entity
         if (string.IsNullOrWhiteSpace(substituteName))
             throw new ArgumentException("Substitute name is required.", nameof(substituteName));
 
+        CitSubstitutionId = Guid.NewGuid();
         SubstituteTicker = substituteTicker.Trim().ToUpperInvariant();
         SubstituteName = substituteName.Trim();
         Fidelity = fidelity;
         Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
         CitName = string.IsNullOrWhiteSpace(citName) ? null : citName.Trim();
     }
+
+    public Guid CitSubstitutionId { get; private set; }
 
     public string SubstituteTicker { get; private set; } = string.Empty;
 

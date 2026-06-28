@@ -1,8 +1,6 @@
-using Vizfolio.Domain.Common;
-
 namespace Vizfolio.Domain.Securities;
 
-public sealed class Security : Entity
+public sealed class Security
 {
     private readonly List<string> _tickers = [];
     private readonly List<string> _exchanges = [];
@@ -11,9 +9,12 @@ public sealed class Security : Entity
 
     public Security(string cik, DateTimeOffset edgarFetchedAt)
     {
+        SecurityId = Guid.NewGuid();
         Cik = NormalizeCik(cik);
         EdgarFetchedAt = edgarFetchedAt;
     }
+
+    public Guid SecurityId { get; private set; }
 
     public string Cik { get; private set; } = string.Empty;
 

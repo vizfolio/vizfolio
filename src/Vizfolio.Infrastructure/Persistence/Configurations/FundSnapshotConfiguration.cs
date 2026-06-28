@@ -12,7 +12,7 @@ internal sealed class FundSnapshotConfiguration : IEntityTypeConfiguration<FundS
     public void Configure(EntityTypeBuilder<FundSnapshot> builder)
     {
         builder.ToTable("FundSnapshots");
-        builder.HasKey(s => s.Id);
+        builder.HasKey(s => s.FundSnapshotId);
 
         builder.Property(s => s.FundId).IsRequired();
         builder.Property(s => s.AsOf).IsRequired();

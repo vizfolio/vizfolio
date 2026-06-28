@@ -10,7 +10,7 @@ public sealed class FundTests
     {
         var fund = new Fund("  S000012345 ");
 
-        fund.Id.ShouldNotBe(Guid.Empty);
+        fund.FundId.ShouldNotBe(Guid.Empty);
         fund.SeriesId.ShouldBe("S000012345");
     }
 

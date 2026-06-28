@@ -1,8 +1,6 @@
-using Vizfolio.Domain.Common;
-
 namespace Vizfolio.Domain.Funds;
 
-public sealed class FundSnapshot : Entity
+public sealed class FundSnapshot
 {
     private readonly List<ShareClass> _shareClasses = [];
     private readonly List<MonthlyReturn> _monthlyReturns = [];
@@ -18,11 +16,14 @@ public sealed class FundSnapshot : Entity
         if (string.IsNullOrWhiteSpace(sourceUrl))
             throw new ArgumentException("Source URL is required.", nameof(sourceUrl));
 
+        FundSnapshotId = Guid.NewGuid();
         FundId = fundId;
         AsOf = asOf;
         SourceFiling = sourceFiling.Trim();
         SourceUrl = sourceUrl.Trim();
     }
+
+    public Guid FundSnapshotId { get; private set; }
 
     public Guid FundId { get; private set; }
 

@@ -9,7 +9,7 @@ internal sealed class PortfolioConfiguration : IEntityTypeConfiguration<Portfoli
     public void Configure(EntityTypeBuilder<Portfolio> builder)
     {
         builder.ToTable("Portfolios");
-        builder.HasKey(p => p.Id);
+        builder.HasKey(p => p.PortfolioId);
         builder.Property(p => p.Name).IsRequired().HasMaxLength(200);
         builder.Property(p => p.CreatedAt).IsRequired();
     }

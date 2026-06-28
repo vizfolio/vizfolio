@@ -12,7 +12,7 @@ internal sealed class FundHoldingConfiguration : IEntityTypeConfiguration<FundHo
     public void Configure(EntityTypeBuilder<FundHolding> builder)
     {
         builder.ToTable("FundHoldings");
-        builder.HasKey(h => h.Id);
+        builder.HasKey(h => h.FundHoldingId);
 
         builder.Property(h => h.FundSnapshotId).IsRequired();
         builder.HasIndex(h => h.FundSnapshotId);

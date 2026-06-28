@@ -1,8 +1,6 @@
-using Vizfolio.Domain.Common;
-
 namespace Vizfolio.Domain.Funds;
 
-public sealed class FundHolding : Entity
+public sealed class FundHolding
 {
     private FundHolding() { }
 
@@ -11,9 +9,12 @@ public sealed class FundHolding : Entity
         if (fundSnapshotId == Guid.Empty)
             throw new ArgumentException("Fund snapshot ID is required.", nameof(fundSnapshotId));
 
+        FundHoldingId = Guid.NewGuid();
         FundSnapshotId = fundSnapshotId;
         Weight = weight;
     }
+
+    public Guid FundHoldingId { get; private set; }
 
     public Guid FundSnapshotId { get; private set; }
 
