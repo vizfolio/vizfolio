@@ -2,6 +2,7 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Vizfolio.Domain.Funds;
+using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
 using Vizfolio.Infrastructure.Persistence;
 
@@ -157,6 +158,9 @@ public sealed class AppDbContextModelTests
     [InlineData(typeof(FundHolding), "FundHolding")]
     [InlineData(typeof(Security), "Security")]
     [InlineData(typeof(CitSubstitution), "CitSubstitution")]
+    [InlineData(typeof(Currency), "Currency")]
+    [InlineData(typeof(Country), "Country")]
+    [InlineData(typeof(AssetCategory), "AssetCategory")]
     public void Tables_use_singular_names(Type clrType, string expectedTable)
     {
         using var context = CreateContext();
@@ -164,5 +168,38 @@ public sealed class AppDbContextModelTests
         var entity = context.Model.FindEntityType(clrType)!;
 
         entity.GetTableName().ShouldBe(expectedTable);
+    }
+
+    [Theory]
+    [InlineData(typeof(Currency), nameof(FundHolding.CurrencyCode))]
+    [InlineData(typeof(Country), nameof(FundHolding.CountryCode))]
+    [InlineData(typeof(AssetCategory), nameof(FundHolding.AssetCategoryCode))]
+    public void FundHolding_references_reference_lookup_with_restrict_delete(Type principal, string propertyName)
+    {
+        using var context = CreateContext();
+
+        var entity = context.Model.FindEntityType(typeof(FundHolding))!;
+        var fk = entity.GetForeignKeys()
+            .FirstOrDefault(f => f.PrincipalEntityType.ClrType == principal);
+
+        fk.ShouldNotBeNull();
+        fk.Properties.ShouldHaveSingleItem().Name.ShouldBe(propertyName);
+        fk.DeleteBehavior.ShouldBe(DeleteBehavior.Restrict);
+        fk.IsRequired.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Security_references_country_lookup_with_restrict_delete()
+    {
+        using var context = CreateContext();
+
+        var entity = context.Model.FindEntityType(typeof(Security))!;
+        var fk = entity.GetForeignKeys()
+            .FirstOrDefault(f => f.PrincipalEntityType.ClrType == typeof(Country));
+
+        fk.ShouldNotBeNull();
+        fk.Properties.ShouldHaveSingleItem().Name.ShouldBe(nameof(Security.CountryCode));
+        fk.DeleteBehavior.ShouldBe(DeleteBehavior.Restrict);
+        fk.IsRequired.ShouldBeFalse();
     }
 }

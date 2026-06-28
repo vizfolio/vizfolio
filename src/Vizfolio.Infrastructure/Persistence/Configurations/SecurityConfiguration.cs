@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
 
 namespace Vizfolio.Infrastructure.Persistence.Configurations;
@@ -18,7 +19,14 @@ internal sealed class SecurityConfiguration : IEntityTypeConfiguration<Security>
         builder.Property(s => s.EntityType).HasMaxLength(100);
         builder.Property(s => s.Sector).HasMaxLength(200);
         builder.Property(s => s.Industry).HasMaxLength(200);
-        builder.Property(s => s.Country).HasMaxLength(2);
+
+        builder.Property(s => s.CountryCode).HasMaxLength(2);
+        builder.HasOne<Country>()
+            .WithMany()
+            .HasForeignKey(s => s.CountryCode)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
+
         builder.Property(s => s.EdgarFetchedAt).IsRequired();
 
         builder.PrimitiveCollection<List<string>>("_tickers")

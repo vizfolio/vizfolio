@@ -38,6 +38,8 @@ public sealed class SecuritiesImporter : ISecuritiesImporter
             return ImportResult.Empty(stopwatch.Elapsed);
         }
 
+        var gate = await ReferenceCodeGate.LoadAsync(_db, cancellationToken);
+
         var existing = await _db.Securities
             .Where(s => targetCiks.Contains(s.Cik))
             .ToDictionaryAsync(s => s.Cik, cancellationToken);
@@ -78,7 +80,12 @@ public sealed class SecuritiesImporter : ISecuritiesImporter
                     security.MarkRefreshed(extract.Source.EdgarFetchedAt);
                 }
 
-                security.UpdateProfile(extract.Name, extract.EntityType, extract.Sector, extract.SicDescription, extract.Country);
+                security.UpdateProfile(
+                    extract.Name,
+                    extract.EntityType,
+                    extract.Sector,
+                    extract.SicDescription,
+                    gate.AcceptCountry(extract.Country));
                 security.SetTickers(extract.Tickers ?? Array.Empty<string>());
                 security.SetExchanges(extract.Exchanges ?? Array.Empty<string>());
 
@@ -97,6 +104,8 @@ public sealed class SecuritiesImporter : ISecuritiesImporter
 
         await _db.SaveChangesAsync(cancellationToken);
 
+        gate.LogReport(_logger);
+
         stopwatch.Stop();
         return new ImportResult(
             Considered: targetCiks.Count,
@@ -104,6 +113,7 @@ public sealed class SecuritiesImporter : ISecuritiesImporter
             Skipped: skipped,
             Failed: failures.Count,
             Failures: failures,
+            DataCleaning: gate.BuildReport(),
             Duration: stopwatch.Elapsed);
     }
 

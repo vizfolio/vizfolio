@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Vizfolio.Domain.Funds;
+using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
 
 namespace Vizfolio.Infrastructure.Persistence.Configurations;
@@ -37,9 +38,27 @@ internal sealed class FundHoldingConfiguration : IEntityTypeConfiguration<FundHo
         builder.Property(h => h.Name).HasMaxLength(500);
         builder.Property(h => h.Ticker).HasMaxLength(20);
         builder.Property(h => h.Isin).HasMaxLength(20);
-        builder.Property(h => h.AssetCategory).HasMaxLength(20);
-        builder.Property(h => h.Country).HasMaxLength(2);
-        builder.Property(h => h.Currency).HasMaxLength(3);
+
+        builder.Property(h => h.AssetCategoryCode).HasMaxLength(10);
+        builder.HasOne<AssetCategory>()
+            .WithMany()
+            .HasForeignKey(h => h.AssetCategoryCode)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
+
+        builder.Property(h => h.CountryCode).HasMaxLength(2);
+        builder.HasOne<Country>()
+            .WithMany()
+            .HasForeignKey(h => h.CountryCode)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
+
+        builder.Property(h => h.CurrencyCode).HasMaxLength(3);
+        builder.HasOne<Currency>()
+            .WithMany()
+            .HasForeignKey(h => h.CurrencyCode)
+            .OnDelete(DeleteBehavior.Restrict)
+            .IsRequired(false);
 
         builder.Property(h => h.IssuerCik).HasMaxLength(10);
         builder.HasIndex(h => h.IssuerCik);

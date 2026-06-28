@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Domain.Funds;
 using Vizfolio.Domain.Portfolios;
+using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
 
 namespace Vizfolio.Infrastructure.Persistence;
@@ -23,6 +24,12 @@ public sealed class AppDbContext : DbContext, IAppDbContext
     public DbSet<FundHolding> FundHoldings => Set<FundHolding>();
 
     public DbSet<CitSubstitution> CitSubstitutions => Set<CitSubstitution>();
+
+    public DbSet<Currency> Currencies => Set<Currency>();
+
+    public DbSet<Country> Countries => Set<Country>();
+
+    public DbSet<AssetCategory> AssetCategories => Set<AssetCategory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

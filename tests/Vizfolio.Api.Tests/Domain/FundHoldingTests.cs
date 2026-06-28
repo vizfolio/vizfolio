@@ -74,9 +74,33 @@ public sealed class FundHoldingTests
 
         holding.SetClassification("EC", "US", "USD");
 
-        holding.AssetCategory.ShouldBe("EC");
-        holding.Country.ShouldBe("US");
-        holding.Currency.ShouldBe("USD");
+        holding.AssetCategoryCode.ShouldBe("EC");
+        holding.CountryCode.ShouldBe("US");
+        holding.CurrencyCode.ShouldBe("USD");
+    }
+
+    [Fact]
+    public void SetClassification_uppercases_and_trims_codes()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+
+        holding.SetClassification("  ec ", " us ", "usd ");
+
+        holding.AssetCategoryCode.ShouldBe("EC");
+        holding.CountryCode.ShouldBe("US");
+        holding.CurrencyCode.ShouldBe("USD");
+    }
+
+    [Fact]
+    public void SetClassification_normalizes_blank_codes_to_null()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+
+        holding.SetClassification("   ", "", null);
+
+        holding.AssetCategoryCode.ShouldBeNull();
+        holding.CountryCode.ShouldBeNull();
+        holding.CurrencyCode.ShouldBeNull();
     }
 
     [Fact]

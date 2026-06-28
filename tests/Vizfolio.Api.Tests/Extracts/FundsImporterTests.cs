@@ -150,6 +150,61 @@ public sealed class FundsImporterTests
     }
 
     [Fact]
+    public async Task Unknown_holding_reference_codes_are_dropped_and_reported()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var source = BuildSource(out var entry);
+        var holding = new HoldingExtract(
+            Weight: 0.1m,
+            Name: "Mystery Inc.",
+            Ticker: "MYST",
+            Isin: null,
+            IssuerCik: null,
+            AssetCategory: "ZZZ",
+            Country: "Q1",
+            Currency: "ZZZ",
+            Balance: null,
+            FairValueUsd: null);
+        source.Snapshots[$"{SeriesId}/{Period}"] = Snapshot(entry, holdings: [holding]);
+
+        var importer = new FundsImporter(ctx.Db, source, NullLogger<FundsImporter>.Instance);
+        var result = await importer.ImportAsync(new FundsImportOptions());
+
+        result.Upserted.ShouldBe(1);
+
+        var stored = await ctx.Db.FundHoldings.AsNoTracking().SingleAsync();
+        stored.AssetCategoryCode.ShouldBeNull();
+        stored.CountryCode.ShouldBeNull();
+        stored.CurrencyCode.ShouldBeNull();
+
+        result.DataCleaning.Count.ShouldBe(3);
+        result.DataCleaning.ShouldContain(d =>
+            d.Field == "Currency" && d.OriginalValue == "ZZZ" && d.Occurrences == 1);
+        result.DataCleaning.ShouldContain(d =>
+            d.Field == "Country" && d.OriginalValue == "Q1" && d.Occurrences == 1);
+        result.DataCleaning.ShouldContain(d =>
+            d.Field == "AssetCategory" && d.OriginalValue == "ZZZ" && d.Occurrences == 1);
+    }
+
+    [Fact]
+    public async Task Known_holding_reference_codes_are_persisted_and_not_reported()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var source = BuildSource(out var entry);
+        source.Snapshots[$"{SeriesId}/{Period}"] = Snapshot(entry, holdings: [SampleHolding(null, 0.05m)]);
+
+        var importer = new FundsImporter(ctx.Db, source, NullLogger<FundsImporter>.Instance);
+        var result = await importer.ImportAsync(new FundsImportOptions());
+
+        var stored = await ctx.Db.FundHoldings.AsNoTracking().SingleAsync();
+        stored.AssetCategoryCode.ShouldBe("EC");
+        stored.CountryCode.ShouldBe("US");
+        stored.CurrencyCode.ShouldBe("USD");
+
+        result.DataCleaning.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Records_failure_when_snapshot_is_missing()
     {
         await using var ctx = await TestDbContext.CreateAsync();

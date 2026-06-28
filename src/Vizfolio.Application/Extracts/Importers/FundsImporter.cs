@@ -39,6 +39,8 @@ public sealed class FundsImporter : IFundsImporter
             return ImportResult.Empty(stopwatch.Elapsed);
         }
 
+        var gate = await ReferenceCodeGate.LoadAsync(_db, cancellationToken);
+
         var seriesIds = entries.Select(e => e.SeriesId).ToList();
         var existingFunds = await _db.Funds
             .Where(f => seriesIds.Contains(f.SeriesId))
@@ -92,7 +94,7 @@ public sealed class FundsImporter : IFundsImporter
                 if (existingFunds.TryAdd(entry.SeriesId, fund))
                     _db.Funds.Add(fund);
 
-                await UpsertSnapshotAsync(fund, snapshot, options.Force, cancellationToken);
+                await UpsertSnapshotAsync(fund, snapshot, gate, options.Force, cancellationToken);
                 upserted++;
             }
             catch (OperationCanceledException)
@@ -108,6 +110,8 @@ public sealed class FundsImporter : IFundsImporter
 
         await _db.SaveChangesAsync(cancellationToken);
 
+        gate.LogReport(_logger);
+
         stopwatch.Stop();
         return new ImportResult(
             Considered: entries.Count,
@@ -115,10 +119,11 @@ public sealed class FundsImporter : IFundsImporter
             Skipped: skipped,
             Failed: failures.Count,
             Failures: failures,
+            DataCleaning: gate.BuildReport(),
             Duration: stopwatch.Elapsed);
     }
 
-    private async Task UpsertSnapshotAsync(Fund fund, FundSnapshotExtract snapshot, bool force, CancellationToken cancellationToken)
+    private async Task UpsertSnapshotAsync(Fund fund, FundSnapshotExtract snapshot, ReferenceCodeGate gate, bool force, CancellationToken cancellationToken)
     {
         var existing = await _db.FundSnapshots
             .FirstOrDefaultAsync(s => s.FundId == fund.FundId && s.AsOf == snapshot.Fund.AsOf, cancellationToken);
@@ -156,10 +161,10 @@ public sealed class FundsImporter : IFundsImporter
 
         _db.FundSnapshots.Add(newSnapshot);
 
-        await AddHoldingsAsync(newSnapshot, snapshot.Holdings ?? [], cancellationToken);
+        await AddHoldingsAsync(newSnapshot, snapshot.Holdings ?? [], gate, cancellationToken);
     }
 
-    private async Task AddHoldingsAsync(FundSnapshot snapshot, IReadOnlyList<HoldingExtract> holdings, CancellationToken cancellationToken)
+    private async Task AddHoldingsAsync(FundSnapshot snapshot, IReadOnlyList<HoldingExtract> holdings, ReferenceCodeGate gate, CancellationToken cancellationToken)
     {
         if (holdings.Count == 0) return;
 
@@ -181,7 +186,10 @@ public sealed class FundsImporter : IFundsImporter
             var holding = new FundHolding(snapshot.FundSnapshotId, h.Weight);
             holding.SetIdentifiers(h.Name, h.Ticker, h.Isin);
             holding.SetValuation(h.FairValueUsd, h.Balance, units: null);
-            holding.SetClassification(h.AssetCategory, h.Country, h.Currency);
+            holding.SetClassification(
+                gate.AcceptAssetCategory(h.AssetCategory),
+                gate.AcceptCountry(h.Country),
+                gate.AcceptCurrency(h.Currency));
             holding.SetIssuerCik(h.IssuerCik);
 
             if (holding.IssuerCik is not null && securityIdByCik.TryGetValue(holding.IssuerCik, out var securityId))

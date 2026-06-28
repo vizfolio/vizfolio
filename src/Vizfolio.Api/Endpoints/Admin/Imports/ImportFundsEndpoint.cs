@@ -49,7 +49,7 @@ public sealed class ImportFundsEndpoint : Endpoint<ImportFundsRequest, ImportRes
     {
         if (!_gate.TryAcquire(out var handle))
         {
-            await Send.ResponseAsync(new ImportResult(0, 0, 0, 0, [], TimeSpan.Zero), StatusCodes.Status409Conflict, ct);
+            await Send.ResponseAsync(ImportResult.Empty(TimeSpan.Zero), StatusCodes.Status409Conflict, ct);
             return;
         }
 

@@ -57,7 +57,7 @@ public sealed class ImportAllEndpoint : Endpoint<ImportAllRequest, ImportAllResp
     {
         if (!_gate.TryAcquire(out var handle))
         {
-            var empty = new ImportResult(0, 0, 0, 0, [], TimeSpan.Zero);
+            var empty = ImportResult.Empty(TimeSpan.Zero);
             await Send.ResponseAsync(new ImportAllResponse(empty, empty, 0), StatusCodes.Status409Conflict, ct);
             return;
         }

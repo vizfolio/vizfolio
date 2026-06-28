@@ -71,7 +71,28 @@ public sealed class SecurityTests
         security.EntityType.ShouldBe("10-K filer");
         security.Sector.ShouldBe("Technology");
         security.Industry.ShouldBe("Electronic Computers");
-        security.Country.ShouldBe("US");
+        security.CountryCode.ShouldBe("US");
+    }
+
+    [Fact]
+    public void UpdateProfile_uppercases_and_trims_country_code()
+    {
+        var security = new Security("320193", SampleFetchedAt);
+
+        security.UpdateProfile(null, null, null, null, "  us ");
+
+        security.CountryCode.ShouldBe("US");
+    }
+
+    [Fact]
+    public void UpdateProfile_normalizes_blank_country_to_null()
+    {
+        var security = new Security("320193", SampleFetchedAt);
+        security.UpdateProfile(null, null, null, null, "US");
+
+        security.UpdateProfile(null, null, null, null, "   ");
+
+        security.CountryCode.ShouldBeNull();
     }
 
     [Fact]

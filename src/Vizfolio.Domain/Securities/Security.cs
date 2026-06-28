@@ -26,7 +26,7 @@ public sealed class Security
 
     public string? Industry { get; private set; }
 
-    public string? Country { get; private set; }
+    public string? CountryCode { get; private set; }
 
     public DateTimeOffset EdgarFetchedAt { get; private set; }
 
@@ -34,13 +34,13 @@ public sealed class Security
 
     public IReadOnlyList<string> Exchanges => _exchanges;
 
-    public void UpdateProfile(string? name, string? entityType, string? sector, string? industry, string? country)
+    public void UpdateProfile(string? name, string? entityType, string? sector, string? industry, string? countryCode)
     {
         Name = name;
         EntityType = entityType;
         Sector = sector;
         Industry = industry;
-        Country = country;
+        CountryCode = string.IsNullOrWhiteSpace(countryCode) ? null : countryCode.Trim().ToUpperInvariant();
     }
 
     public void SetTickers(IEnumerable<string> tickers)

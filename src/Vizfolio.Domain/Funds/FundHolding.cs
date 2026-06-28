@@ -34,11 +34,11 @@ public sealed class FundHolding
 
     public string? Isin { get; private set; }
 
-    public string? AssetCategory { get; private set; }
+    public string? AssetCategoryCode { get; private set; }
 
-    public string? Country { get; private set; }
+    public string? CountryCode { get; private set; }
 
-    public string? Currency { get; private set; }
+    public string? CurrencyCode { get; private set; }
 
     public string? IssuerCik { get; private set; }
 
@@ -64,12 +64,15 @@ public sealed class FundHolding
         Units = string.IsNullOrWhiteSpace(units) ? null : units.Trim();
     }
 
-    public void SetClassification(string? assetCategory, string? country, string? currency)
+    public void SetClassification(string? assetCategoryCode, string? countryCode, string? currencyCode)
     {
-        AssetCategory = assetCategory;
-        Country = country;
-        Currency = currency;
+        AssetCategoryCode = NormalizeCode(assetCategoryCode);
+        CountryCode = NormalizeCode(countryCode);
+        CurrencyCode = NormalizeCode(currencyCode);
     }
+
+    private static string? NormalizeCode(string? code)
+        => string.IsNullOrWhiteSpace(code) ? null : code.Trim().ToUpperInvariant();
 
     public void SetIssuerCik(string? cik)
     {

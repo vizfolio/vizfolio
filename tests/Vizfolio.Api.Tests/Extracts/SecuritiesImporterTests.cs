@@ -113,6 +113,27 @@ public sealed class SecuritiesImporterTests
     }
 
     [Fact]
+    public async Task Unknown_country_code_is_dropped_and_reported()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var source = BuildSource(("AAPL", "320193"));
+        source.Securities["0000320193"] = Sample("0000320193", "Apple Inc.", BaseFetchedAt) with { Country = "Q1" };
+
+        var importer = new SecuritiesImporter(ctx.Db, source, NullLogger<SecuritiesImporter>.Instance);
+
+        var result = await importer.ImportAsync(new SecuritiesImportOptions());
+
+        result.Upserted.ShouldBe(1);
+        var stored = await ctx.Db.Securities.AsNoTracking().SingleAsync();
+        stored.CountryCode.ShouldBeNull();
+
+        var entry = result.DataCleaning.ShouldHaveSingleItem();
+        entry.Field.ShouldBe("Country");
+        entry.OriginalValue.ShouldBe("Q1");
+        entry.Occurrences.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Records_failure_when_extract_is_missing()
     {
         await using var ctx = await TestDbContext.CreateAsync();
