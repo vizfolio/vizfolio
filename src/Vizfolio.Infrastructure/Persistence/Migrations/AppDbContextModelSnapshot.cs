@@ -245,111 +245,27 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasData(
                         new
                         {
-                            Code = "STIV",
-                            Description = "Money market fund, liquidity pool, or other cash management vehicle.",
-                            Name = "Short-Term Investment Vehicle"
+                            Code = "EQUITY",
+                            Description = "Equity securities (common or preferred).",
+                            Name = "Equity"
                         },
                         new
                         {
-                            Code = "EC",
-                            Description = "Common equity securities.",
-                            Name = "Equity-Common"
-                        },
-                        new
-                        {
-                            Code = "EP",
-                            Description = "Preferred equity securities.",
-                            Name = "Equity-Preferred"
-                        },
-                        new
-                        {
-                            Code = "DBT",
-                            Description = "Debt securities.",
+                            Code = "DEBT",
+                            Description = "Debt, structured notes, loans, and asset-backed securities.",
                             Name = "Debt"
                         },
                         new
                         {
-                            Code = "RA",
-                            Description = "Repurchase or reverse repurchase agreement.",
-                            Name = "Repurchase Agreement"
+                            Code = "DERIVATIVE",
+                            Description = "Equity, credit, rate, commodity, FX, or other derivatives.",
+                            Name = "Derivative"
                         },
                         new
                         {
-                            Code = "LON",
-                            Description = "Loans and loan participations.",
-                            Name = "Loan"
-                        },
-                        new
-                        {
-                            Code = "ABS-APCP",
-                            Description = "Asset-backed commercial paper.",
-                            Name = "ABS-Asset Backed Commercial Paper"
-                        },
-                        new
-                        {
-                            Code = "ABS-CB",
-                            Description = "Collateralized bond or debt obligation.",
-                            Name = "ABS-Collateralized Bond/Debt Obligation"
-                        },
-                        new
-                        {
-                            Code = "ABS-MBS",
-                            Description = "Mortgage-backed security.",
-                            Name = "ABS-Mortgage Backed Security"
-                        },
-                        new
-                        {
-                            Code = "ABS-O",
-                            Description = "Other asset-backed security not otherwise classified.",
-                            Name = "ABS-Other"
-                        },
-                        new
-                        {
-                            Code = "COMM",
-                            Description = "Physical commodity or commodity-linked instrument.",
-                            Name = "Commodity"
-                        },
-                        new
-                        {
-                            Code = "DCO",
-                            Description = "Derivative referencing a commodity.",
-                            Name = "Derivative-Commodity"
-                        },
-                        new
-                        {
-                            Code = "DCR",
-                            Description = "Derivative referencing credit (e.g. credit default swap).",
-                            Name = "Derivative-Credit"
-                        },
-                        new
-                        {
-                            Code = "DE",
-                            Description = "Derivative referencing equity.",
-                            Name = "Derivative-Equity"
-                        },
-                        new
-                        {
-                            Code = "DFE",
-                            Description = "Derivative referencing foreign exchange.",
-                            Name = "Derivative-Foreign Exchange"
-                        },
-                        new
-                        {
-                            Code = "DIR",
-                            Description = "Derivative referencing interest rates.",
-                            Name = "Derivative-Interest Rate"
-                        },
-                        new
-                        {
-                            Code = "DO",
-                            Description = "Derivative not otherwise classified.",
-                            Name = "Derivative-Other"
-                        },
-                        new
-                        {
-                            Code = "RE",
-                            Description = "Direct real estate or real estate-linked investment.",
-                            Name = "Real Estate"
+                            Code = "OTHER",
+                            Description = "Short-term investments, repurchase agreements, commodities, real estate, and anything not otherwise classified.",
+                            Name = "Other"
                         });
                 });
 

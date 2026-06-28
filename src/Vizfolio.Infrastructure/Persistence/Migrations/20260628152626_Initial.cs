@@ -254,24 +254,10 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 columns: new[] { "Code", "Description", "Name" },
                 values: new object[,]
                 {
-                    { "ABS-APCP", "Asset-backed commercial paper.", "ABS-Asset Backed Commercial Paper" },
-                    { "ABS-CB", "Collateralized bond or debt obligation.", "ABS-Collateralized Bond/Debt Obligation" },
-                    { "ABS-MBS", "Mortgage-backed security.", "ABS-Mortgage Backed Security" },
-                    { "ABS-O", "Other asset-backed security not otherwise classified.", "ABS-Other" },
-                    { "COMM", "Physical commodity or commodity-linked instrument.", "Commodity" },
-                    { "DBT", "Debt securities.", "Debt" },
-                    { "DCO", "Derivative referencing a commodity.", "Derivative-Commodity" },
-                    { "DCR", "Derivative referencing credit (e.g. credit default swap).", "Derivative-Credit" },
-                    { "DE", "Derivative referencing equity.", "Derivative-Equity" },
-                    { "DFE", "Derivative referencing foreign exchange.", "Derivative-Foreign Exchange" },
-                    { "DIR", "Derivative referencing interest rates.", "Derivative-Interest Rate" },
-                    { "DO", "Derivative not otherwise classified.", "Derivative-Other" },
-                    { "EC", "Common equity securities.", "Equity-Common" },
-                    { "EP", "Preferred equity securities.", "Equity-Preferred" },
-                    { "LON", "Loans and loan participations.", "Loan" },
-                    { "RA", "Repurchase or reverse repurchase agreement.", "Repurchase Agreement" },
-                    { "RE", "Direct real estate or real estate-linked investment.", "Real Estate" },
-                    { "STIV", "Money market fund, liquidity pool, or other cash management vehicle.", "Short-Term Investment Vehicle" }
+                    { "DEBT", "Debt, structured notes, loans, and asset-backed securities.", "Debt" },
+                    { "DERIVATIVE", "Equity, credit, rate, commodity, FX, or other derivatives.", "Derivative" },
+                    { "EQUITY", "Equity securities (common or preferred).", "Equity" },
+                    { "OTHER", "Short-term investments, repurchase agreements, commodities, real estate, and anything not otherwise classified.", "Other" }
                 });
 
             migrationBuilder.InsertData(

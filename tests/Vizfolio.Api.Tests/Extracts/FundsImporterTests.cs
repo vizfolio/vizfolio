@@ -197,7 +197,7 @@ public sealed class FundsImporterTests
         var result = await importer.ImportAsync(new FundsImportOptions());
 
         var stored = await ctx.Db.FundHoldings.AsNoTracking().SingleAsync();
-        stored.AssetCategoryCode.ShouldBe("EC");
+        stored.AssetCategoryCode.ShouldBe("EQUITY");
         stored.CountryCode.ShouldBe("US");
         stored.CurrencyCode.ShouldBe("USD");
 
@@ -261,7 +261,7 @@ public sealed class FundsImporterTests
             Ticker: "AAPL",
             Isin: "US0378331005",
             IssuerCik: issuerCik,
-            AssetCategory: "EC",
+            AssetCategory: "equity",
             Country: "US",
             Currency: "USD",
             Balance: 100m,

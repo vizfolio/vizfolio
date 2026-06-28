@@ -48,12 +48,14 @@ public sealed class ReferenceDataSeedTests
     }
 
     [Fact]
-    public async Task AssetCategory_seed_includes_sec_nport_enumeration()
+    public async Task AssetCategory_seed_matches_extract_pipeline_buckets()
     {
         await using var ctx = await TestDbContext.CreateAsync();
 
-        foreach (var expected in new[] { "EC", "EP", "DBT", "STIV", "RA", "LON", "ABS-MBS", "COMM", "RE" })
+        foreach (var expected in new[] { "EQUITY", "DEBT", "DERIVATIVE", "OTHER" })
             (await ctx.Db.AssetCategories.AnyAsync(c => c.Code == expected)).ShouldBeTrue(expected);
+
+        (await ctx.Db.AssetCategories.CountAsync()).ShouldBe(4);
     }
 
     [Fact]
@@ -90,7 +92,7 @@ public sealed class ReferenceDataSeedTests
         var (_, snapshotId) = await SeedFundSnapshotAsync(ctx);
 
         var holding = new FundHolding(snapshotId, 0.05m);
-        holding.SetClassification("EC", "US", "USD");
+        holding.SetClassification("EQUITY", "US", "USD");
         ctx.Db.FundHoldings.Add(holding);
 
         await ctx.Db.SaveChangesAsync();
