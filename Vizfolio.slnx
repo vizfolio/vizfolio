@@ -1,5 +1,5 @@
 <Solution>
-  <Folder Name="/Docs/">
+  <Folder Name="/docs/">
     <File Path="docs\er-diagram.md" />
     <File Path="docs\fund-data.md" />
     <File Path="docs\security-data.md" />
