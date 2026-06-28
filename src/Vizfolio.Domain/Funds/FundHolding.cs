@@ -40,6 +40,8 @@ public sealed class FundHolding
 
     public string? Currency { get; private set; }
 
+    public string? IssuerCik { get; private set; }
+
     public void LinkToSecurity(Guid securityId)
     {
         if (securityId == Guid.Empty)
@@ -67,5 +69,20 @@ public sealed class FundHolding
         AssetCategory = assetCategory;
         Country = country;
         Currency = currency;
+    }
+
+    public void SetIssuerCik(string? cik)
+    {
+        if (string.IsNullOrWhiteSpace(cik))
+        {
+            IssuerCik = null;
+            return;
+        }
+
+        var trimmed = cik.Trim();
+        if (!trimmed.All(char.IsDigit))
+            throw new ArgumentException("Issuer CIK must contain only digits.", nameof(cik));
+
+        IssuerCik = trimmed.TrimStart('0').PadLeft(10, '0');
     }
 }

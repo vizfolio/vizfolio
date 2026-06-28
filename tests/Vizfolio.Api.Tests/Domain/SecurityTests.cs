@@ -65,11 +65,12 @@ public sealed class SecurityTests
     {
         var security = new Security("320193", SampleFetchedAt);
 
-        security.UpdateProfile("Apple Inc.", "10-K filer", "Technology", "US");
+        security.UpdateProfile("Apple Inc.", "10-K filer", "Technology", "Electronic Computers", "US");
 
         security.Name.ShouldBe("Apple Inc.");
         security.EntityType.ShouldBe("10-K filer");
         security.Sector.ShouldBe("Technology");
+        security.Industry.ShouldBe("Electronic Computers");
         security.Country.ShouldBe("US");
     }
 

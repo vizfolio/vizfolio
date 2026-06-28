@@ -125,6 +125,18 @@ public sealed class AppDbContextModelTests
     }
 
     [Fact]
+    public void FundHolding_has_index_on_IssuerCik()
+    {
+        using var context = CreateContext();
+
+        var entity = context.Model.FindEntityType(typeof(FundHolding))!;
+        var issuerCikIndex = entity.GetIndexes()
+            .FirstOrDefault(i => i.Properties.Any(p => p.Name == nameof(FundHolding.IssuerCik)));
+
+        issuerCikIndex.ShouldNotBeNull();
+    }
+
+    [Fact]
     public void FundHolding_optionally_references_Security_with_restrict_delete()
     {
         using var context = CreateContext();

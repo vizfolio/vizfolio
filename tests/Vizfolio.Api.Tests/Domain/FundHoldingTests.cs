@@ -78,4 +78,54 @@ public sealed class FundHoldingTests
         holding.Country.ShouldBe("US");
         holding.Currency.ShouldBe("USD");
     }
+
+    [Fact]
+    public void SetIssuerCik_zero_pads_to_ten_digits()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+
+        holding.SetIssuerCik("19617");
+
+        holding.IssuerCik.ShouldBe("0000019617");
+    }
+
+    [Fact]
+    public void SetIssuerCik_accepts_already_padded_value()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+
+        holding.SetIssuerCik("0000019617");
+
+        holding.IssuerCik.ShouldBe("0000019617");
+    }
+
+    [Fact]
+    public void SetIssuerCik_blank_clears_value()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+        holding.SetIssuerCik("19617");
+
+        holding.SetIssuerCik("   ");
+
+        holding.IssuerCik.ShouldBeNull();
+    }
+
+    [Fact]
+    public void SetIssuerCik_null_clears_value()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+        holding.SetIssuerCik("19617");
+
+        holding.SetIssuerCik(null);
+
+        holding.IssuerCik.ShouldBeNull();
+    }
+
+    [Fact]
+    public void SetIssuerCik_rejects_non_digit_input()
+    {
+        var holding = new FundHolding(SampleSnapshotId, 0.05m);
+
+        Should.Throw<ArgumentException>(() => holding.SetIssuerCik("AAPL"));
+    }
 }

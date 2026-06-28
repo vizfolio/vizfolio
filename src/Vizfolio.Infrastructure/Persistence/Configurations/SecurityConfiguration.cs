@@ -17,6 +17,7 @@ internal sealed class SecurityConfiguration : IEntityTypeConfiguration<Security>
         builder.Property(s => s.Name).HasMaxLength(500);
         builder.Property(s => s.EntityType).HasMaxLength(100);
         builder.Property(s => s.Sector).HasMaxLength(200);
+        builder.Property(s => s.Industry).HasMaxLength(200);
         builder.Property(s => s.Country).HasMaxLength(2);
         builder.Property(s => s.EdgarFetchedAt).IsRequired();
 

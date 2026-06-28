@@ -24,6 +24,8 @@ public sealed class Security
 
     public string? Sector { get; private set; }
 
+    public string? Industry { get; private set; }
+
     public string? Country { get; private set; }
 
     public DateTimeOffset EdgarFetchedAt { get; private set; }
@@ -32,11 +34,12 @@ public sealed class Security
 
     public IReadOnlyList<string> Exchanges => _exchanges;
 
-    public void UpdateProfile(string? name, string? entityType, string? sector, string? country)
+    public void UpdateProfile(string? name, string? entityType, string? sector, string? industry, string? country)
     {
         Name = name;
         EntityType = entityType;
         Sector = sector;
+        Industry = industry;
         Country = country;
     }
 

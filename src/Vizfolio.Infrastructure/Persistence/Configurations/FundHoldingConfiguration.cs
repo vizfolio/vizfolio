@@ -40,5 +40,8 @@ internal sealed class FundHoldingConfiguration : IEntityTypeConfiguration<FundHo
         builder.Property(h => h.AssetCategory).HasMaxLength(20);
         builder.Property(h => h.Country).HasMaxLength(2);
         builder.Property(h => h.Currency).HasMaxLength(3);
+
+        builder.Property(h => h.IssuerCik).HasMaxLength(10);
+        builder.HasIndex(h => h.IssuerCik);
     }
 }
