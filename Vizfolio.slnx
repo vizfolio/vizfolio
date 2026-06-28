@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Vizfolio.Api/Vizfolio.Api.csproj" />
+    <Project Path="src/Vizfolio.Application/Vizfolio.Application.csproj" />
+    <Project Path="src/Vizfolio.Domain/Vizfolio.Domain.csproj" />
+    <Project Path="src/Vizfolio.Infrastructure/Vizfolio.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Vizfolio.Api.Tests/Vizfolio.Api.Tests.csproj" />
+  </Folder>
+</Solution>
