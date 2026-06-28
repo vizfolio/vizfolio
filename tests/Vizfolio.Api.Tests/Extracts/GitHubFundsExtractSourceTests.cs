@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,19 +10,24 @@ namespace Vizfolio.Api.Tests.Extracts;
 
 public sealed class GitHubFundsExtractSourceTests
 {
+    private const string RootPrefix = "fund-extracts-master";
+
     [Fact]
-    public async Task GetManifestAsync_parses_funds_list()
+    public async Task GetManifestAsync_reads_funds_json_from_tarball()
     {
-        var handler = new StubHttpMessageHandler(_ => StubHttpMessageHandler.Ok("""
-            {
-              "schema_version": "0.1",
-              "generated_at": "2026-01-15T12:00:00Z",
-              "funds": [
-                { "series_id": "S000012345", "latest_period": "2024-12-31", "name": "Sample Fund", "registrant_cik": "0000123", "latest_accession": "A-1", "tickers": ["FUND"] }
-              ]
-            }
-        """));
-        var source = BuildSource(handler);
+        var tarball = TarballFixture.Build(RootPrefix, new Dictionary<string, byte[]>
+        {
+            ["funds.json"] = TarballFixture.Utf8("""
+                {
+                  "schema_version": "0.1",
+                  "generated_at": "2026-01-15T12:00:00Z",
+                  "funds": [
+                    { "series_id": "S000012345", "latest_period": "2024-12-31", "name": "Sample Fund", "registrant_cik": "0000123", "latest_accession": "A-1", "tickers": ["FUND"] }
+                  ]
+                }
+            """)
+        });
+        using var source = BuildSource(TarballHandler(tarball));
 
         var manifest = await source.GetManifestAsync();
 
@@ -33,9 +37,9 @@ public sealed class GitHubFundsExtractSourceTests
     }
 
     [Fact]
-    public async Task GetSnapshotAsync_decompresses_gzip_payload_and_substitutes_template()
+    public async Task GetSnapshotAsync_decompresses_gzipped_entry_from_tarball()
     {
-        var body = """
+        var snapshotJson = """
             {
               "schema_version": "0.4",
               "generated_at": "2026-01-15T12:00:00Z",
@@ -49,8 +53,8 @@ public sealed class GitHubFundsExtractSourceTests
                 "registrant_name": "Sample Registrant",
                 "net_assets_usd": 1000000,
                 "is_final_filing": false,
-                "share_classes": [{ "class_id": "C000111", "name": "Investor", "ticker": "FUND", "expense_ratio": 0.005 }],
-                "monthly_returns": [{ "month": "2024-12-01", "return_pct": 0.0123, "class_id": "C000111" }]
+                "share_classes": [],
+                "monthly_returns": [{ "month": "2024-12", "return_pct": 0.0123, "class_id": null }]
               },
               "holdings": [
                 { "weight": 0.05, "name": "Apple Inc.", "ticker": "AAPL", "issuer_cik": "0000320193", "fair_value_usd": 12345.67 }
@@ -58,48 +62,59 @@ public sealed class GitHubFundsExtractSourceTests
             }
             """;
 
-        var handler = new StubHttpMessageHandler(req =>
+        var tarball = TarballFixture.Build(RootPrefix, new Dictionary<string, byte[]>
         {
-            req.RequestUri!.ToString().ShouldContain("S000012345");
-            req.RequestUri!.ToString().ShouldContain("2024-12-31");
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(GzipBytes(body))
-                {
-                    Headers = { ContentType = new MediaTypeHeaderValue("application/octet-stream") }
-                }
-            };
+            ["funds.json"] = TarballFixture.Utf8("""{"schema_version":"0.1","generated_at":"2026-01-15T12:00:00Z","funds":[]}"""),
+            ["snapshots/S000012345/2024-12-31.json.gz"] = TarballFixture.Gzip(snapshotJson)
         });
-        var source = BuildSource(handler);
+        using var source = BuildSource(TarballHandler(tarball));
 
         var snapshot = await source.GetSnapshotAsync("S000012345", "2024-12-31");
 
         snapshot.ShouldNotBeNull();
         snapshot.Fund.SeriesId.ShouldBe("S000012345");
         snapshot.Fund.AsOf.ShouldBe(new DateOnly(2024, 12, 31));
-        snapshot.Holdings.ShouldNotBeNull();
-        snapshot.Holdings.Single().IssuerCik.ShouldBe("0000320193");
+        snapshot.Fund.MonthlyReturns!.Single().Month.ShouldBe(new DateOnly(2024, 12, 1));
+        snapshot.Holdings!.Single().IssuerCik.ShouldBe("0000320193");
     }
 
     [Fact]
-    public async Task GetSnapshotAsync_returns_null_on_404()
+    public async Task GetSnapshotAsync_returns_null_when_entry_is_absent()
     {
-        var handler = new StubHttpMessageHandler(_ => StubHttpMessageHandler.NotFound());
-        var source = BuildSource(handler);
+        var tarball = TarballFixture.Build(RootPrefix, new Dictionary<string, byte[]>
+        {
+            ["funds.json"] = TarballFixture.Utf8("""{"schema_version":"0.1","generated_at":"2026-01-15T12:00:00Z","funds":[]}""")
+        });
+        using var source = BuildSource(TarballHandler(tarball));
 
         (await source.GetSnapshotAsync("S000000000", "2024-12-31")).ShouldBeNull();
     }
 
-    private static byte[] GzipBytes(string text)
+    [Fact]
+    public async Task Repeated_calls_reuse_a_single_tarball_download()
     {
-        using var memory = new MemoryStream();
-        using (var gz = new GZipStream(memory, CompressionLevel.Fastest, leaveOpen: true))
-        using (var writer = new StreamWriter(gz, System.Text.Encoding.UTF8))
+        var tarball = TarballFixture.Build(RootPrefix, new Dictionary<string, byte[]>
         {
-            writer.Write(text);
-        }
-        return memory.ToArray();
+            ["funds.json"] = TarballFixture.Utf8("""{"schema_version":"0.1","generated_at":"2026-01-15T12:00:00Z","funds":[]}""")
+        });
+        var handler = TarballHandler(tarball);
+        using var source = BuildSource(handler);
+
+        await source.GetManifestAsync();
+        await source.GetManifestAsync();
+        await source.GetSnapshotAsync("S000000000", "2024-12-31");
+
+        handler.Requests.Count.ShouldBe(1);
     }
+
+    private static StubHttpMessageHandler TarballHandler(byte[] tarball) =>
+        new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(tarball)
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("application/x-gzip") }
+            }
+        });
 
     private static GitHubFundsExtractSource BuildSource(StubHttpMessageHandler handler)
     {
