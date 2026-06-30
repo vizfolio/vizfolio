@@ -23,6 +23,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<AccountHolding> AccountHoldings => Set<AccountHolding>();
 
+    public DbSet<AccountHoldingSnapshot> AccountHoldingSnapshots => Set<AccountHoldingSnapshot>();
+
     public DbSet<Fund> Funds => Set<Fund>();
 
     public DbSet<FundSnapshot> FundSnapshots => Set<FundSnapshot>();

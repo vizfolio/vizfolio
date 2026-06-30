@@ -7,6 +7,7 @@ using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
+using Vizfolio.Domain.Funds;
 using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Securities;
 
@@ -358,6 +359,255 @@ public sealed class PortfolioImportServiceTests
         (await ctx.Db.Accounts.AsNoTracking()
             .CountAsync(a => a.PortfolioId == portfolio.PortfolioId)).ShouldBe(2);
         (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync()).ShouldBe(3);
+    }
+
+    private const string QfxWithPositions = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>POS-1</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20260101</DTSTART><DTEND>20260601</DTEND>
+        <BUYSTOCK>
+          <INVBUY>
+            <INVTRAN><FITID>POS-BUY-1</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>10</UNITS><UNITPRICE>500.00</UNITPRICE><TOTAL>-5000.00</TOTAL>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVBUY>
+          <BUYTYPE>BUY</BUYTYPE>
+        </BUYSTOCK>
+      </INVTRANLIST>
+      <INVPOSLIST>
+        <POSSTOCK>
+          <INVPOS>
+            <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>10</UNITS><UNITPRICE>525.50</UNITPRICE><MKTVAL>5255.00</MKTVAL><COSTBASIS>5000.00</COSTBASIS>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVPOS>
+        </POSSTOCK>
+        <POSSTOCK>
+          <INVPOS>
+            <SECID><UNIQUEID>AAPL</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>5</UNITS><UNITPRICE>200.00</UNITPRICE><MKTVAL>1000.00</MKTVAL>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVPOS>
+        </POSSTOCK>
+      </INVPOSLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+
+    [Fact]
+    public async Task ImportToPortfolioAsync_records_snapshot_per_position_with_DTASOF_as_AsOf()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        SeedSecurity(ctx, cik: "0000102909", ticker: "VOO");
+        SeedSecurity(ctx, cik: "0000320193", ticker: "AAPL");
+        await ctx.Db.SaveChangesAsync();
+
+        var service = NewService(ctx);
+        await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(QfxWithPositions), "pos.qfx", CancellationToken.None);
+
+        var snapshots = await ctx.Db.AccountHoldingSnapshots.AsNoTracking().ToListAsync();
+        snapshots.Count.ShouldBe(2);
+        snapshots.ShouldAllBe(s => s.AsOf == new DateOnly(2026, 6, 1));
+        snapshots.ShouldAllBe(s => s.Source == AccountHoldingSnapshotSource.BrokerPosition);
+
+        var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
+        var vooHolding = holdings.Single(h => h.Symbol == "VOO");
+        var aaplHolding = holdings.Single(h => h.Symbol == "AAPL");
+
+        var vooSnap = snapshots.Single(s => s.AccountHoldingId == vooHolding.AccountHoldingId);
+        vooSnap.Quantity.ShouldBe(10m);
+        vooSnap.UnitPrice.ShouldBe(525.50m);
+        vooSnap.MarketValue.ShouldBe(5255.00m);
+        vooSnap.CostBasis.ShouldBe(5000.00m);
+        vooSnap.CurrencyCode.ShouldBe("USD");
+
+        var aaplSnap = snapshots.Single(s => s.AccountHoldingId == aaplHolding.AccountHoldingId);
+        aaplSnap.Quantity.ShouldBe(5m);
+        aaplSnap.CostBasis.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ImportToPortfolioAsync_does_not_duplicate_snapshots_on_re_import()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        SeedSecurity(ctx, cik: "0000102909", ticker: "VOO");
+        SeedSecurity(ctx, cik: "0000320193", ticker: "AAPL");
+        await ctx.Db.SaveChangesAsync();
+
+        var service = NewService(ctx);
+        await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(QfxWithPositions), "pos.qfx", CancellationToken.None);
+        await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(QfxWithPositions), "pos.qfx", CancellationToken.None);
+
+        (await ctx.Db.AccountHoldingSnapshots.AsNoTracking().CountAsync()).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ImportToPortfolioAsync_creates_holding_for_position_with_no_matching_transaction()
+    {
+        const string positionOnlyQfx = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>POS-2</ACCTID></INVACCTFROM>
+      <INVTRANLIST><DTSTART>20260101</DTSTART><DTEND>20260601</DTEND></INVTRANLIST>
+      <INVPOSLIST>
+        <POSSTOCK>
+          <INVPOS>
+            <SECID><UNIQUEID>MSFT</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>7</UNITS><UNITPRICE>400.00</UNITPRICE><MKTVAL>2800.00</MKTVAL>
+          </INVPOS>
+        </POSSTOCK>
+      </INVPOSLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        SeedSecurity(ctx, cik: "0000789019", ticker: "MSFT");
+        await ctx.Db.SaveChangesAsync();
+
+        var service = NewService(ctx);
+        await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(positionOnlyQfx), "msft.qfx", CancellationToken.None);
+
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync()).ShouldBe(0);
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.Symbol.ShouldBe("MSFT");
+
+        var snapshot = await ctx.Db.AccountHoldingSnapshots.AsNoTracking().SingleAsync();
+        snapshot.AccountHoldingId.ShouldBe(holding.AccountHoldingId);
+        snapshot.Quantity.ShouldBe(7m);
+    }
+
+    [Fact]
+    public async Task ImportToPortfolioAsync_skips_position_with_unresolvable_ticker()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        // No Security row for VOO / AAPL — positions cannot resolve.
+        var service = NewService(ctx);
+
+        await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(QfxWithPositions), "unresolved.qfx", CancellationToken.None);
+
+        (await ctx.Db.AccountHoldingSnapshots.AsNoTracking().CountAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ImportToPortfolioAsync_creates_distinct_holdings_and_snapshots_for_share_classes_of_same_fund()
+    {
+        // VTI (ETF) and VTSAX (mutual fund) are share classes of the same Vanguard fund —
+        // same FundId, different tickers. They must produce two AccountHoldings and two snapshots.
+        const string shareClassQfx = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>SHARE-1</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20260101</DTSTART><DTEND>20260601</DTEND>
+        <BUYMF>
+          <INVBUY>
+            <INVTRAN><FITID>VTI-BUY</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>VTI</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>10</UNITS><UNITPRICE>250.00</UNITPRICE><TOTAL>-2500.00</TOTAL>
+          </INVBUY>
+          <BUYTYPE>BUY</BUYTYPE>
+        </BUYMF>
+        <BUYMF>
+          <INVBUY>
+            <INVTRAN><FITID>VTSAX-BUY</FITID><DTTRADE>20260116</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>20</UNITS><UNITPRICE>125.00</UNITPRICE><TOTAL>-2500.00</TOTAL>
+          </INVBUY>
+          <BUYTYPE>BUY</BUYTYPE>
+        </BUYMF>
+      </INVTRANLIST>
+      <INVPOSLIST>
+        <POSMF>
+          <INVPOS>
+            <SECID><UNIQUEID>VTI</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>10</UNITS><UNITPRICE>260.00</UNITPRICE><MKTVAL>2600.00</MKTVAL>
+          </INVPOS>
+        </POSMF>
+        <POSMF>
+          <INVPOS>
+            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>20</UNITS><UNITPRICE>130.00</UNITPRICE><MKTVAL>2600.00</MKTVAL>
+          </INVPOS>
+        </POSMF>
+      </INVPOSLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        var fund = new Fund("S000VANGUARD");
+        ctx.Db.Funds.Add(fund);
+        var snapshot = new FundSnapshot(fund.FundId, new DateOnly(2026, 5, 31), "filing", "https://example.test/seed");
+        snapshot.ReplaceShareClasses(new[]
+        {
+            new ShareClass("C1", "ETF Class",       "VTI",   0.03m),
+            new ShareClass("C2", "Admiral Class",   "VTSAX", 0.04m),
+        });
+        ctx.Db.FundSnapshots.Add(snapshot);
+        await ctx.Db.SaveChangesAsync();
+
+        var service = NewService(ctx);
+        await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(shareClassQfx), "shares.qfx", CancellationToken.None);
+
+        var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
+        holdings.Count.ShouldBe(2);
+        holdings.Select(h => h.Symbol).ShouldBe(new[] { "VTI", "VTSAX" }, ignoreOrder: true);
+        holdings.ShouldAllBe(h => h.FundId == fund.FundId);
+
+        var snapshots = await ctx.Db.AccountHoldingSnapshots.AsNoTracking().ToListAsync();
+        snapshots.Count.ShouldBe(2);
+        var vti = holdings.Single(h => h.Symbol == "VTI");
+        var vtsax = holdings.Single(h => h.Symbol == "VTSAX");
+        snapshots.Single(s => s.AccountHoldingId == vti.AccountHoldingId).Quantity.ShouldBe(10m);
+        snapshots.Single(s => s.AccountHoldingId == vtsax.AccountHoldingId).Quantity.ShouldBe(20m);
+
+        var txs = await ctx.Db.AccountTransactions.AsNoTracking().ToListAsync();
+        txs.Single(t => t.Ticker == "VTI").AccountHoldingId.ShouldBe(vti.AccountHoldingId);
+        txs.Single(t => t.Ticker == "VTSAX").AccountHoldingId.ShouldBe(vtsax.AccountHoldingId);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_csv_does_not_create_snapshots()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var service = NewService(ctx);
+
+        await service.ImportToAccountAsync(account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
+
+        (await ctx.Db.AccountHoldingSnapshots.AsNoTracking().CountAsync()).ShouldBe(0);
+    }
+
+    private static void SeedSecurity(TestDbContext ctx, string cik, string ticker)
+    {
+        var security = new Security(cik, DateTimeOffset.UtcNow);
+        security.SetTickers(new[] { ticker });
+        ctx.Db.Securities.Add(security);
     }
 
     private static PortfolioImportService NewService(TestDbContext ctx)

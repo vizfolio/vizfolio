@@ -11,7 +11,7 @@ using Vizfolio.Infrastructure.Persistence;
 namespace Vizfolio.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260628231821_Init")]
+    [Migration("20260630005351_Init")]
     partial class Init
     {
         /// <inheritdoc />
@@ -320,6 +320,52 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasIndex("Symbol");
 
                     b.ToTable("AccountHolding", (string)null);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHoldingSnapshot", b =>
+                {
+                    b.Property<Guid>("AccountHoldingSnapshotId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountHoldingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("AsOf")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("CostBasis")
+                        .HasColumnType("decimal(28,4)");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("MarketValue")
+                        .HasColumnType("decimal(28,4)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("UnitPrice")
+                        .HasColumnType("decimal(28,8)");
+
+                    b.HasKey("AccountHoldingSnapshotId");
+
+                    b.HasIndex("CurrencyCode");
+
+                    b.HasIndex("AccountHoldingId", "AsOf")
+                        .IsUnique();
+
+                    b.ToTable("AccountHoldingSnapshot", (string)null);
                 });
 
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountTransaction", b =>
@@ -3526,6 +3572,20 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.HasOne("Vizfolio.Domain.Securities.Security", null)
                         .WithMany()
                         .HasForeignKey("SecurityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHoldingSnapshot", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Portfolios.AccountHolding", null)
+                        .WithMany()
+                        .HasForeignKey("AccountHoldingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vizfolio.Domain.Reference.Currency", null)
+                        .WithMany()
+                        .HasForeignKey("CurrencyCode")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

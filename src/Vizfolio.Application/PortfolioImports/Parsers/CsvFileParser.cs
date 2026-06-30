@@ -70,7 +70,12 @@ public sealed class CsvFileParser : IPortfolioFileParser
                 Memo: memo));
         }
 
-        var statement = new ParsedAccountStatement(InstitutionCode: null, AccountNumber: null, transactions);
+        var statement = new ParsedAccountStatement(
+            InstitutionCode: null,
+            AccountNumber: null,
+            Transactions: transactions,
+            Positions: [],
+            AsOf: null);
         return new ParsedPortfolioFile(SourceSystem, [statement]);
     }
 

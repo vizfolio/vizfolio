@@ -48,10 +48,19 @@ public sealed class PortfolioImportService : IPortfolioImportService
             return PortfolioImportResult.FileHasAccountInfo(parsed.SourceSystem, stopwatch.Elapsed);
 
         var allTransactions = parsed.Statements.SelectMany(s => s.Transactions).ToList();
+        var allPositions = parsed.Statements.SelectMany(s => s.Positions).ToList();
+        var mergedAsOf = parsed.Statements
+            .Where(s => s.AsOf is not null)
+            .Select(s => s.AsOf!.Value)
+            .OrderByDescending(d => d)
+            .Cast<DateOnly?>()
+            .FirstOrDefault();
         var mergedStatement = new ParsedAccountStatement(
             InstitutionCode: null,
             AccountNumber: null,
-            Transactions: allTransactions);
+            Transactions: allTransactions,
+            Positions: allPositions,
+            AsOf: mergedAsOf);
 
         var currencySet = await LoadCurrenciesAsync(cancellationToken);
         var accountResult = await ImportStatementAsync(
@@ -152,6 +161,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
         var tickerSet = statement.Transactions
             .Select(t => t.Ticker)
+            .Concat(statement.Positions.Select(p => p.Ticker))
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Select(t => t!.Trim().ToUpperInvariant())
             .Distinct()
@@ -210,6 +220,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
             }
         }
 
+        await ImportPositionSnapshotsAsync(statement, resolver, validCurrencies, cancellationToken);
+
         return new AccountImportResult(
             AccountId: account.AccountId,
             Created: accountCreated,
@@ -220,6 +232,48 @@ public sealed class PortfolioImportService : IPortfolioImportService
             Skipped: skipped,
             Failed: failures.Count,
             Failures: failures);
+    }
+
+    private async Task ImportPositionSnapshotsAsync(
+        ParsedAccountStatement statement,
+        AccountHoldingResolver resolver,
+        IReadOnlySet<string> validCurrencies,
+        CancellationToken cancellationToken)
+    {
+        if (statement.Positions.Count == 0) return;
+
+        var inFlight = new HashSet<(Guid HoldingId, DateOnly AsOf)>();
+
+        foreach (var pos in statement.Positions)
+        {
+            if (string.IsNullOrWhiteSpace(pos.Ticker)) continue;
+
+            var ticker = pos.Ticker.Trim().ToUpperInvariant();
+            var holding = resolver.ResolveByTicker(ticker, pos.Cusip, pos.CurrencyCode);
+            if (holding is null)
+            {
+                _logger.LogDebug(
+                    "Skipping position snapshot for unresolved ticker {Ticker} on {AsOf}", ticker, pos.AsOf);
+                continue;
+            }
+
+            var key = (holding.AccountHoldingId, pos.AsOf);
+            if (!inFlight.Add(key)) continue;
+
+            var alreadyExists = await _db.AccountHoldingSnapshots
+                .AnyAsync(s => s.AccountHoldingId == holding.AccountHoldingId && s.AsOf == pos.AsOf,
+                    cancellationToken);
+            if (alreadyExists) continue;
+
+            var snapshot = new AccountHoldingSnapshot(
+                holding.AccountHoldingId, pos.AsOf, pos.Units, AccountHoldingSnapshotSource.BrokerPosition);
+            snapshot.SetValuation(
+                pos.CostBasis,
+                pos.MarketValue,
+                pos.UnitPrice,
+                NormalizeCurrency(pos.CurrencyCode, validCurrencies));
+            _db.AccountHoldingSnapshots.Add(snapshot);
+        }
     }
 
     private async Task<(ParsedPortfolioFile? Parsed, Func<TimeSpan, PortfolioImportResult>? Missing)> ParseAsync(

@@ -36,27 +36,35 @@ public sealed class QfxFileParser : IPortfolioFileParser
         var statements = new List<ParsedAccountStatement>();
 
         AppendStatements(doc, "//INVSTMTRS", ".//INVACCTFROM", "BROKERID",
-            (stmt, txs) =>
+            (stmt, txs, positions) =>
             {
                 var invList = stmt.SelectSingleNode(".//INVTRANLIST");
                 if (invList is not null) ParseInvestmentTransactions(invList, txs, securityList);
+
+                var posList = stmt.SelectSingleNode(".//INVPOSLIST");
+                var asOf = TryParseDateOnly(SelectText(stmt, "DTASOF"));
+                if (posList is not null && asOf is not null)
+                    ParseInvestmentPositions(posList, asOf.Value, positions, securityList);
             },
+            stmt => TryParseDateOnly(SelectText(stmt, "DTASOF")),
             statements);
 
         AppendStatements(doc, "//STMTRS", ".//BANKACCTFROM", "BANKID",
-            (stmt, txs) =>
+            (stmt, txs, _) =>
             {
                 var bankList = stmt.SelectSingleNode(".//BANKTRANLIST");
                 if (bankList is not null) ParseBankTransactions(bankList, txs);
             },
+            stmt => TryParseDateOnly(SelectText(stmt, ".//BANKTRANLIST/DTEND")),
             statements);
 
         AppendStatements(doc, "//CCSTMTRS", ".//CCACCTFROM", institutionCodeChild: null,
-            (stmt, txs) =>
+            (stmt, txs, _) =>
             {
                 var bankList = stmt.SelectSingleNode(".//BANKTRANLIST");
                 if (bankList is not null) ParseBankTransactions(bankList, txs);
             },
+            stmt => TryParseDateOnly(SelectText(stmt, ".//BANKTRANLIST/DTEND")),
             statements);
 
         return new ParsedPortfolioFile(SourceSystem, statements);
@@ -67,7 +75,8 @@ public sealed class QfxFileParser : IPortfolioFileParser
         string statementXPath,
         string acctFromXPath,
         string? institutionCodeChild,
-        Action<XmlNode, List<ParsedTransaction>> populateTransactions,
+        Action<XmlNode, List<ParsedTransaction>, List<ParsedPosition>> populate,
+        Func<XmlNode, DateOnly?> resolveAsOf,
         List<ParsedAccountStatement> sink)
     {
         var nodes = doc.SelectNodes(statementXPath);
@@ -82,8 +91,10 @@ public sealed class QfxFileParser : IPortfolioFileParser
             var accountNumber = SelectText(acctFrom, "ACCTID");
 
             var transactions = new List<ParsedTransaction>();
-            populateTransactions(stmt, transactions);
-            sink.Add(new ParsedAccountStatement(institutionCode, accountNumber, transactions));
+            var positions = new List<ParsedPosition>();
+            populate(stmt, transactions, positions);
+            var asOf = resolveAsOf(stmt);
+            sink.Add(new ParsedAccountStatement(institutionCode, accountNumber, transactions, positions, asOf));
         }
     }
 
@@ -124,6 +135,41 @@ public sealed class QfxFileParser : IPortfolioFileParser
                 _ => null,
             };
             if (tx is not null) transactions.Add(tx);
+        }
+    }
+
+    private static void ParseInvestmentPositions(
+        XmlNode posList,
+        DateOnly asOf,
+        List<ParsedPosition> positions,
+        IReadOnlyDictionary<string, string> securityList)
+    {
+        foreach (XmlNode node in posList.ChildNodes)
+        {
+            if (node.NodeType != XmlNodeType.Element) continue;
+            var tag = node.Name.ToUpperInvariant();
+            if (tag is not ("POSSTOCK" or "POSMF" or "POSOPT" or "POSOTHER" or "POSDEBT")) continue;
+
+            var (mappedTicker, mappedCusip) = ResolveSecurityId(
+                SelectText(node, ".//SECID/UNIQUEID"),
+                SelectText(node, ".//SECID/UNIQUEIDTYPE"),
+                securityList);
+
+            var units = ParseDecimal(SelectText(node, ".//UNITS")) ?? 0m;
+            var unitPrice = ParseDecimal(SelectText(node, ".//UNITPRICE"));
+            var marketValue = ParseDecimal(SelectText(node, ".//MKTVAL"));
+            var costBasis = ParseDecimal(SelectText(node, ".//COSTBASIS"));
+            var currency = SelectText(node, ".//CURRENCY/CURSYM");
+
+            positions.Add(new ParsedPosition(
+                AsOf: asOf,
+                Ticker: mappedTicker,
+                Cusip: mappedCusip,
+                Units: units,
+                UnitPrice: unitPrice,
+                MarketValue: marketValue,
+                CostBasis: costBasis,
+                CurrencyCode: currency));
         }
     }
 

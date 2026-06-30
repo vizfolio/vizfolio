@@ -407,6 +407,130 @@ NEWFILEUID:NONE
         parsed.Statements[0].InstitutionCode.ShouldBe("vanguard.com");
     }
 
+    [Fact]
+    public async Task ParseAsync_extracts_INVPOSLIST_into_positions_with_statement_DTASOF()
+    {
+        const string sample = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>fidelity.com</BROKERID><ACCTID>X1234</ACCTID></INVACCTFROM>
+      <INVTRANLIST><DTSTART>20260101</DTSTART><DTEND>20260601</DTEND></INVTRANLIST>
+      <INVPOSLIST>
+        <POSSTOCK>
+          <INVPOS>
+            <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <HELDINACCT>CASH</HELDINACCT>
+            <POSTYPE>LONG</POSTYPE>
+            <UNITS>10</UNITS>
+            <UNITPRICE>525.50</UNITPRICE>
+            <MKTVAL>5255.00</MKTVAL>
+            <COSTBASIS>5000.00</COSTBASIS>
+            <DTPRICEASOF>20260601</DTPRICEASOF>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVPOS>
+        </POSSTOCK>
+        <POSMF>
+          <INVPOS>
+            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <HELDINACCT>CASH</HELDINACCT>
+            <POSTYPE>LONG</POSTYPE>
+            <UNITS>50.123</UNITS>
+            <UNITPRICE>110.00</UNITPRICE>
+            <MKTVAL>5513.53</MKTVAL>
+            <DTPRICEASOF>20260601</DTPRICEASOF>
+          </INVPOS>
+        </POSMF>
+      </INVPOSLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+        await using var stream = StringStream(sample);
+
+        var parsed = await parser.ParseAsync(stream, "positions.qfx", CancellationToken.None);
+
+        parsed.Statements.Count.ShouldBe(1);
+        var statement = parsed.Statements[0];
+        statement.AsOf.ShouldBe(new DateOnly(2026, 6, 1));
+        statement.Positions.Count.ShouldBe(2);
+
+        var voo = statement.Positions.Single(p => p.Ticker == "VOO");
+        voo.AsOf.ShouldBe(new DateOnly(2026, 6, 1));
+        voo.Units.ShouldBe(10m);
+        voo.UnitPrice.ShouldBe(525.50m);
+        voo.MarketValue.ShouldBe(5255.00m);
+        voo.CostBasis.ShouldBe(5000.00m);
+        voo.CurrencyCode.ShouldBe("USD");
+
+        var vtsax = statement.Positions.Single(p => p.Ticker == "VTSAX");
+        vtsax.Units.ShouldBe(50.123m);
+        vtsax.CostBasis.ShouldBeNull();
+        vtsax.CurrencyCode.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ParseAsync_resolves_position_cusip_to_ticker_via_seclist()
+    {
+        const string sample = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>X9</ACCTID></INVACCTFROM>
+      <INVTRANLIST><DTSTART>20260101</DTSTART><DTEND>20260601</DTEND></INVTRANLIST>
+      <INVPOSLIST>
+        <POSMF>
+          <INVPOS>
+            <SECID><UNIQUEID>TEST00042</UNIQUEID><UNIQUEIDTYPE>CUSIP</UNIQUEIDTYPE></SECID>
+            <UNITS>1</UNITS><UNITPRICE>10</UNITPRICE><MKTVAL>10</MKTVAL>
+          </INVPOS>
+        </POSMF>
+      </INVPOSLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+  <SECLISTMSGSRSV1><SECLIST>
+    <MFINFO>
+      <SECINFO>
+        <SECID><UNIQUEID>TEST00042</UNIQUEID><UNIQUEIDTYPE>CUSIP</UNIQUEIDTYPE></SECID>
+        <SECNAME>Test Fund</SECNAME>
+        <TICKER>TST42</TICKER>
+      </SECINFO>
+      <MFTYPE>OPENEND</MFTYPE>
+    </MFINFO>
+  </SECLIST></SECLISTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+        await using var stream = StringStream(sample);
+
+        var parsed = await parser.ParseAsync(stream, "positions-cusip.qfx", CancellationToken.None);
+
+        var position = parsed.Statements[0].Positions.ShouldHaveSingleItem();
+        position.Ticker.ShouldBe("TST42");
+        position.Cusip.ShouldBe("TEST00042");
+    }
+
+    [Fact]
+    public async Task ParseAsync_returns_empty_positions_when_INVPOSLIST_absent()
+    {
+        var parser = new QfxFileParser();
+        await using var stream = StringStream(Ofx2Sample);
+
+        var parsed = await parser.ParseAsync(stream, "no-positions.qfx", CancellationToken.None);
+
+        parsed.Statements[0].Positions.ShouldBeEmpty();
+        parsed.Statements[0].AsOf.ShouldBe(new DateOnly(2026, 6, 1));
+    }
+
     private static MemoryStream StringStream(string content) =>
         new(Encoding.UTF8.GetBytes(content));
 }

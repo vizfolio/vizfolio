@@ -12,8 +12,8 @@ public sealed class AccountHoldingResolver
 
     private readonly Dictionary<string, Guid> _securityIdByTicker = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Guid> _fundIdByTicker = new(StringComparer.Ordinal);
-    private readonly Dictionary<Guid, AccountHolding> _holdingBySecurity = new();
-    private readonly Dictionary<Guid, AccountHolding> _holdingByFund = new();
+    private readonly Dictionary<(Guid SecurityId, string? Symbol), AccountHolding> _holdingBySecurity = new();
+    private readonly Dictionary<(Guid FundId, string? Symbol), AccountHolding> _holdingByFund = new();
 
     private Guid _accountId;
     private bool _primed;
@@ -40,9 +40,9 @@ public sealed class AccountHoldingResolver
         foreach (var holding in existingHoldings)
         {
             if (holding.SecurityId.HasValue)
-                _holdingBySecurity.TryAdd(holding.SecurityId.Value, holding);
+                _holdingBySecurity.TryAdd((holding.SecurityId.Value, holding.Symbol), holding);
             if (holding.FundId.HasValue)
-                _holdingByFund.TryAdd(holding.FundId.Value, holding);
+                _holdingByFund.TryAdd((holding.FundId.Value, holding.Symbol), holding);
         }
 
         if (tickerSet.Count == 0) return;
@@ -94,30 +94,35 @@ public sealed class AccountHoldingResolver
     public AccountHolding GetOrCreateForSecurity(Guid securityId, string? symbol, string? cusip, string? currencyCode)
     {
         EnsurePrimed();
-        if (_holdingBySecurity.TryGetValue(securityId, out var existing)) return existing;
+        var key = (securityId, NormalizeSymbol(symbol));
+        if (_holdingBySecurity.TryGetValue(key, out var existing)) return existing;
 
         var holding = new AccountHolding(_accountId, AccountHoldingKind.Security);
         holding.LinkToSecurity(securityId);
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
-        _holdingBySecurity[securityId] = holding;
+        _holdingBySecurity[key] = holding;
         return holding;
     }
 
     public AccountHolding GetOrCreateForFund(Guid fundId, string? symbol, string? cusip, string? currencyCode)
     {
         EnsurePrimed();
-        if (_holdingByFund.TryGetValue(fundId, out var existing)) return existing;
+        var key = (fundId, NormalizeSymbol(symbol));
+        if (_holdingByFund.TryGetValue(key, out var existing)) return existing;
 
         var holding = new AccountHolding(_accountId, AccountHoldingKind.Fund);
         holding.LinkToFund(fundId);
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
-        _holdingByFund[fundId] = holding;
+        _holdingByFund[key] = holding;
         return holding;
     }
+
+    private static string? NormalizeSymbol(string? symbol) =>
+        string.IsNullOrWhiteSpace(symbol) ? null : symbol.Trim().ToUpperInvariant();
 
     private void EnsurePrimed()
     {

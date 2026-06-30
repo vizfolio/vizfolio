@@ -352,6 +352,38 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "AccountHoldingSnapshot",
+                columns: table => new
+                {
+                    AccountHoldingSnapshotId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AccountHoldingId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    AsOf = table.Column<DateOnly>(type: "TEXT", nullable: false),
+                    Quantity = table.Column<decimal>(type: "decimal(28,8)", nullable: false),
+                    CostBasis = table.Column<decimal>(type: "decimal(28,4)", nullable: true),
+                    MarketValue = table.Column<decimal>(type: "decimal(28,4)", nullable: true),
+                    UnitPrice = table.Column<decimal>(type: "decimal(28,8)", nullable: true),
+                    CurrencyCode = table.Column<string>(type: "TEXT", maxLength: 3, nullable: true),
+                    Source = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
+                    RecordedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AccountHoldingSnapshot", x => x.AccountHoldingSnapshotId);
+                    table.ForeignKey(
+                        name: "FK_AccountHoldingSnapshot_AccountHolding_AccountHoldingId",
+                        column: x => x.AccountHoldingId,
+                        principalTable: "AccountHolding",
+                        principalColumn: "AccountHoldingId",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_AccountHoldingSnapshot_Currency_CurrencyCode",
+                        column: x => x.CurrencyCode,
+                        principalTable: "Currency",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "AccountTransaction",
                 columns: table => new
                 {
@@ -926,6 +958,17 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 column: "Symbol");
 
             migrationBuilder.CreateIndex(
+                name: "IX_AccountHoldingSnapshot_AccountHoldingId_AsOf",
+                table: "AccountHoldingSnapshot",
+                columns: new[] { "AccountHoldingId", "AsOf" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountHoldingSnapshot_CurrencyCode",
+                table: "AccountHoldingSnapshot",
+                column: "CurrencyCode");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_AccountTransaction_AccountHoldingId",
                 table: "AccountTransaction",
                 column: "AccountHoldingId");
@@ -1029,6 +1072,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "AccountHoldingSnapshot");
+
             migrationBuilder.DropTable(
                 name: "AccountTransaction");
 

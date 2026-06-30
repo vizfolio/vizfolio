@@ -18,6 +18,8 @@ public interface IAppDbContext
 
     DbSet<AccountHolding> AccountHoldings { get; }
 
+    DbSet<AccountHoldingSnapshot> AccountHoldingSnapshots { get; }
+
     DbSet<Fund> Funds { get; }
 
     DbSet<FundSnapshot> FundSnapshots { get; }
