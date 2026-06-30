@@ -12,5 +12,7 @@ internal sealed class PortfolioConfiguration : IEntityTypeConfiguration<Portfoli
         builder.HasKey(p => p.PortfolioId);
         builder.Property(p => p.Name).IsRequired().HasMaxLength(200);
         builder.Property(p => p.CreatedAt).IsRequired();
+
+        builder.Navigation(p => p.Accounts).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

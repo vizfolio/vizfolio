@@ -10,7 +10,15 @@ public interface IAppDbContext
 {
     DbSet<Portfolio> Portfolios { get; }
 
+    DbSet<Account> Accounts { get; }
+
+    DbSet<AccountTransaction> AccountTransactions { get; }
+
     DbSet<Security> Securities { get; }
+
+    DbSet<AccountHolding> AccountHoldings { get; }
+
+    DbSet<AccountHoldingSnapshot> AccountHoldingSnapshots { get; }
 
     DbSet<Fund> Funds { get; }
 

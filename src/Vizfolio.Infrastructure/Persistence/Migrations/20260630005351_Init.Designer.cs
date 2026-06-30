@@ -11,8 +11,8 @@ using Vizfolio.Infrastructure.Persistence;
 namespace Vizfolio.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260628164425_Initial")]
-    partial class Initial
+    [Migration("20260630005351_Init")]
+    partial class Init
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -211,6 +211,241 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("FundSnapshot", (string)null);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
+                {
+                    b.Property<Guid>("AccountId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountType")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InstitutionCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PortfolioId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AccountId");
+
+                    b.HasIndex("PortfolioId", "InstitutionCode", "AccountNumber")
+                        .IsUnique();
+
+                    b.ToTable("Account", (string)null);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHolding", b =>
+                {
+                    b.Property<Guid>("AccountHoldingId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssetCategoryCode")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssetClassCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Cusip")
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("FundId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Isin")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SecurityId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Symbol")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AccountHoldingId");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("AssetCategoryCode");
+
+                    b.HasIndex("AssetClassCode");
+
+                    b.HasIndex("CurrencyCode");
+
+                    b.HasIndex("FundId");
+
+                    b.HasIndex("SecurityId");
+
+                    b.HasIndex("Symbol");
+
+                    b.ToTable("AccountHolding", (string)null);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHoldingSnapshot", b =>
+                {
+                    b.Property<Guid>("AccountHoldingSnapshotId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountHoldingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("AsOf")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("CostBasis")
+                        .HasColumnType("decimal(28,4)");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("MarketValue")
+                        .HasColumnType("decimal(28,4)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("UnitPrice")
+                        .HasColumnType("decimal(28,8)");
+
+                    b.HasKey("AccountHoldingSnapshotId");
+
+                    b.HasIndex("CurrencyCode");
+
+                    b.HasIndex("AccountHoldingId", "AsOf")
+                        .IsUnique();
+
+                    b.ToTable("AccountHoldingSnapshot", (string)null);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountTransaction", b =>
+                {
+                    b.Property<Guid>("AccountTransactionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AccountHoldingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(28,4)");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Cusip")
+                        .HasMaxLength(9)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("Fees")
+                        .HasColumnType("decimal(28,4)");
+
+                    b.Property<DateTimeOffset>("ImportedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Memo")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("Price")
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<decimal?>("Quantity")
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<DateOnly?>("SettlementDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceSystem")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Ticker")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateOnly>("TradeDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AccountTransactionId");
+
+                    b.HasIndex("AccountHoldingId");
+
+                    b.HasIndex("CurrencyCode");
+
+                    b.HasIndex("Ticker");
+
+                    b.HasIndex("AccountId", "TradeDate");
+
+                    b.HasIndex("AccountId", "SourceSystem", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("AccountTransaction", (string)null);
                 });
 
             modelBuilder.Entity("Vizfolio.Domain.Portfolios.Portfolio", b =>
@@ -3297,12 +3532,100 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     b.Navigation("ShareClasses");
                 });
 
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Portfolios.Portfolio", null)
+                        .WithMany("Accounts")
+                        .HasForeignKey("PortfolioId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHolding", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Portfolios.Account", null)
+                        .WithMany("Holdings")
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vizfolio.Domain.Reference.AssetCategory", null)
+                        .WithMany()
+                        .HasForeignKey("AssetCategoryCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Reference.AssetClass", null)
+                        .WithMany()
+                        .HasForeignKey("AssetClassCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Reference.Currency", null)
+                        .WithMany()
+                        .HasForeignKey("CurrencyCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Funds.Fund", null)
+                        .WithMany()
+                        .HasForeignKey("FundId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Securities.Security", null)
+                        .WithMany()
+                        .HasForeignKey("SecurityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountHoldingSnapshot", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Portfolios.AccountHolding", null)
+                        .WithMany()
+                        .HasForeignKey("AccountHoldingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vizfolio.Domain.Reference.Currency", null)
+                        .WithMany()
+                        .HasForeignKey("CurrencyCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.AccountTransaction", b =>
+                {
+                    b.HasOne("Vizfolio.Domain.Portfolios.AccountHolding", null)
+                        .WithMany()
+                        .HasForeignKey("AccountHoldingId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vizfolio.Domain.Portfolios.Account", null)
+                        .WithMany("Transactions")
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vizfolio.Domain.Reference.Currency", null)
+                        .WithMany()
+                        .HasForeignKey("CurrencyCode")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Vizfolio.Domain.Securities.Security", b =>
                 {
                     b.HasOne("Vizfolio.Domain.Reference.Country", null)
                         .WithMany()
                         .HasForeignKey("CountryCode")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Account", b =>
+                {
+                    b.Navigation("Holdings");
+
+                    b.Navigation("Transactions");
+                });
+
+            modelBuilder.Entity("Vizfolio.Domain.Portfolios.Portfolio", b =>
+                {
+                    b.Navigation("Accounts");
                 });
 #pragma warning restore 612, 618
         }

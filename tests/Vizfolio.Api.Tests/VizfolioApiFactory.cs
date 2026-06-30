@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Vizfolio.Api.Tests.Extracts.Fakes;
 using Vizfolio.Application.Extracts.Abstractions;
+using Vizfolio.Infrastructure.Persistence;
 
 namespace Vizfolio.Api.Tests;
 
@@ -38,6 +40,10 @@ public sealed class VizfolioApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            services.RemoveAll<DbContextOptions<AppDbContext>>();
+            services.RemoveAll<DbContextOptions>();
+            services.AddDbContext<AppDbContext>(options => options.UseSqlite(_connectionString));
+
             services.RemoveAll<ISecuritiesExtractSource>();
             services.RemoveAll<IFundsExtractSource>();
             services.AddSingleton<ISecuritiesExtractSource>(SecuritiesSource);

@@ -15,7 +15,15 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<Portfolio> Portfolios => Set<Portfolio>();
 
+    public DbSet<Account> Accounts => Set<Account>();
+
+    public DbSet<AccountTransaction> AccountTransactions => Set<AccountTransaction>();
+
     public DbSet<Security> Securities => Set<Security>();
+
+    public DbSet<AccountHolding> AccountHoldings => Set<AccountHolding>();
+
+    public DbSet<AccountHoldingSnapshot> AccountHoldingSnapshots => Set<AccountHoldingSnapshot>();
 
     public DbSet<Fund> Funds => Set<Fund>();
 
