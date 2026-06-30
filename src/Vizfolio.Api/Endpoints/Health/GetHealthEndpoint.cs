@@ -10,7 +10,15 @@ public sealed class GetHealthEndpoint : EndpointWithoutRequest<HealthResponse>
     {
         Get("/health");
         AllowAnonymous();
-        Description(b => b.WithTags("Diagnostics"));
+        Description(b => b
+            .WithTags("Diagnostics")
+            .Produces<HealthResponse>(StatusCodes.Status200OK));
+        Summary(s =>
+        {
+            s.Summary = "Liveness probe for the Vizfolio API.";
+            s.Description = "Returns a constant `Healthy` status plus the server's current UTC timestamp. Intended for load-balancer / orchestrator probes.";
+            s.Responses[StatusCodes.Status200OK] = "Service is up.";
+        });
     }
 
     public override Task HandleAsync(CancellationToken ct)

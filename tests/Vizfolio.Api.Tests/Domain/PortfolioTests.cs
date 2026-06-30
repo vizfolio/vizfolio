@@ -12,7 +12,7 @@ public sealed class PortfolioTests
 
         var portfolio = new Portfolio("Retirement");
 
-        portfolio.Id.ShouldNotBe(Guid.Empty);
+        portfolio.PortfolioId.ShouldNotBe(Guid.Empty);
         portfolio.Name.ShouldBe("Retirement");
         portfolio.CreatedAt.ShouldBeGreaterThanOrEqualTo(before);
     }
