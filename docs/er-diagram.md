@@ -176,6 +176,17 @@ There is intentionally **no DB-level uniqueness** on `(AccountId, SecurityId)` o
 
 **CitSubstitution** is standalone — it maps user-entered Collective Investment Trust names to substitute tickers via the `Patterns` JSON array. It doesn't FK anywhere; lookups are by name pattern matching.
 
+## Performance analytics
+
+The `GET /portfolios/{id}/performance` and `GET /portfolios/{id}/accounts/{accountId}/performance` endpoints derive performance metrics directly from this data model — no aggregate or balance tables are added. Computation lives in `Vizfolio.Application.Performance.PerformanceCalculator`:
+
+- **Balance at date D** = (Σ `AccountHoldingSnapshot.MarketValue` for the latest snapshot ≤ D on each non-cash holding) + (Σ signed `AccountTransaction.Amount` ≤ D across the scope). Cash is intentionally not snapshotted in most accounts — the ledger sum is its source of truth. Holdings without any snapshot ≤ D contribute zero (a known limitation when valuations are missing).
+- **Cash flows** in `[from, to]` = `Deposit` + `Withdrawal` + `Transfer` rows. For *portfolio* scope, transfer pairs that net to zero on the same date are treated as intra-portfolio movements and excluded (heuristic — there is no `CounterpartyAccountId` FK yet). For *account* scope, all transfers count.
+- **Rate of return** is computed four ways in parallel from the same `(begin, end, flows)` inputs: Simple, Modified Dietz, Time-Weighted (sub-period chain broken at each flow date, with carry-forward valuation), and IRR (Newton's method, returns null when not solvable). Clients pick which to display.
+- **Series buckets** align to calendar boundaries (Monthly = month-end, Quarterly = quarter-end, Yearly = Dec 31, Weekly = 7-day windows from `from`, Daily = each day).
+
+The rollup pattern documented earlier — "latest snapshot ≤ asOf, then replay transactions after it" — is exactly what the balance helper does, except it uses snapshot `MarketValue` directly instead of replaying share-quantity changes (the snapshot is treated as authoritative for any holding it covers).
+
 ## Quick references
 
 | Topic                                            | Source                                                                  |

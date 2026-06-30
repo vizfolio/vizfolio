@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Vizfolio.Application.Extracts.Abstractions;
 using Vizfolio.Application.Extracts.Importers;
+using Vizfolio.Application.Performance;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
@@ -19,6 +20,8 @@ public static class DependencyInjection
         services.AddScoped<IPortfolioFileParser, CsvFileParser>();
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
+
+        services.AddScoped<IPerformanceCalculator, PerformanceCalculator>();
         return services;
     }
 }
