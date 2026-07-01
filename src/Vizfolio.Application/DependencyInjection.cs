@@ -4,6 +4,7 @@ using Vizfolio.Application.Extracts.Importers;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
+using Vizfolio.Application.Portfolios;
 
 namespace Vizfolio.Application;
 
@@ -19,6 +20,7 @@ public static class DependencyInjection
         services.AddScoped<IPortfolioFileParser, CsvFileParser>();
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
+        services.AddScoped<IPortfolioPerformanceService, PortfolioPerformanceService>();
         return services;
     }
 }

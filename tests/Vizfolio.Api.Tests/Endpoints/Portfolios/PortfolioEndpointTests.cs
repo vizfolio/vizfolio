@@ -1,9 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Vizfolio.Api.Endpoints.Portfolios;
 using Vizfolio.Application.PortfolioImports.Models;
+using Vizfolio.Domain.Securities;
+using Vizfolio.Infrastructure.Persistence;
 
 namespace Vizfolio.Api.Tests.Endpoints.Portfolios;
 
@@ -13,6 +17,48 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         "Date,Type,Ticker,Quantity,Price,Amount,Fees,Currency,Memo,ExternalId\n" +
         "2026-06-01,Buy,VOO,2,500,-1000.00,0,USD,Buy VOO,ext-1\n" +
         "2026-06-02,Dividend,VOO,,,5.25,,USD,Q2 div,ext-2\n";
+
+    private const string SingleAccountQfxWithPositions = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>PERF-1</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20250601</DTSTART><DTEND>20260601</DTEND>
+        <BUYSTOCK>
+          <INVBUY>
+            <INVTRAN><FITID>PERF-BUY-1</FITID><DTTRADE>20251015</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>10</UNITS><UNITPRICE>500.00</UNITPRICE><TOTAL>-5000.00</TOTAL>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVBUY>
+          <BUYTYPE>BUY</BUYTYPE>
+        </BUYSTOCK>
+      </INVTRANLIST>
+      <INVPOSLIST>
+        <POSSTOCK>
+          <INVPOS>
+            <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>10</UNITS><UNITPRICE>525.50</UNITPRICE><MKTVAL>5255.00</MKTVAL><COSTBASIS>5000.00</COSTBASIS>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVPOS>
+        </POSSTOCK>
+        <POSSTOCK>
+          <INVPOS>
+            <SECID><UNIQUEID>AAPL</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <UNITS>5</UNITS><UNITPRICE>200.00</UNITPRICE><MKTVAL>1000.00</MKTVAL>
+            <CURRENCY><CURSYM>USD</CURSYM><CURRATE>1</CURRATE></CURRENCY>
+          </INVPOS>
+        </POSSTOCK>
+      </INVPOSLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
 
     private const string TwoAccountQfx = """
 <?xml version="1.0" encoding="UTF-8"?>
@@ -60,9 +106,11 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
 """;
 
     private readonly HttpClient _client;
+    private readonly VizfolioApiFactory _factory;
 
     public PortfolioEndpointTests(VizfolioApiFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -197,6 +245,126 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var response = await UploadPortfolioFileAsync(Guid.NewGuid(), "multi.qfx", TwoAccountQfx);
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GET_portfolio_performance_returns_ending_balance_from_snapshots_after_import()
+    {
+        await EnsurePerfSecuritiesAsync();
+        var portfolio = await CreatePortfolioAsync();
+
+        var import = await UploadPortfolioFileAsync(portfolio.PortfolioId, "perf.qfx", SingleAccountQfxWithPositions);
+        import.EnsureSuccessStatusCode();
+
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/performance?from=2025-06-01&to=2026-06-01");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
+        body.ShouldNotBeNull();
+        body.From.ShouldBe(new DateOnly(2025, 6, 1));
+        body.To.ShouldBe(new DateOnly(2026, 6, 1));
+        body.CurrencyCode.ShouldBe("USD");
+        body.EndingBalance.Value.ShouldBe(6255.00m); // 5255 (VOO) + 1000 (AAPL)
+        body.EndingBalance.IsComplete.ShouldBeTrue();
+        body.EndingBalance.SnapshotAsOf.ShouldBe(new DateOnly(2026, 6, 1));
+        body.EndingBalance.HoldingsCovered.ShouldBe(2);
+        body.EndingBalance.HoldingsMissingSnapshot.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task GET_portfolio_performance_partial_history_scenario_starts_at_zero_and_incomplete()
+    {
+        await EnsurePerfSecuritiesAsync();
+        var portfolio = await CreatePortfolioAsync();
+
+        var import = await UploadPortfolioFileAsync(portfolio.PortfolioId, "perf.qfx", SingleAccountQfxWithPositions);
+        import.EnsureSuccessStatusCode();
+
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/performance?from=2025-06-01&to=2026-06-01");
+
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
+        body!.StartingBalance.Value.ShouldBe(0m);
+        body.StartingBalance.IsComplete.ShouldBeFalse();
+        body.StartingBalance.SnapshotAsOf.ShouldBeNull();
+        body.StartingBalance.HoldingsMissingSnapshot.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task GET_account_performance_scopes_to_a_single_account()
+    {
+        await EnsurePerfSecuritiesAsync();
+        var portfolio = await CreatePortfolioAsync();
+
+        var import = await UploadPortfolioFileAsync(portfolio.PortfolioId, "perf.qfx", SingleAccountQfxWithPositions);
+        import.EnsureSuccessStatusCode();
+        var importBody = await import.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        var accountId = importBody!.Accounts[0].AccountId;
+
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance?from=2025-06-01&to=2026-06-01");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
+        body!.EndingBalance.Value.ShouldBe(6255.00m);
+    }
+
+    [Fact]
+    public async Task GET_portfolio_performance_unknown_portfolio_returns_404()
+    {
+        var response = await _client.GetAsync($"/portfolios/{Guid.NewGuid()}/performance");
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GET_account_performance_unknown_account_returns_404()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/performance");
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GET_account_performance_account_in_different_portfolio_returns_404()
+    {
+        var owningPortfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(owningPortfolio.PortfolioId, accountNumber: "PERF-X");
+        var otherPortfolio = await CreatePortfolioAsync();
+
+        var response = await _client.GetAsync(
+            $"/portfolios/{otherPortfolio.PortfolioId}/accounts/{account.AccountId}/performance");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GET_portfolio_performance_with_from_after_to_returns_400()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/performance?from=2026-06-01&to=2026-01-01");
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    private async Task EnsurePerfSecuritiesAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await UpsertSecurityAsync(db, cik: "0000102909", ticker: "VOO");
+        await UpsertSecurityAsync(db, cik: "0000320193", ticker: "AAPL");
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task UpsertSecurityAsync(AppDbContext db, string cik, string ticker)
+    {
+        var exists = await db.Securities.AnyAsync(s => s.Cik == cik);
+        if (exists) return;
+        var security = new Security(cik, DateTimeOffset.UtcNow);
+        security.SetTickers(new[] { ticker });
+        db.Securities.Add(security);
     }
 
     private async Task<PortfolioResponse> CreatePortfolioAsync()
