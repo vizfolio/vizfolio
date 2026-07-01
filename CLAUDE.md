@@ -14,3 +14,4 @@ This is a dotnet project for Vizfolio, an open source investment tracker
 
 - **Fund Data**: Read `@docs/fund-data.md` when dealing with fund data
 - **Security Data**: Read `@docs/security-data.md` when dealing with security data
+- **Performance API**: Read `@docs/performance-api.md` when touching the performance endpoints, calculator strategies, or QFX ingestion of contributions/snapshots. Keep this document up to date when changes are made.
