@@ -531,6 +531,65 @@ NEWFILEUID:NONE
         parsed.Statements[0].AsOf.ShouldBe(new DateOnly(2026, 6, 1));
     }
 
+    [Fact]
+    public async Task ParseAsync_extracts_INVBANKTRAN_as_cash_deposit_and_withdrawal()
+    {
+        const string invBankTranQfx = """
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>fidelity.com</BROKERID><ACCTID>X1234</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20260101</DTSTART><DTEND>20260601</DTEND>
+        <INVBANKTRAN>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20260315</DTPOSTED>
+            <TRNAMT>5000.00</TRNAMT>
+            <FITID>DEP-20260315</FITID>
+            <NAME>ACH DEPOSIT</NAME>
+            <MEMO>Contribution</MEMO>
+          </STMTTRN>
+          <SUBACCTFUND>CASH</SUBACCTFUND>
+        </INVBANKTRAN>
+        <INVBANKTRAN>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20260420</DTPOSTED>
+            <TRNAMT>-1000.00</TRNAMT>
+            <FITID>WD-20260420</FITID>
+            <MEMO>Rebalance withdrawal</MEMO>
+          </STMTTRN>
+          <SUBACCTFUND>CASH</SUBACCTFUND>
+        </INVBANKTRAN>
+      </INVTRANLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+        await using var stream = StringStream(invBankTranQfx);
+
+        var parsed = await parser.ParseAsync(stream, "invbanktran.qfx", CancellationToken.None);
+
+        var txs = parsed.Statements.Single().Transactions;
+        txs.Count.ShouldBe(2);
+
+        var deposit = txs.Single(t => t.ExternalId == "DEP-20260315");
+        deposit.Type.ShouldBe(TransactionType.Deposit);
+        deposit.Amount.ShouldBe(5000.00m);
+        deposit.TradeDate.ShouldBe(new DateOnly(2026, 3, 15));
+
+        var withdrawal = txs.Single(t => t.ExternalId == "WD-20260420");
+        withdrawal.Type.ShouldBe(TransactionType.Withdrawal);
+        withdrawal.Amount.ShouldBe(-1000.00m);
+        withdrawal.TradeDate.ShouldBe(new DateOnly(2026, 4, 20));
+    }
+
     private static MemoryStream StringStream(string content) =>
         new(Encoding.UTF8.GetBytes(content));
 }

@@ -29,6 +29,16 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
       <INVACCTFROM><BROKERID>vanguard.com</BROKERID><ACCTID>PERF-1</ACCTID></INVACCTFROM>
       <INVTRANLIST>
         <DTSTART>20250601</DTSTART><DTEND>20260601</DTEND>
+        <INVBANKTRAN>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20251001</DTPOSTED>
+            <TRNAMT>7500.00</TRNAMT>
+            <FITID>PERF-DEP-1</FITID>
+            <MEMO>ACH deposit</MEMO>
+          </STMTTRN>
+          <SUBACCTFUND>CASH</SUBACCTFUND>
+        </INVBANKTRAN>
         <BUYSTOCK>
           <INVBUY>
             <INVTRAN><FITID>PERF-BUY-1</FITID><DTTRADE>20251015</DTTRADE></INVTRAN>
@@ -290,6 +300,20 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         body.StartingBalance.IsComplete.ShouldBeFalse();
         body.StartingBalance.SnapshotAsOf.ShouldBeNull();
         body.StartingBalance.HoldingsMissingSnapshot.ShouldBeGreaterThan(0);
+
+        // Both returns should be null with reason IncompleteStartingBalance in this scenario.
+        body.Returns.TimeWeighted.Rate.ShouldBeNull();
+        body.Returns.TimeWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+        body.Returns.TimeWeighted.Method.ShouldBe("ModifiedDietz");
+        body.Returns.MoneyWeighted.Rate.ShouldBeNull();
+        body.Returns.MoneyWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+        body.Returns.MoneyWeighted.Method.ShouldBe("XIRR");
+
+        // The QFX includes a $7500 ACH deposit wrapped in <INVBANKTRAN> — must surface as a Deposit contribution.
+        body.Contributions.Net.ShouldBe(7500m);
+        body.Contributions.Deposits.ShouldBe(7500m);
+        body.Contributions.Withdrawals.ShouldBe(0m);
+        body.Contributions.Count.ShouldBe(1);
     }
 
     [Fact]

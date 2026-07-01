@@ -21,7 +21,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedSnapshotAsync(ctx, h1, To, marketValue: 1000m);
         await SeedSnapshotAsync(ctx, h2, To, marketValue: 500m);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -41,7 +41,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -500m);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 900m);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -64,7 +64,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedSnapshotAsync(ctx, h1, To, marketValue: 700m);
         await SeedSnapshotAsync(ctx, h2, To, marketValue: 300m);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForPortfolioAsync(portfolioId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -82,7 +82,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 12, 31), marketValue: 900m); // <= To
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2026, 2, 1), marketValue: 1200m); // > To, ignored
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -98,7 +98,7 @@ public sealed class PortfolioPerformanceServiceTests
         var holding = await SeedHoldingAsync(ctx, accountId);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: null);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -118,7 +118,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedSnapshotAsync(ctx, active, To, marketValue: 1000m);
         // dormant holding has no snapshot and no transactions in range — should be excluded entirely.
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -138,7 +138,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -100m);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 150m);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -156,7 +156,7 @@ public sealed class PortfolioPerformanceServiceTests
         var holding = await SeedHoldingAsync(ctx, accountId);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 100m);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(
             portfolioId, accountId, new DateOnly(2026, 6, 1), new DateOnly(2026, 1, 1), CancellationToken.None);
 
@@ -167,7 +167,7 @@ public sealed class PortfolioPerformanceServiceTests
     public async Task Unknown_portfolio_returns_null()
     {
         await using var ctx = await TestDbContext.CreateAsync();
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
 
         var result = await service.ComputeForPortfolioAsync(Guid.NewGuid(), From, To, CancellationToken.None);
 
@@ -181,7 +181,7 @@ public sealed class PortfolioPerformanceServiceTests
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var otherPortfolioId = await SeedPortfolioAsync(ctx, name: "Other");
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(otherPortfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldBeNull();
@@ -193,7 +193,7 @@ public sealed class PortfolioPerformanceServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, _) = await SeedPortfolioWithAccountAsync(ctx);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForPortfolioAsync(portfolioId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -212,7 +212,7 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedSnapshotAsync(ctx, h2, To, marketValue: 100m, currency: "USD");
         await SeedSnapshotAsync(ctx, h3, To, marketValue: 100m, currency: "EUR");
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -230,7 +230,7 @@ public sealed class PortfolioPerformanceServiceTests
         var beforeSnapshots = await ctx.Db.AccountHoldingSnapshots.CountAsync();
         var beforeHoldings = await ctx.Db.AccountHoldings.CountAsync();
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         _ = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
         _ = await service.ComputeForPortfolioAsync(portfolioId, From, To, CancellationToken.None);
 
@@ -250,12 +250,155 @@ public sealed class PortfolioPerformanceServiceTests
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 9, 1), TransactionType.Buy, amount: -100m);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 300m);
 
-        var service = new PortfolioPerformanceService(ctx.Db);
+        var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
 
         result.ShouldNotBeNull();
         result.From.ShouldBe(earliestTrade);
     }
+
+    [Fact]
+    public async Task Contributions_include_deposits_withdrawals_transfers_in_range()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 3, 1), TransactionType.Deposit, amount: 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 7, 1), TransactionType.Withdrawal, amount: -200m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 9, 1), TransactionType.Transfer, amount: 50m);
+        // Not contributions:
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 4, 1), TransactionType.Buy, amount: -500m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 5, 1), TransactionType.Dividend, amount: 25m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Reinvest, amount: 25m);
+
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 900m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Contributions.Net.ShouldBe(850m);       // 1000 - 200 + 50
+        result.Contributions.Deposits.ShouldBe(1050m); // 1000 + 50 (positive Transfer)
+        result.Contributions.Withdrawals.ShouldBe(-200m);
+        result.Contributions.Count.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Contributions_are_zero_when_no_flows_in_range()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1000m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Contributions.Net.ShouldBe(0m);
+        result.Contributions.Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Returns_are_null_with_reason_when_starting_balance_is_incomplete()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -500m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 900m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Returns.TimeWeighted.Rate.ShouldBeNull();
+        result.Returns.TimeWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+        result.Returns.MoneyWeighted.Rate.ShouldBeNull();
+        result.Returns.MoneyWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+    }
+
+    [Fact]
+    public async Task Returns_are_computed_when_starting_and_ending_snapshots_both_exist()
+    {
+        // Opening snapshot at From ($1000), ending snapshot at To ($1100), no cash flows.
+        // Modified Dietz: R = 100 / 1000 = 10% period.
+        // XIRR: 10% annualized (365-day period).
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+        await SeedSnapshotAsync(ctx, holding, From, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1100m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.IsComplete.ShouldBeTrue();
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+
+        result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        Math.Abs(result.Returns.TimeWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.0001m);
+        result.Returns.TimeWeighted.Method.ShouldBe("ModifiedDietz");
+        result.Returns.TimeWeighted.Basis.ShouldBe("Period");
+
+        result.Returns.MoneyWeighted.Rate.ShouldNotBeNull();
+        Math.Abs(result.Returns.MoneyWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.001m);
+        result.Returns.MoneyWeighted.Method.ShouldBe("XIRR");
+        result.Returns.MoneyWeighted.Basis.ShouldBe("Annualized");
+    }
+
+    [Fact]
+    public async Task Chained_TWRR_returns_null_reason_when_only_boundary_snapshots_exist()
+    {
+        // Same setup as above, but swap in the Chained calculator directly to verify
+        // it reports InsufficientIntermediateSnapshots for the boundary-only case.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+        await SeedSnapshotAsync(ctx, holding, From, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1100m);
+
+        var service = new PortfolioPerformanceService(
+            ctx.Db,
+            new ChainedSubPeriodTimeWeightedReturnCalculator(),
+            new XirrMoneyWeightedReturnCalculator());
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Returns.TimeWeighted.Method.ShouldBe("ChainedSubPeriods");
+        result.Returns.TimeWeighted.Rate.ShouldBeNull();
+        result.Returns.TimeWeighted.Reason.ShouldBe("InsufficientIntermediateSnapshots");
+    }
+
+    [Fact]
+    public async Task Chained_TWRR_uses_interior_snapshots_when_they_exist()
+    {
+        // Boundary at From ($1000), interior at day 180 ($1100), boundary at To ($1300).
+        // sub1 = 1.10, sub2 = 1300/1100. Total = 1.30 - 1 = 0.30.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+        await SeedSnapshotAsync(ctx, holding, From, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedSnapshotAsync(ctx, holding, From.AddDays(180), marketValue: 1100m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1300m);
+
+        var service = new PortfolioPerformanceService(
+            ctx.Db,
+            new ChainedSubPeriodTimeWeightedReturnCalculator(),
+            new XirrMoneyWeightedReturnCalculator());
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        Math.Abs(result.Returns.TimeWeighted.Rate!.Value - 0.30m).ShouldBeLessThan(0.0001m);
+    }
+
+    private static PortfolioPerformanceService NewService(TestDbContext ctx) =>
+        new(ctx.Db,
+            new ModifiedDietzTimeWeightedReturnCalculator(),
+            new XirrMoneyWeightedReturnCalculator());
 
     // ---------- seeding helpers ----------
 

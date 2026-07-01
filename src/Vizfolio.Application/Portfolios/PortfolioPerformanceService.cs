@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Domain.Portfolios;
 
 namespace Vizfolio.Application.Portfolios;
 
@@ -7,11 +8,25 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 {
     private const string DefaultCurrencyCode = "USD";
 
-    private readonly IAppDbContext _db;
+    private static readonly TransactionType[] ContributionTypes =
+    {
+        TransactionType.Deposit,
+        TransactionType.Withdrawal,
+        TransactionType.Transfer,
+    };
 
-    public PortfolioPerformanceService(IAppDbContext db)
+    private readonly IAppDbContext _db;
+    private readonly ITimeWeightedReturnCalculator _twrCalculator;
+    private readonly IMoneyWeightedReturnCalculator _mwrCalculator;
+
+    public PortfolioPerformanceService(
+        IAppDbContext db,
+        ITimeWeightedReturnCalculator twrCalculator,
+        IMoneyWeightedReturnCalculator mwrCalculator)
     {
         _db = db;
+        _twrCalculator = twrCalculator;
+        _mwrCalculator = mwrCalculator;
     }
 
     public async Task<PortfolioPerformanceResult?> ComputeForPortfolioAsync(
@@ -98,6 +113,15 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        var contributionRows = await _db.AccountTransactions
+            .AsNoTracking()
+            .Where(t => accountIds.Contains(t.AccountId)
+                        && ContributionTypes.Contains(t.Type)
+                        && t.TradeDate >= from
+                        && t.TradeDate <= to)
+            .Select(t => new { t.TradeDate, t.Amount, t.Type })
+            .ToListAsync(cancellationToken);
+
         var snapshotsByHolding = snapshots
             .GroupBy(s => s.AccountHoldingId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.AsOf).ToList());
@@ -110,7 +134,29 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var ending = ComputeBalance(relevantHoldings, snapshotsByHolding, to);
         var starting = ComputeBalance(relevantHoldings, snapshotsByHolding, from);
 
-        return new PortfolioPerformanceResult(from, to, starting, ending, currency);
+        var contributions = SummarizeContributions(contributionRows.Select(r => new CashFlow(r.TradeDate, r.Amount)).ToList());
+        var cashFlows = contributionRows
+            .Select(r => new CashFlow(r.TradeDate, r.Amount))
+            .OrderBy(f => f.Date)
+            .ToList();
+
+        var intermediateBalances = BuildIntermediateBalances(relevantHoldings, snapshotsByHolding, from, to);
+
+        var context = new PerformanceComputationContext(
+            From: from,
+            To: to,
+            StartingBalance: starting.Value,
+            StartingIsComplete: starting.IsComplete,
+            EndingBalance: ending.Value,
+            EndingIsComplete: ending.IsComplete,
+            CashFlows: cashFlows,
+            IntermediateBalances: intermediateBalances);
+
+        var returns = new PerformanceReturnsResult(
+            TimeWeighted: _twrCalculator.Compute(context),
+            MoneyWeighted: _mwrCalculator.Compute(context));
+
+        return new PortfolioPerformanceResult(from, to, starting, ending, contributions, returns, currency);
     }
 
     private async Task<DateOnly> ResolveDefaultFromAsync(
@@ -173,6 +219,42 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         return new PerformanceBalanceResult(sum, missing == 0, maxAsOf, covered, missing);
     }
 
+    private static List<BalancePoint> BuildIntermediateBalances(
+        HashSet<Guid> relevantHoldings,
+        Dictionary<Guid, List<SnapshotProjection>> snapshotsByHolding,
+        DateOnly from,
+        DateOnly to)
+    {
+        var interiorDates = snapshotsByHolding.Values
+            .SelectMany(list => list)
+            .Where(s => s.AsOf > from && s.AsOf < to)
+            .Select(s => s.AsOf)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
+
+        var points = new List<BalancePoint>();
+        foreach (var date in interiorDates)
+        {
+            var balance = ComputeBalance(relevantHoldings, snapshotsByHolding, date);
+            if (balance.IsComplete && balance.HoldingsCovered > 0)
+                points.Add(new BalancePoint(date, balance.Value));
+        }
+        return points;
+    }
+
+    private static PerformanceContributionsResult SummarizeContributions(IReadOnlyList<CashFlow> flows)
+    {
+        decimal net = 0m, deposits = 0m, withdrawals = 0m;
+        foreach (var f in flows)
+        {
+            net += f.Amount;
+            if (f.Amount > 0) deposits += f.Amount;
+            else if (f.Amount < 0) withdrawals += f.Amount;
+        }
+        return new PerformanceContributionsResult(net, deposits, withdrawals, flows.Count);
+    }
+
     private static string ResolveReportingCurrency(IReadOnlyCollection<SnapshotProjection> snapshots)
     {
         if (snapshots.Count == 0) return DefaultCurrencyCode;
@@ -191,7 +273,11 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
     private static PortfolioPerformanceResult Empty(DateOnly from, DateOnly to)
     {
         var zero = new PerformanceBalanceResult(0m, true, null, 0, 0);
-        return new PortfolioPerformanceResult(from, to, zero, zero, DefaultCurrencyCode);
+        var noContrib = new PerformanceContributionsResult(0m, 0m, 0m, 0);
+        var noReturns = new PerformanceReturnsResult(
+            TimeWeighted: new ReturnResult(null, "ModifiedDietz", "Period", "NoData"),
+            MoneyWeighted: new ReturnResult(null, "XIRR", "Annualized", "NoData"));
+        return new PortfolioPerformanceResult(from, to, zero, zero, noContrib, noReturns, DefaultCurrencyCode);
     }
 
     private sealed record SnapshotProjection(

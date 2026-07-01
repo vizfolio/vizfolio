@@ -21,6 +21,12 @@ public static class DependencyInjection
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
         services.AddScoped<IPortfolioPerformanceService, PortfolioPerformanceService>();
+
+        // Return-metric strategies. Swap the TWRR line to
+        // ChainedSubPeriodTimeWeightedReturnCalculator to opt into the strict GIPS-style
+        // calculator (returns null until multiple snapshots exist across the period).
+        services.AddScoped<ITimeWeightedReturnCalculator, ModifiedDietzTimeWeightedReturnCalculator>();
+        services.AddScoped<IMoneyWeightedReturnCalculator, XirrMoneyWeightedReturnCalculator>();
         return services;
     }
 }

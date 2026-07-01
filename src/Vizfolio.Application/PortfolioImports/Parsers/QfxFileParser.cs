@@ -132,6 +132,9 @@ public sealed class QfxFileParser : IPortfolioFileParser
                 "INCOME" => InvIncome(node, securityList),
                 "REINVEST" => InvReinvest(node, securityList),
                 "TRANSFER" => InvTransfer(node, securityList),
+                // Cash movement into or out of the brokerage cash sweep — OFX wraps a <STMTTRN>
+                // inside <INVBANKTRAN>. Same TRNTYPE / TRNAMT semantics as a bank statement row.
+                "INVBANKTRAN" => TryReadStatementTransaction(node.SelectSingleNode(".//STMTTRN")),
                 _ => null,
             };
             if (tx is not null) transactions.Add(tx);
@@ -180,37 +183,45 @@ public sealed class QfxFileParser : IPortfolioFileParser
             if (node.NodeType != XmlNodeType.Element) continue;
             if (!node.Name.Equals("STMTTRN", StringComparison.OrdinalIgnoreCase)) continue;
 
-            var fitId = SelectText(node, "FITID") ?? string.Empty;
-            var trnType = SelectText(node, "TRNTYPE")?.ToUpperInvariant();
-            var dtPosted = ParseDateOnly(SelectText(node, "DTPOSTED"));
-            var amount = ParseDecimal(SelectText(node, "TRNAMT")) ?? 0m;
-            var memo = SelectText(node, "MEMO");
-
-            var type = trnType switch
-            {
-                "CREDIT" or "DEP" or "DIRECTDEP" => TransactionType.Deposit,
-                "DEBIT" or "DIRECTDEBIT" or "PAYMENT" => TransactionType.Withdrawal,
-                "INT" => TransactionType.Interest,
-                "DIV" => TransactionType.Dividend,
-                "FEE" or "SRVCHG" => TransactionType.Fee,
-                "XFER" => TransactionType.Transfer,
-                _ => amount >= 0 ? TransactionType.Deposit : TransactionType.Withdrawal,
-            };
-
-            transactions.Add(new ParsedTransaction(
-                ExternalId: fitId,
-                Type: type,
-                TradeDate: dtPosted,
-                SettlementDate: null,
-                Ticker: null,
-                Cusip: null,
-                Quantity: null,
-                Price: null,
-                Amount: amount,
-                Fees: null,
-                CurrencyCode: null,
-                Memo: memo));
+            var parsed = TryReadStatementTransaction(node);
+            if (parsed is not null) transactions.Add(parsed);
         }
+    }
+
+    private static ParsedTransaction? TryReadStatementTransaction(XmlNode? stmtTrn)
+    {
+        if (stmtTrn is null) return null;
+
+        var fitId = SelectText(stmtTrn, "FITID") ?? string.Empty;
+        var trnType = SelectText(stmtTrn, "TRNTYPE")?.ToUpperInvariant();
+        var dtPosted = ParseDateOnly(SelectText(stmtTrn, "DTPOSTED"));
+        var amount = ParseDecimal(SelectText(stmtTrn, "TRNAMT")) ?? 0m;
+        var memo = SelectText(stmtTrn, "MEMO");
+
+        var type = trnType switch
+        {
+            "CREDIT" or "DEP" or "DIRECTDEP" => TransactionType.Deposit,
+            "DEBIT" or "DIRECTDEBIT" or "PAYMENT" => TransactionType.Withdrawal,
+            "INT" => TransactionType.Interest,
+            "DIV" => TransactionType.Dividend,
+            "FEE" or "SRVCHG" => TransactionType.Fee,
+            "XFER" => TransactionType.Transfer,
+            _ => amount >= 0 ? TransactionType.Deposit : TransactionType.Withdrawal,
+        };
+
+        return new ParsedTransaction(
+            ExternalId: fitId,
+            Type: type,
+            TradeDate: dtPosted,
+            SettlementDate: null,
+            Ticker: null,
+            Cusip: null,
+            Quantity: null,
+            Price: null,
+            Amount: amount,
+            Fees: null,
+            CurrencyCode: null,
+            Memo: memo);
     }
 
     private static ParsedTransaction InvBuySell(

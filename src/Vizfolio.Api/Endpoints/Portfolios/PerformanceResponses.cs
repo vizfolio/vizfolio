@@ -5,6 +5,8 @@ public sealed record PortfolioPerformanceResponse(
     DateOnly To,
     PerformanceBalance StartingBalance,
     PerformanceBalance EndingBalance,
+    PerformanceContributions Contributions,
+    PerformanceReturns Returns,
     string CurrencyCode);
 
 public sealed record PerformanceBalance(
@@ -13,3 +15,19 @@ public sealed record PerformanceBalance(
     DateOnly? SnapshotAsOf,
     int HoldingsCovered,
     int HoldingsMissingSnapshot);
+
+public sealed record PerformanceContributions(
+    decimal Net,
+    decimal Deposits,
+    decimal Withdrawals,
+    int Count);
+
+public sealed record PerformanceReturns(
+    PerformanceReturn TimeWeighted,
+    PerformanceReturn MoneyWeighted);
+
+public sealed record PerformanceReturn(
+    decimal? Rate,
+    string Method,
+    string Basis,
+    string? Reason);
