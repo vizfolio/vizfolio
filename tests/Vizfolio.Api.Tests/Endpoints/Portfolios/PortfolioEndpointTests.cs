@@ -373,6 +373,152 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
+    [Fact]
+    public async Task GET_history_coverage_flags_gap_after_import_without_opening_balance()
+    {
+        await EnsurePerfSecuritiesAsync();
+        var portfolio = await CreatePortfolioAsync();
+        var import = await UploadPortfolioFileAsync(portfolio.PortfolioId, "perf.qfx", SingleAccountQfxWithPositions);
+        import.EnsureSuccessStatusCode();
+        var accountId = (await import.Content.ReadFromJsonAsync<PortfolioImportResult>())!.Accounts[0].AccountId;
+
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<HistoryCoverageResponse>();
+        body.ShouldNotBeNull();
+        body.HasHistoryGap.ShouldBeTrue();
+        body.FirstTransactionDate.ShouldNotBeNull();
+        body.EarliestSnapshotDate.ShouldBe(new DateOnly(2026, 6, 1));
+        body.SuggestedOpeningDate.ShouldBe(body.FirstTransactionDate!.Value.AddDays(-1));
+        body.OpeningBalanceSnapshotCount.ShouldBe(0);
+        body.BrokerPositionSnapshotCount.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task GET_history_coverage_unknown_account_returns_404()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var response = await _client.GetAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/history-coverage");
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task POST_opening_balance_closes_the_gap_and_unlocks_returns()
+    {
+        await EnsurePerfSecuritiesAsync();
+        var portfolio = await CreatePortfolioAsync();
+        var import = await UploadPortfolioFileAsync(portfolio.PortfolioId, "perf.qfx", SingleAccountQfxWithPositions);
+        import.EnsureSuccessStatusCode();
+        var accountId = (await import.Content.ReadFromJsonAsync<PortfolioImportResult>())!.Accounts[0].AccountId;
+
+        // Snap the suggested opening date from the coverage endpoint, then POST an opening balance
+        // that supplies both holdings so the starting balance becomes complete.
+        var coverageBefore = await _client.GetFromJsonAsync<HistoryCoverageResponse>(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
+        var openingDate = coverageBefore!.SuggestedOpeningDate!.Value;
+
+        var openingRequest = new SetOpeningBalanceRequest(
+            portfolio.PortfolioId,
+            accountId,
+            openingDate,
+            "USD",
+            new List<OpeningBalanceHoldingInput>
+            {
+                new("VOO", Units: 10m, MarketValue: 5000m, UnitPrice: 500m, CostBasis: 4500m, CurrencyCode: null, Cusip: null),
+                new("AAPL", Units: 5m, MarketValue: 900m, UnitPrice: 180m, CostBasis: 800m, CurrencyCode: null, Cusip: null),
+            });
+
+        var setResponse = await _client.PostAsJsonAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
+            openingRequest);
+        setResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var setBody = await setResponse.Content.ReadFromJsonAsync<OpeningBalanceResponse>();
+        setBody!.SnapshotsCreated.ShouldBe(2);
+        setBody.SnapshotsUpdated.ShouldBe(0);
+
+        var coverageAfter = await _client.GetFromJsonAsync<HistoryCoverageResponse>(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
+        coverageAfter!.HasHistoryGap.ShouldBeFalse();
+        coverageAfter.EarliestSnapshotDate.ShouldBe(openingDate);
+        coverageAfter.OpeningBalanceSnapshotCount.ShouldBe(2);
+
+        // Performance is now honest — starting balance is complete, returns should be populated.
+        var perfResponse = await _client.GetFromJsonAsync<PortfolioPerformanceResponse>(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance" +
+            $"?from={openingDate:yyyy-MM-dd}&to=2026-06-01");
+        perfResponse!.StartingBalance.IsComplete.ShouldBeTrue();
+        perfResponse.StartingBalance.Value.ShouldBe(5900m); // 5000 + 900
+        perfResponse.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        perfResponse.Returns.MoneyWeighted.Rate.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task POST_opening_balance_replaces_snapshot_at_same_date_when_called_again()
+    {
+        await EnsurePerfSecuritiesAsync();
+        var portfolio = await CreatePortfolioAsync();
+        var import = await UploadPortfolioFileAsync(portfolio.PortfolioId, "perf.qfx", SingleAccountQfxWithPositions);
+        import.EnsureSuccessStatusCode();
+        var accountId = (await import.Content.ReadFromJsonAsync<PortfolioImportResult>())!.Accounts[0].AccountId;
+
+        var asOf = new DateOnly(2025, 6, 1);
+        var first = await _client.PostAsJsonAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
+            new SetOpeningBalanceRequest(portfolio.PortfolioId, accountId, asOf, "USD",
+                new List<OpeningBalanceHoldingInput>
+                {
+                    new("VOO", Units: 10m, MarketValue: 4000m, UnitPrice: 400m, CostBasis: null, CurrencyCode: null, Cusip: null),
+                }));
+        first.EnsureSuccessStatusCode();
+        (await first.Content.ReadFromJsonAsync<OpeningBalanceResponse>())!.SnapshotsCreated.ShouldBe(1);
+
+        var second = await _client.PostAsJsonAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
+            new SetOpeningBalanceRequest(portfolio.PortfolioId, accountId, asOf, "USD",
+                new List<OpeningBalanceHoldingInput>
+                {
+                    new("VOO", Units: 10m, MarketValue: 5000m, UnitPrice: 500m, CostBasis: null, CurrencyCode: null, Cusip: null),
+                }));
+        second.EnsureSuccessStatusCode();
+        var secondBody = (await second.Content.ReadFromJsonAsync<OpeningBalanceResponse>())!;
+        secondBody.SnapshotsCreated.ShouldBe(0);
+        secondBody.SnapshotsUpdated.ShouldBe(1);
+        secondBody.Holdings.Single().Created.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task POST_opening_balance_empty_holdings_returns_400()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, "OB-1");
+
+        var response = await _client.PostAsJsonAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{account.AccountId}/opening-balance",
+            new SetOpeningBalanceRequest(portfolio.PortfolioId, account.AccountId, new DateOnly(2025, 1, 1), "USD",
+                new List<OpeningBalanceHoldingInput>()));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task POST_opening_balance_unknown_account_returns_404()
+    {
+        var portfolio = await CreatePortfolioAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/opening-balance",
+            new SetOpeningBalanceRequest(portfolio.PortfolioId, Guid.NewGuid(), new DateOnly(2025, 1, 1), "USD",
+                new List<OpeningBalanceHoldingInput>
+                {
+                    new("VOO", 10m, 5000m, 500m, null, null, null),
+                }));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
     private async Task EnsurePerfSecuritiesAsync()
     {
         using var scope = _factory.Services.CreateScope();
