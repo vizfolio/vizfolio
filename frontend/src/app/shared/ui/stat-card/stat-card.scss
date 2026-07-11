@@ -1,0 +1,59 @@
+.stat-card {
+  padding: var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.stat-label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-flag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-negative);
+  background: color-mix(in oklch, var(--color-negative) 12%, transparent);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.stat-value {
+  margin: var(--space-3) 0 0;
+  font-family: var(--font-heading);
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.stat-delta {
+  margin: var(--space-2) 0 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.trend-up {
+  color: var(--color-positive);
+}
+
+.trend-down {
+  color: var(--color-negative);
+}
+
+.trend-neutral {
+  color: var(--color-text-muted);
+}

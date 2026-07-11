@@ -1,0 +1,20 @@
+<nav class="sidebar" aria-label="Primary">
+  <ul class="nav-list">
+    @for (item of navItems; track item.route) {
+      <li>
+        <a
+          class="nav-link"
+          [routerLink]="item.route"
+          routerLinkActive="active"
+          #rla="routerLinkActive"
+          [attr.aria-current]="rla.isActive ? 'page' : null"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path [attr.d]="item.iconPath" fill="currentColor" />
+          </svg>
+          <span>{{ item.label }}</span>
+        </a>
+      </li>
+    }
+  </ul>
+</nav>

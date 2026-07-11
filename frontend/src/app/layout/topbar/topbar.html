@@ -1,0 +1,27 @@
+<header class="topbar">
+  <div class="topbar-left">
+    <button
+      type="button"
+      class="menu-btn"
+      aria-label="Toggle navigation menu"
+      (click)="menuToggle.emit()"
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor">
+        <path d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
+      </svg>
+    </button>
+    <span class="brand">Vizfolio</span>
+  </div>
+
+  <div class="topbar-right">
+    <app-theme-toggle />
+    <!-- Account menu slot — placeholder until auth lands. -->
+    <button type="button" class="account-btn" aria-label="Account" disabled>
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor">
+        <path
+          d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-5 0-9 2.5-9 5.5V21h18v-1.5c0-3-4-5.5-9-5.5Z"
+        />
+      </svg>
+    </button>
+  </div>
+</header>

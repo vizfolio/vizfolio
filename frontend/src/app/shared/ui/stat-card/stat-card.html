@@ -1,0 +1,16 @@
+<article class="stat-card">
+  <div class="stat-head">
+    <span class="stat-label">{{ label() }}</span>
+    @if (incomplete()) {
+      <span class="stat-flag" title="Some holdings are missing snapshot data for this period">
+        incomplete
+      </span>
+    }
+  </div>
+
+  <p class="stat-value">{{ value() }}</p>
+
+  @if (delta(); as d) {
+    <p class="stat-delta" [class]="'trend-' + trend()">{{ d }}</p>
+  }
+</article>

@@ -1,1 +1,114 @@
-/* You can add global styles to this file, and also import other style files */
+/* Global styles + theme tokens for Vizfolio.
+ *
+ * Theming contract:
+ *   - RAW tokens = the fixed brand palette (never change per theme).
+ *   - SEMANTIC tokens = what components actually consume (--color-bg, --color-text, ...).
+ *     Only the semantic layer is re-mapped per theme, so adding a theme is a new
+ *     `:root[data-theme='name'] { ... }` block — component SCSS never changes.
+ *
+ * The active theme is set by ThemeService via `document.documentElement.dataset.theme`.
+ */
+
+:root {
+  /* ---- RAW palette (brand constants, OKLCH) ---- */
+  --brand-blue: oklch(51.01% 0.274 263.83);
+  --brand-violet: oklch(53.18% 0.28 296.97);
+  --brand-french-violet: oklch(47.66% 0.246 305.88);
+  --brand-pink: oklch(69.02% 0.277 332.77);
+  --brand-red: oklch(61.42% 0.238 15.34);
+  --brand-orange: oklch(63.32% 0.24 31.68);
+  --brand-green: oklch(72% 0.19 149);
+
+  --gradient-brand: linear-gradient(
+    90deg,
+    var(--brand-orange) 0%,
+    var(--brand-pink) 50%,
+    var(--brand-violet) 100%
+  );
+
+  /* ---- Sizing / shape tokens (theme-independent) ---- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  --sidebar-width: 240px;
+  --topbar-height: 56px;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-heading: 'Inter Tight', var(--font-sans);
+
+  /* ---- SEMANTIC tokens: LIGHT theme (default) ---- */
+  --color-bg: oklch(98.5% 0.002 300);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-2: oklch(96.5% 0.004 300);
+  --color-text: oklch(22% 0.006 300);
+  --color-text-muted: oklch(52% 0.012 303);
+  --color-border: oklch(90% 0.006 300);
+  --color-primary: var(--brand-violet);
+  --color-primary-contrast: oklch(100% 0 0);
+  --color-accent: var(--brand-blue);
+  --color-positive: oklch(58% 0.16 150);
+  --color-negative: var(--brand-red);
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.06), 0 1px 3px oklch(0% 0 0 / 0.08);
+  --shadow-md: 0 4px 12px oklch(0% 0 0 / 0.1);
+}
+
+:root[data-theme='dark'] {
+  /* ---- SEMANTIC tokens: DARK theme ---- */
+  --color-bg: oklch(19% 0.006 301);
+  --color-surface: oklch(23% 0.007 301);
+  --color-surface-2: oklch(27% 0.008 301);
+  --color-text: oklch(96% 0.003 300);
+  --color-text-muted: oklch(72% 0.012 304);
+  --color-border: oklch(33% 0.009 301);
+  --color-primary: var(--brand-pink);
+  --color-primary-contrast: oklch(18% 0.006 301);
+  --color-accent: oklch(70% 0.16 250);
+  --color-positive: oklch(74% 0.17 150);
+  --color-negative: oklch(70% 0.2 20);
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.3), 0 1px 3px oklch(0% 0 0 / 0.4);
+  --shadow-md: 0 4px 16px oklch(0% 0 0 / 0.5);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+/* Visible, consistent keyboard focus for accessibility (WCAG AA). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
