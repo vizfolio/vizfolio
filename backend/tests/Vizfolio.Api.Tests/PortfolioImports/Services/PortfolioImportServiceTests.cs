@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Vizfolio.Api.Tests.Extracts;
+using Vizfolio.Api.Tests.PortfolioImports.Fakes;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Application.PortfolioImports.Parsers;
@@ -603,6 +604,74 @@ public sealed class PortfolioImportServiceTests
         (await ctx.Db.AccountHoldingSnapshots.AsNoTracking().CountAsync()).ShouldBe(0);
     }
 
+    [Fact]
+    public async Task ImportToAccountAsync_uses_requested_parser_when_source_system_is_given()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var service = NewService(ctx);
+
+        // Lower-case value proves the match is case-insensitive.
+        var result = await service.ImportToAccountAsync(
+            account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None, requestedSourceSystem: "csv");
+
+        result.Status.ShouldBe(PortfolioImportStatus.Success);
+        result.SourceSystem.ShouldBe("CSV");
+        result.Accounts[0].Inserted.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_returns_UnknownParser_and_does_not_fall_back_when_source_system_unregistered()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var service = NewService(ctx);
+
+        // The file is a perfectly good CSV that auto-detection would claim, but an explicit unknown
+        // parser key must fail loudly rather than silently falling back to detection.
+        var result = await service.ImportToAccountAsync(
+            account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None, requestedSourceSystem: "NOPE");
+
+        result.Status.ShouldBe(PortfolioImportStatus.UnknownParser);
+        result.SourceSystem.ShouldBe("NOPE");
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_auto_detect_prefers_higher_priority_parser()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+
+        // Both parsers claim any file; the higher-priority one must win regardless of registration order.
+        var generic = new StubParser("GENERIC", priority: 0);
+        var specific = new StubParser("SPECIFIC", priority: 500);
+        var service = new PortfolioImportService(
+            ctx.Db, new IPortfolioFileParser[] { generic, specific }, NullLogger<PortfolioImportService>.Instance);
+
+        var result = await service.ImportToAccountAsync(
+            account.AccountId, Stream("anything"), "file.dat", CancellationToken.None);
+
+        result.SourceSystem.ShouldBe("SPECIFIC");
+    }
+
+    /// <summary>A parser that claims every file, used to assert auto-detect priority ordering.</summary>
+    private sealed class StubParser(string sourceSystem, int priority) : IPortfolioFileParser
+    {
+        public string SourceSystem { get; } = sourceSystem;
+        public string DisplayName => SourceSystem;
+        public int Priority { get; } = priority;
+        public IReadOnlyCollection<string> FileExtensions { get; } = [".dat"];
+
+        public Task<bool> CanParseAsync(Stream stream, string fileName, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<ParsedPortfolioFile> ParseAsync(Stream stream, string fileName, CancellationToken cancellationToken) =>
+            Task.FromResult(new ParsedPortfolioFile(
+                SourceSystem,
+                [new ParsedAccountStatement(null, null, [], [], null)]));
+    }
+
     private static void SeedSecurity(TestDbContext ctx, string cik, string ticker)
     {
         var security = new Security(cik, DateTimeOffset.UtcNow);
@@ -612,7 +681,12 @@ public sealed class PortfolioImportServiceTests
 
     private static PortfolioImportService NewService(TestDbContext ctx)
     {
-        var parsers = new IPortfolioFileParser[] { new QfxFileParser(), new CsvFileParser() };
+        var parsers = new IPortfolioFileParser[]
+        {
+            new QfxFileParser(),
+            new VanguardTransactionHistoryReportParser(),
+            new CsvLedgerTestParser(),
+        };
         return new PortfolioImportService(ctx.Db, parsers, NullLogger<PortfolioImportService>.Instance);
     }
 

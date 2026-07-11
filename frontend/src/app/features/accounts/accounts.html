@@ -77,12 +77,21 @@
     <div class="card">
       <h2 class="card-title">Import a broker file</h2>
       <p class="card-hint">
-        Upload a QFX/OFX export that includes account details — accounts are created
-        automatically and transactions are bucketed to them.
+        Upload a broker export that includes account details — accounts are created
+        automatically and transactions are bucketed to them. The format is detected
+        automatically; override it below if needed.
       </p>
+      <app-select-field
+        class="format-select"
+        label="Format"
+        [value]="sourceSystem()"
+        [options]="formatOptions()"
+        [disabled]="importing()"
+        (valueChange)="sourceSystem.set($event)"
+      />
       <app-file-upload
-        accept=".qfx,.ofx,.csv"
-        label="Drag a QFX/OFX file here, or choose one"
+        [accept]="acceptAttr()"
+        label="Drag a broker file here, or choose one"
         [disabled]="importing()"
         (fileSelected)="onFileSelected($event)"
       />

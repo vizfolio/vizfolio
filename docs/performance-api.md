@@ -1,6 +1,6 @@
 # Performance API
 
-The Performance API surfaces how a portfolio (or a single account inside it) performed over a date range. Read this doc when you're touching anything under `backend/src/Vizfolio.Application/Portfolios/` (the performance service and calculator strategies), the endpoints at `backend/src/Vizfolio.Api/Endpoints/Portfolios/GetPortfolioPerformanceEndpoint.cs` and `GetAccountPerformanceEndpoint.cs`, or the QFX parsing that feeds them (`backend/src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs`).
+The Performance API surfaces how a portfolio (or a single account inside it) performed over a date range. Read this doc when you're touching anything under `backend/src/Vizfolio.Application/Portfolios/` (the performance service and calculator strategies), the endpoints at `backend/src/Vizfolio.Api/Endpoints/Portfolios/GetPortfolioPerformanceEndpoint.cs` and `GetAccountPerformanceEndpoint.cs`, or the import parser pipeline that feeds them (`backend/src/Vizfolio.Application/PortfolioImports/`, see "Import pipeline & parser plugins" below).
 
 ## Endpoints
 
@@ -179,6 +179,47 @@ public sealed class PortfolioPerformanceService(
 Each calculator receives a `PerformanceComputationContext` — from/to dates, both balances plus their `IsComplete` flags, the ordered list of `CashFlow`s, and the interior `BalancePoint`s (built by walking every unique snapshot `AsOf` in `(from, to)` and computing the portfolio balance at that date; points where any relevant holding is missing coverage are dropped).
 
 Adding a new return metric is a matter of implementing the corresponding interface and swapping the DI registration. Adding a *new* metric (e.g., drawdown, contribution-vs-market-effect decomposition) means adding a sibling record to `PerformanceReturnsResult` and a new field to the response — no changes to the route or existing metrics.
+
+## Import pipeline & parser plugins
+
+Broker files feed the ledger through a plug-in parser pipeline. Each format implements
+`IPortfolioFileParser` (`backend/src/Vizfolio.Application/PortfolioImports/Abstractions/IPortfolioFileParser.cs`)
+and is registered in `DependencyInjection.AddApplication`. `PortfolioImportService`
+(`.../PortfolioImports/Services/PortfolioImportService.cs`) does the dispatch. Parsers ship today:
+`QfxFileParser` (OFX/QFX, `SourceSystem="QFX"`) and `VanguardTransactionHistoryReportParser`
+(the per-account "Create a Report" `.xlsx`, `SourceSystem="VANGUARD"`, read with ClosedXML — MIT).
+
+The parser contract carries selection metadata beyond `SourceSystem`:
+
+- **`DisplayName`** — human label shown in the UI "Format" dropdown.
+- **`Priority`** — auto-detect offers parsers highest-first, so provider-specific parsers sit above
+  any generic fallback (QFX = 100, Vanguard = 200). Ties fall back to registration order.
+- **`FileExtensions`** — powers the UI `accept` hint (aggregated across parsers).
+
+**Selection.** By default the format is **auto-detected**: the buffered upload is offered to each
+parser's `CanParseAsync` in priority order and the first match wins (415 `UnsupportedFormat` if none
+claim it). Callers may **force** a parser by passing `sourceSystem` (the `SourceSystem` key) on the
+import endpoints — this skips detection; an unregistered key returns 415 `UnknownParser`. The UI
+happy path sends no override (0 extra clicks); the dropdown defaults to *Auto-detect* and only sends
+`sourceSystem` when the user overrides.
+
+**Discovery.** `GET /api/imports/parsers` returns `[{ sourceSystem, displayName, fileExtensions }]`
+(priority order) so the UI can build the dropdown and the file-picker `accept` list.
+
+**Dedup is per source system.** Transactions dedup on `(account, sourceSystem, externalId)`. So the
+same holding imported from both the QFX export and the Vanguard report (which overlap on the recent
+~18 months) will **not** cross-dedup — an open item to resolve when the Vanguard row parser lands
+(`ParseAsync` is currently a stub; detection is live).
+
+### Adding a provider parser
+
+1. Implement `IPortfolioFileParser` (populate the shared `ParsedTransaction`/`ParsedPosition` records —
+   no new parsed models needed).
+2. Register it in `DependencyInjection.AddApplication`.
+3. Set `Priority` above any generic parser and give it distinctive `CanParseAsync` signature detection.
+
+That's the whole extension surface — the endpoints, discovery, dedup, and UI dropdown pick it up
+automatically.
 
 ## QFX ingestion nuances
 

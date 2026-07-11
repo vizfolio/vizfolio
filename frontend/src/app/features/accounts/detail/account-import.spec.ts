@@ -3,8 +3,17 @@ import { TestBed } from '@angular/core/testing';
 import { Observable, of, throwError } from 'rxjs';
 
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
-import { PortfolioImportResult, PortfolioImportStatus } from '../../../core/api/models/imports.models';
+import {
+  ImportParser,
+  PortfolioImportResult,
+  PortfolioImportStatus,
+} from '../../../core/api/models/imports.models';
 import { AccountImport } from './account-import';
+
+const PARSERS: ImportParser[] = [
+  { sourceSystem: 'QFX', displayName: 'OFX / QFX statement', fileExtensions: ['.qfx', '.ofx'] },
+  { sourceSystem: 'VANGUARD', displayName: 'Vanguard transaction report', fileExtensions: ['.xlsx', '.xls'] },
+];
 
 const RESULT: PortfolioImportResult = {
   status: PortfolioImportStatus.Success,
@@ -28,8 +37,13 @@ const RESULT: PortfolioImportResult = {
 class MockApi {
   result: Observable<PortfolioImportResult> = of(RESULT);
   file: File | null = null;
-  importAccountFile(_pid: string, _aid: string, file: File) {
+  sourceSystem: string | undefined;
+  getImportParsers() {
+    return of(PARSERS);
+  }
+  importAccountFile(_pid: string, _aid: string, file: File, sourceSystem?: string) {
     this.file = file;
+    this.sourceSystem = sourceSystem;
     return this.result;
   }
 }
@@ -55,6 +69,26 @@ describe('AccountImport', () => {
     expect(api.file).toBe(file);
     expect(cmp.accountResult()?.inserted).toBe(3);
     expect(cmp.error()).toBeNull();
+  });
+
+  it('auto-detects by default (no source-system override) and lists parser format options', () => {
+    const api = new MockApi();
+    const cmp = setup(api);
+    // Auto-detect entry plus one option per parser.
+    expect(cmp.formatOptions().map((o: { value: string }) => o.value)).toEqual(['', 'QFX', 'VANGUARD']);
+    expect(cmp.acceptAttr()).toBe('.qfx,.ofx,.xlsx,.xls');
+
+    cmp.onFileSelected(new File(['data'], 'statement.qfx'));
+    expect(api.sourceSystem).toBeUndefined();
+  });
+
+  it('forwards the chosen format as the source-system override', () => {
+    const api = new MockApi();
+    const cmp = setup(api);
+    cmp.sourceSystem.set('VANGUARD');
+    cmp.onFileSelected(new File(['data'], 'report.xlsx'));
+
+    expect(api.sourceSystem).toBe('VANGUARD');
   });
 
   it('explains a 422 as a multi-account file that belongs on the Accounts page', () => {

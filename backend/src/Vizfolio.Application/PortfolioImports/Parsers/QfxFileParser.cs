@@ -11,6 +11,12 @@ public sealed class QfxFileParser : IPortfolioFileParser
 {
     public string SourceSystem => "QFX";
 
+    public string DisplayName => "OFX / QFX statement";
+
+    public int Priority => 100;
+
+    public IReadOnlyCollection<string> FileExtensions { get; } = [".qfx", ".ofx"];
+
     public async Task<bool> CanParseAsync(Stream stream, string fileName, CancellationToken cancellationToken)
     {
         stream.Position = 0;

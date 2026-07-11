@@ -187,6 +187,47 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     }
 
     [Fact]
+    public async Task GET_import_parsers_lists_registered_parsers_highest_priority_first()
+    {
+        var parsers = await _client.GetFromJsonAsync<List<ImportParserResponse>>("/api/imports/parsers");
+
+        parsers.ShouldNotBeNull();
+        // Vanguard (200) > QFX (100) > generic test CSV (0).
+        parsers.Select(p => p.SourceSystem).ShouldBe(new[] { "VANGUARD", "QFX", "CSV" });
+        parsers.Single(p => p.SourceSystem == "QFX").FileExtensions.ShouldContain(".qfx");
+        parsers.Single(p => p.SourceSystem == "VANGUARD").DisplayName.ShouldBe("Vanguard transaction report");
+    }
+
+    [Fact]
+    public async Task POST_account_import_honours_explicit_source_system_override()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "9010");
+
+        var response = await UploadAccountFileAsync(
+            portfolio.PortfolioId, account.AccountId, "ledger.csv", CanonicalCsv, sourceSystem: "CSV");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.SourceSystem.ShouldBe("CSV");
+        body.Accounts[0].Inserted.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task POST_account_import_unknown_source_system_returns_415()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "9011");
+
+        var response = await UploadAccountFileAsync(
+            portfolio.PortfolioId, account.AccountId, "ledger.csv", CanonicalCsv, sourceSystem: "does-not-exist");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.Status.ShouldBe(PortfolioImportStatus.UnknownParser);
+    }
+
+    [Fact]
     public async Task POST_account_import_unsupported_file_returns_415()
     {
         var portfolio = await CreatePortfolioAsync();
@@ -554,10 +595,13 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         return (await response.Content.ReadFromJsonAsync<AccountResponse>())!;
     }
 
-    private async Task<HttpResponseMessage> UploadAccountFileAsync(Guid portfolioId, Guid accountId, string fileName, string content)
+    private async Task<HttpResponseMessage> UploadAccountFileAsync(
+        Guid portfolioId, Guid accountId, string fileName, string content, string? sourceSystem = null)
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(content)), "File", fileName);
+        if (sourceSystem is not null)
+            multipart.Add(new StringContent(sourceSystem), "SourceSystem");
         return await _client.PostAsync($"/api/portfolios/{portfolioId}/accounts/{accountId}/imports", multipart);
     }
 

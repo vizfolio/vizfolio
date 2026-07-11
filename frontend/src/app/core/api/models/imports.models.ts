@@ -15,10 +15,22 @@
 export enum PortfolioImportStatus {
   Success = 0,
   UnsupportedFormat = 1,
-  AccountNotFound = 2,
-  PortfolioNotFound = 3,
-  FileHasNoAccountInfo = 4,
-  FileHasAccountInfo = 5,
+  UnknownParser = 2,
+  AccountNotFound = 3,
+  PortfolioNotFound = 4,
+  FileHasNoAccountInfo = 5,
+  FileHasAccountInfo = 6,
+}
+
+/**
+ * A registered import parser advertised by GET /api/imports/parsers, used to populate the
+ * "Format" override dropdown. Source of truth:
+ *   backend/src/Vizfolio.Api/Endpoints/Portfolios/ListImportParsersEndpoint.cs
+ */
+export interface ImportParser {
+  sourceSystem: string;
+  displayName: string;
+  fileExtensions: string[];
 }
 
 /** A single row/account that could not be processed. */

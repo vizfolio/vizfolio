@@ -90,7 +90,23 @@ describe('PortfolioApiService', () => {
     service.importAccountFile('p1', 'a1', file).subscribe();
     const req = http.expectOne('/api/portfolios/p1/accounts/a1/imports');
     expect(req.request.body instanceof FormData).toBe(true);
+    expect((req.request.body as FormData).has('sourceSystem')).toBe(false);
     req.flush({});
+  });
+
+  it('includes the sourceSystem override in the import form data when provided', () => {
+    const file = new File(['data'], 'report.xlsx', { type: 'application/octet-stream' });
+    service.importAccountFile('p1', 'a1', file, 'VANGUARD').subscribe();
+    const req = http.expectOne('/api/portfolios/p1/accounts/a1/imports');
+    expect((req.request.body as FormData).get('sourceSystem')).toBe('VANGUARD');
+    req.flush({});
+  });
+
+  it('GETs the available import parsers', () => {
+    service.getImportParsers().subscribe();
+    const req = http.expectOne('/api/imports/parsers');
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
   });
 
   it('adds from/to query params to the performance request when provided', () => {

@@ -31,7 +31,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
         Guid accountId,
         Stream fileStream,
         string fileName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? requestedSourceSystem = null)
     {
         var stopwatch = Stopwatch.StartNew();
 
@@ -40,7 +41,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
         if (account is null)
             return PortfolioImportResult.AccountNotFound(stopwatch.Elapsed);
 
-        var (parsed, missing) = await ParseAsync(fileStream, fileName, cancellationToken);
+        var (parsed, missing) = await ParseAsync(fileStream, fileName, requestedSourceSystem, cancellationToken);
         if (missing is not null)
             return missing(stopwatch.Elapsed);
 
@@ -81,7 +82,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
         Guid portfolioId,
         Stream fileStream,
         string fileName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? requestedSourceSystem = null)
     {
         var stopwatch = Stopwatch.StartNew();
 
@@ -90,7 +92,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
         if (!portfolioExists)
             return PortfolioImportResult.PortfolioNotFound(stopwatch.Elapsed);
 
-        var (parsed, missing) = await ParseAsync(fileStream, fileName, cancellationToken);
+        var (parsed, missing) = await ParseAsync(fileStream, fileName, requestedSourceSystem, cancellationToken);
         if (missing is not null)
             return missing(stopwatch.Elapsed);
 
@@ -277,13 +279,32 @@ public sealed class PortfolioImportService : IPortfolioImportService
     }
 
     private async Task<(ParsedPortfolioFile? Parsed, Func<TimeSpan, PortfolioImportResult>? Missing)> ParseAsync(
-        Stream fileStream, string fileName, CancellationToken cancellationToken)
+        Stream fileStream, string fileName, string? requestedSourceSystem, CancellationToken cancellationToken)
     {
         await using var buffer = new MemoryStream();
         await fileStream.CopyToAsync(buffer, cancellationToken);
 
+        // Explicit override from the UI: trust the caller's pick and skip auto-detection.
+        if (!string.IsNullOrWhiteSpace(requestedSourceSystem))
+        {
+            var requested = requestedSourceSystem.Trim();
+            var forced = _parsers.FirstOrDefault(
+                p => string.Equals(p.SourceSystem, requested, StringComparison.OrdinalIgnoreCase));
+            if (forced is null)
+            {
+                _logger.LogWarning("No parser registered for requested source system {SourceSystem}", requested);
+                return (null, d => PortfolioImportResult.UnknownParser(requested, d));
+            }
+
+            buffer.Position = 0;
+            var forcedParse = await forced.ParseAsync(buffer, fileName, cancellationToken);
+            return (forcedParse, null);
+        }
+
+        // Auto-detect: offer the file to parsers from highest priority to lowest so a
+        // provider-specific parser gets first refusal ahead of any generic fallback.
         IPortfolioFileParser? chosen = null;
-        foreach (var parser in _parsers)
+        foreach (var parser in _parsers.OrderByDescending(p => p.Priority))
         {
             buffer.Position = 0;
             if (await parser.CanParseAsync(buffer, fileName, cancellationToken))
