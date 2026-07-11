@@ -22,7 +22,13 @@ export const routes: Routes = [
   {
     path: 'accounts',
     title: 'Accounts · Vizfolio',
-    data: { title: 'Accounts' },
+    loadComponent: () =>
+      import('./features/accounts/accounts').then((m) => m.Accounts),
+  },
+  {
+    path: 'accounts/:accountId',
+    title: 'Account · Vizfolio',
+    data: { title: 'Account' },
     loadComponent: () =>
       import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
   },

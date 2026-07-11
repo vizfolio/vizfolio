@@ -1,0 +1,165 @@
+<section class="accounts">
+  <header class="page-header">
+    <h1>Accounts</h1>
+    @if (activeName(); as name) {
+      <p class="page-subtitle">{{ name }}</p>
+    }
+  </header>
+
+  @if (!activeId()) {
+    <app-empty-state
+      title="No portfolio selected"
+      message="Create or select a portfolio to manage its accounts."
+    >
+      <a class="btn btn--primary" routerLink="/portfolios">Go to portfolios</a>
+    </app-empty-state>
+  } @else {
+    <!-- Add account -->
+    <form class="card add-form" (submit)="$event.preventDefault(); create()">
+      <h2 class="card-title">Add an account</h2>
+      <div class="form-grid">
+        <label class="field">
+          <span class="field-label">Name</span>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="Fidelity Brokerage"
+            [value]="form().name"
+            (input)="updateField('name', $event)"
+            [disabled]="submitting()"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Institution code</span>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="fidelity.com"
+            [value]="form().institutionCode"
+            (input)="updateField('institutionCode', $event)"
+            [disabled]="submitting()"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Account number</span>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="1234"
+            [value]="form().accountNumber"
+            (input)="updateField('accountNumber', $event)"
+            [disabled]="submitting()"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Type <span class="optional">(optional)</span></span>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="Roth IRA"
+            [value]="form().accountType"
+            (input)="updateField('accountType', $event)"
+            [disabled]="submitting()"
+          />
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn--primary" [disabled]="!canCreate()">
+          {{ submitting() ? 'Adding…' : 'Add account' }}
+        </button>
+        @if (formError(); as message) {
+          <p class="form-error" role="alert">{{ message }}</p>
+        }
+      </div>
+    </form>
+
+    <!-- Import a broker file -->
+    <div class="card">
+      <h2 class="card-title">Import a broker file</h2>
+      <p class="card-hint">
+        Upload a QFX/OFX export that includes account details — accounts are created
+        automatically and transactions are bucketed to them.
+      </p>
+      <app-file-upload
+        accept=".qfx,.ofx,.csv"
+        label="Drag a QFX/OFX file here, or choose one"
+        [disabled]="importing()"
+        (fileSelected)="onFileSelected($event)"
+      />
+      @if (importing()) {
+        <p class="import-status" role="status">Importing…</p>
+      }
+      @if (importError(); as message) {
+        <p class="form-error" role="alert">{{ message }}</p>
+      }
+      @if (importResult(); as result) {
+        <div class="import-result" role="status">
+          <p class="import-summary">
+            Imported {{ result.accounts.length }} account(s).
+          </p>
+          <ul class="import-accounts">
+            @for (account of result.accounts; track account.accountId) {
+              <li>
+                <strong>{{ account.accountNumber || account.accountId }}</strong>
+                — {{ account.inserted }} added, {{ account.skipped }} skipped
+                @if (account.failed > 0) {
+                  , {{ account.failed }} failed
+                }
+                @if (account.created) {
+                  <span class="new-badge">new</span>
+                }
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+
+    <!-- Accounts list -->
+    @switch (listStatus()) {
+      @case ('loading') {
+        <p class="loading" role="status">Loading accounts…</p>
+      }
+      @case ('error') {
+        <p class="form-error" role="alert">Couldn't load accounts for this portfolio.</p>
+      }
+      @default {
+        @if (accounts().length === 0) {
+          <app-empty-state
+            title="No accounts yet"
+            message="Add an account above or import a broker file to get started."
+          />
+        } @else {
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Institution</th>
+                  <th scope="col">Type</th>
+                  <th scope="col" class="align-end">Transactions</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (account of accounts(); track account.accountId) {
+                  <tr>
+                    <td>{{ account.name }}</td>
+                    <td>{{ account.institutionCode }}</td>
+                    <td>{{ accountTypeLabel(account.accountType) }}</td>
+                    <td class="align-end">{{ account.transactionCount }}</td>
+                    <td class="align-end">
+                      <a class="btn btn--ghost btn--sm" [routerLink]="['/accounts', account.accountId]">
+                        Open
+                      </a>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
+    }
+  }
+</section>
