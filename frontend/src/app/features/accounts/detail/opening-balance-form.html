@@ -1,0 +1,75 @@
+<form class="opening" (submit)="$event.preventDefault(); submit()">
+  <p class="intro">
+    Record positions held on a chosen date. Vizfolio creates opening-balance snapshots so
+    performance before your earliest imported statement is based on real values, not estimates.
+  </p>
+
+  <div class="top-fields">
+    <label class="field">
+      <span class="field-label">As of</span>
+      <input type="date" [value]="asOf()" (change)="onAsOf($event)" [disabled]="submitting()" />
+    </label>
+    <label class="field">
+      <span class="field-label">Default currency <span class="optional">(optional)</span></span>
+      <input
+        type="text"
+        placeholder="USD"
+        [value]="defaultCurrency()"
+        (input)="onDefaultCurrency($event)"
+        [disabled]="submitting()"
+      />
+    </label>
+  </div>
+
+  <div class="rows" role="group" aria-label="Holdings">
+    <div class="row row--head" aria-hidden="true">
+      <span>Symbol</span>
+      <span>Units</span>
+      <span>Market value</span>
+      <span>Unit price</span>
+      <span>Cost basis</span>
+      <span>Currency</span>
+      <span>CUSIP</span>
+      <span></span>
+    </div>
+    @for (row of rows(); track row.key) {
+      <div class="row">
+        <input aria-label="Symbol" placeholder="AAPL" [value]="row.symbol"
+          (input)="updateRow(row.key, 'symbol', $event)" [disabled]="submitting()" />
+        <input aria-label="Units" type="number" step="any" [value]="row.units"
+          (input)="updateRow(row.key, 'units', $event)" [disabled]="submitting()" />
+        <input aria-label="Market value" type="number" step="any" [value]="row.marketValue"
+          (input)="updateRow(row.key, 'marketValue', $event)" [disabled]="submitting()" />
+        <input aria-label="Unit price" type="number" step="any" [value]="row.unitPrice"
+          (input)="updateRow(row.key, 'unitPrice', $event)" [disabled]="submitting()" />
+        <input aria-label="Cost basis" type="number" step="any" [value]="row.costBasis"
+          (input)="updateRow(row.key, 'costBasis', $event)" [disabled]="submitting()" />
+        <input aria-label="Currency" placeholder="USD" [value]="row.currencyCode"
+          (input)="updateRow(row.key, 'currencyCode', $event)" [disabled]="submitting()" />
+        <input aria-label="CUSIP" [value]="row.cusip"
+          (input)="updateRow(row.key, 'cusip', $event)" [disabled]="submitting()" />
+        <button type="button" class="remove" aria-label="Remove holding"
+          (click)="removeRow(row.key)" [disabled]="submitting() || rows().length === 1">×</button>
+      </div>
+    }
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn btn--ghost" (click)="addRow()" [disabled]="submitting()">
+      + Add holding
+    </button>
+    <button type="submit" class="btn btn--primary" [disabled]="!canSubmit()">
+      {{ submitting() ? 'Saving…' : 'Save opening balance' }}
+    </button>
+  </div>
+
+  @if (error(); as message) {
+    <p class="form-error" role="alert">{{ message }}</p>
+  }
+  @if (result(); as r) {
+    <p class="form-ok" role="status">
+      Saved — {{ r.snapshotsCreated }} created, {{ r.snapshotsUpdated }} updated across
+      {{ r.holdings.length }} holding(s) as of {{ r.asOf }}.
+    </p>
+  }
+</form>

@@ -28,9 +28,8 @@ export const routes: Routes = [
   {
     path: 'accounts/:accountId',
     title: 'Account · Vizfolio',
-    data: { title: 'Account' },
     loadComponent: () =>
-      import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
+      import('./features/accounts/detail/account').then((m) => m.Account),
   },
   {
     path: 'performance',

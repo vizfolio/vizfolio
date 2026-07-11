@@ -1,0 +1,28 @@
+<div class="account-import">
+  <p class="hint">
+    Upload a single-account broker export (QFX/OFX or CSV) for this account. Re-importing the
+    same file is safe — duplicate transactions are skipped.
+  </p>
+
+  <app-file-upload
+    accept=".qfx,.ofx,.csv"
+    label="Drag a statement here, or choose one"
+    [disabled]="importing()"
+    (fileSelected)="onFileSelected($event)"
+  />
+
+  @if (importing()) {
+    <p class="status" role="status">Importing…</p>
+  }
+  @if (error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+  @if (accountResult(); as account) {
+    <p class="ok" role="status">
+      Imported: {{ account.inserted }} added, {{ account.skipped }} skipped
+      @if (account.failed > 0) {
+        , {{ account.failed }} failed
+      }.
+    </p>
+  }
+</div>

@@ -1,0 +1,96 @@
+<section class="account">
+  <a class="back-link" routerLink="/accounts">← All accounts</a>
+
+  @switch (status()) {
+    @case ('loading') {
+      <p class="loading" role="status">Loading account…</p>
+    }
+    @case ('no-portfolio') {
+      <p class="error" role="alert">
+        No active portfolio. <a routerLink="/portfolios">Choose a portfolio</a> to view its accounts.
+      </p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">
+        Couldn't load this account. It may not belong to the active portfolio.
+      </p>
+    }
+    @default {
+      @if (account(); as acct) {
+        <header class="account-header">
+          <h1>{{ acct.name }}</h1>
+          <p class="account-meta">
+            {{ acct.institutionCode }} · {{ acct.accountNumber }}
+            @if (acct.accountType) {
+              · {{ acct.accountType }}
+            }
+            · {{ acct.transactionCount }} transactions
+          </p>
+        </header>
+
+        <nav class="tabs" role="tablist" aria-label="Account sections">
+          @for (t of tabs; track t.id) {
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              [class.active]="tab() === t.id"
+              [attr.aria-selected]="tab() === t.id"
+              (click)="select(t.id)"
+            >
+              {{ t.label }}
+            </button>
+          }
+        </nav>
+
+        <div class="tab-panel" role="tabpanel">
+          @switch (tab()) {
+            @case ('performance') {
+              <app-account-performance
+                [portfolioId]="portfolioId()!"
+                [accountId]="accountId()"
+              />
+            }
+            @case ('history') {
+              <app-account-history
+                [portfolioId]="portfolioId()!"
+                [accountId]="accountId()"
+                (fillGap)="select('opening-balance')"
+              />
+            }
+            @case ('opening-balance') {
+              <app-opening-balance-form
+                [portfolioId]="portfolioId()!"
+                [accountId]="accountId()"
+              />
+            }
+            @case ('import') {
+              <app-account-import
+                [portfolioId]="portfolioId()!"
+                [accountId]="accountId()"
+              />
+            }
+            @case ('holdings') {
+              <div class="stub">
+                <h2>Holdings</h2>
+                <p>
+                  Current positions will appear here once the API exposes a read endpoint for an
+                  account's holdings and snapshots.
+                </p>
+              </div>
+            }
+            @case ('ledger') {
+              <div class="stub">
+                <h2>Ledger</h2>
+                <p>
+                  The transaction ledger will appear here once the API exposes a read endpoint for
+                  an account's transactions.
+                </p>
+              </div>
+            }
+          }
+        </div>
+      }
+    }
+  }
+</section>
