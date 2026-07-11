@@ -7,6 +7,7 @@ import {
   OpeningBalanceHoldingInput,
   OpeningBalanceResponse,
 } from '../../../core/api/models/coverage.models';
+import { DateField } from '../../../shared/ui/date-field/date-field';
 
 /** One editable holding row. Numeric fields are strings here and parsed on submit. */
 interface HoldingRow {
@@ -41,6 +42,7 @@ function blankRow(): HoldingRow {
  */
 @Component({
   selector: 'app-opening-balance-form',
+  imports: [DateField],
   templateUrl: './opening-balance-form.html',
   styleUrl: './opening-balance-form.scss',
 })
@@ -67,10 +69,6 @@ export class OpeningBalanceForm {
   protected readonly canSubmit = computed(
     () => !this.submitting() && this.asOf().length > 0 && this.validRows().length > 0,
   );
-
-  protected onAsOf(event: Event): void {
-    this.asOf.set((event.target as HTMLInputElement).value);
-  }
 
   protected onDefaultCurrency(event: Event): void {
     this.defaultCurrency.set((event.target as HTMLInputElement).value);

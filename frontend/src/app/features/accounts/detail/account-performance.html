@@ -1,13 +1,7 @@
 <div class="perf">
   <div class="range">
-    <label class="range-field">
-      <span class="range-label">From</span>
-      <input type="date" [value]="from()" (change)="onFrom($event)" />
-    </label>
-    <label class="range-field">
-      <span class="range-label">To</span>
-      <input type="date" [value]="to()" (change)="onTo($event)" />
-    </label>
+    <app-date-field label="From" [value]="from()" (valueChange)="from.set($event)" />
+    <app-date-field label="To" [value]="to()" (valueChange)="to.set($event)" />
     <span class="range-note">Leave blank to use the account's full history.</span>
   </div>
 

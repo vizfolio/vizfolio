@@ -7,9 +7,13 @@
  *     `:root[data-theme='name'] { ... }` block — component SCSS never changes.
  *
  * The active theme is set by ThemeService via `document.documentElement.dataset.theme`.
+ * `color-scheme` is also flipped per theme so native form controls (e.g. the DateField's
+ * `<input type="date">` calendar popup) render in the matching light/dark scheme.
  */
 
 :root {
+  color-scheme: light;
+
   /* ---- RAW palette (brand constants, OKLCH) ---- */
   --brand-blue: oklch(51.01% 0.274 263.83);
   --brand-violet: oklch(53.18% 0.28 296.97);
@@ -62,6 +66,8 @@
 }
 
 :root[data-theme='dark'] {
+  color-scheme: dark;
+
   /* ---- SEMANTIC tokens: DARK theme ---- */
   --color-bg: oklch(19% 0.006 301);
   --color-surface: oklch(23% 0.007 301);

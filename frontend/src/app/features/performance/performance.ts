@@ -6,6 +6,7 @@ import { catchError, of, switchMap } from 'rxjs';
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
 import { PortfolioPerformance } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
+import { DateField } from '../../shared/ui/date-field/date-field';
 import { PerformanceSummary } from '../../shared/ui/performance-summary/performance-summary';
 
 type Status = 'loading' | 'ready' | 'error' | 'no-portfolio';
@@ -13,7 +14,7 @@ type Status = 'loading' | 'ready' | 'error' | 'no-portfolio';
 /** Portfolio-level performance for the active portfolio, over an optional date range. */
 @Component({
   selector: 'app-performance',
-  imports: [PerformanceSummary, RouterLink],
+  imports: [PerformanceSummary, RouterLink, DateField],
   templateUrl: './performance.html',
   styleUrl: './performance.scss',
 })
@@ -60,13 +61,5 @@ export class Performance {
           this.status.set('ready');
         }
       });
-  }
-
-  protected onFrom(event: Event): void {
-    this.from.set((event.target as HTMLInputElement).value);
-  }
-
-  protected onTo(event: Event): void {
-    this.to.set((event.target as HTMLInputElement).value);
   }
 }

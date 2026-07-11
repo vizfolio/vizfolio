@@ -4,6 +4,7 @@ import { catchError, of, switchMap } from 'rxjs';
 
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { PortfolioPerformance } from '../../../core/api/models/performance.models';
+import { DateField } from '../../../shared/ui/date-field/date-field';
 import { PerformanceSummary } from '../../../shared/ui/performance-summary/performance-summary';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -11,7 +12,7 @@ type Status = 'loading' | 'ready' | 'error';
 /** Performance tab: account-scoped returns over an optional date range. */
 @Component({
   selector: 'app-account-performance',
-  imports: [PerformanceSummary],
+  imports: [PerformanceSummary, DateField],
   templateUrl: './account-performance.html',
   styleUrl: './account-performance.scss',
 })
@@ -55,13 +56,5 @@ export class AccountPerformance {
           this.status.set('ready');
         }
       });
-  }
-
-  protected onFrom(event: Event): void {
-    this.from.set((event.target as HTMLInputElement).value);
-  }
-
-  protected onTo(event: Event): void {
-    this.to.set((event.target as HTMLInputElement).value);
   }
 }

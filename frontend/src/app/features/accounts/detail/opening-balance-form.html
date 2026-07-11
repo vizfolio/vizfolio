@@ -5,10 +5,12 @@
   </p>
 
   <div class="top-fields">
-    <label class="field">
-      <span class="field-label">As of</span>
-      <input type="date" [value]="asOf()" (change)="onAsOf($event)" [disabled]="submitting()" />
-    </label>
+    <app-date-field
+      label="As of"
+      [value]="asOf()"
+      [disabled]="submitting()"
+      (valueChange)="asOf.set($event)"
+    />
     <label class="field">
       <span class="field-label">Default currency <span class="optional">(optional)</span></span>
       <input

@@ -17,36 +17,14 @@
 
 .range {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   flex-wrap: wrap;
   gap: var(--space-4);
-}
-
-.range-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.range-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-
-.range-field input {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-bg);
-  color: var(--color-text);
-  font: inherit;
 }
 
 .range-note {
   color: var(--color-text-muted);
   font-size: 0.85rem;
-  padding-bottom: var(--space-2);
 }
 
 .loading {
