@@ -1,6 +1,6 @@
 # ER Diagram
 
-This is the persistence-layer view of the Vizfolio domain — what's in the database, how the tables relate, and which fields carry identity. Read it when you need a quick map before touching schema, migrations, or queries. Source of truth is `src/Vizfolio.Domain/` for the classes and `src/Vizfolio.Infrastructure/Persistence/Configurations/` for the EF mappings.
+This is the persistence-layer view of the Vizfolio domain — what's in the database, how the tables relate, and which fields carry identity. Read it when you need a quick map before touching schema, migrations, or queries. Source of truth is `backend/src/Vizfolio.Domain/` for the classes and `backend/src/Vizfolio.Infrastructure/Persistence/Configurations/` for the EF mappings.
 
 ## Diagram
 
@@ -158,7 +158,7 @@ erDiagram
 
 ## Aggregates and what each cluster is for
 
-**Portfolio → Account → AccountTransaction** is the user's ledger. A `Portfolio` is a logical grouping; an `Account` is one brokerage/institution account inside it; an `AccountTransaction` is one row in that account's history. Transactions are uniquely identified within an account by `(AccountId, SourceSystem, ExternalId)` so re-imports are idempotent. Accounts are uniquely identified within a portfolio by `(PortfolioId, InstitutionCode, AccountNumber)` — `InstitutionCode` is the OFX `BROKERID` / `BANKID` (e.g. `vanguard.com`), normalized to lower case, and `AccountNumber` is the OFX `ACCTID`. The portfolio-scoped import endpoint (`POST /portfolios/{id}/imports`) uses this pair to find-or-create an account per `<INVSTMTRS>` block in a multi-account QFX file.
+**Portfolio → Account → AccountTransaction** is the user's ledger. A `Portfolio` is a logical grouping; an `Account` is one brokerage/institution account inside it; an `AccountTransaction` is one row in that account's history. Transactions are uniquely identified within an account by `(AccountId, SourceSystem, ExternalId)` so re-imports are idempotent. Accounts are uniquely identified within a portfolio by `(PortfolioId, InstitutionCode, AccountNumber)` — `InstitutionCode` is the OFX `BROKERID` / `BANKID` (e.g. `vanguard.com`), normalized to lower case, and `AccountNumber` is the OFX `ACCTID`. The portfolio-scoped import endpoint (`POST /api/portfolios/{id}/imports`) uses this pair to find-or-create an account per `<INVSTMTRS>` block in a multi-account QFX file.
 
 **AccountHolding** is what an account holds — one row per tradeable asset *within an account*. The `Kind` discriminator selects between `Security`, `Fund`, `Crypto`, `Cash`, and `Other`; for `Security`/`Fund` the corresponding nullable FK is populated. Crypto/Cash/Other carry their symbol + classification on `AccountHolding` itself without a sibling reference entity. Holdings are created lazily — either during import (`PortfolioImportService`) or after the fact (`LedgerRelinker`) — by `Vizfolio.Application.Portfolios.AccountHoldingResolver`, which resolves a ticker to a `Security` or to the latest `FundSnapshot`'s `ShareClass.Ticker`. The resolver is primed per-account, so the same security imported into two different accounts produces two distinct `AccountHolding` rows.
 
@@ -180,10 +180,10 @@ There is intentionally **no DB-level uniqueness** on `(AccountId, SecurityId)` o
 
 | Topic                                            | Source                                                                  |
 | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Domain classes                                   | `src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference}/`             |
-| EF mappings, table/column names, indexes         | `src/Vizfolio.Infrastructure/Persistence/Configurations/`                  |
-| Reference-data seeds                             | `src/Vizfolio.Infrastructure/Persistence/Seeding/`                         |
-| Current schema as SQL                            | `src/Vizfolio.Infrastructure/Persistence/Migrations/*_Init.cs`             |
-| Resolving a transaction's holding                | `src/Vizfolio.Application/Portfolios/AccountHoldingResolver.cs`            |
-| Backfilling existing transactions to Holdings    | `src/Vizfolio.Application/PortfolioImports/Services/LedgerRelinker.cs`     |
-| Backfilling fund holdings to Securities          | `src/Vizfolio.Application/Extracts/Importers/HoldingRelinker.cs`           |
+| Domain classes                                   | `backend/src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference}/`             |
+| EF mappings, table/column names, indexes         | `backend/src/Vizfolio.Infrastructure/Persistence/Configurations/`                  |
+| Reference-data seeds                             | `backend/src/Vizfolio.Infrastructure/Persistence/Seeding/`                         |
+| Current schema as SQL                            | `backend/src/Vizfolio.Infrastructure/Persistence/Migrations/*_Init.cs`             |
+| Resolving a transaction's holding                | `backend/src/Vizfolio.Application/Portfolios/AccountHoldingResolver.cs`            |
+| Backfilling existing transactions to Holdings    | `backend/src/Vizfolio.Application/PortfolioImports/Services/LedgerRelinker.cs`     |
+| Backfilling fund holdings to Securities          | `backend/src/Vizfolio.Application/Extracts/Importers/HoldingRelinker.cs`           |
