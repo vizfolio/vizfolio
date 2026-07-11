@@ -4,22 +4,14 @@ import { catchError, of, switchMap } from 'rxjs';
 
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { PortfolioPerformance } from '../../../core/api/models/performance.models';
-import { CompletenessBadge } from '../../../shared/ui/completeness-badge/completeness-badge';
-import { PerfChart, PerfDataset } from '../../../shared/ui/perf-chart/perf-chart';
-import { StatCard } from '../../../shared/ui/stat-card/stat-card';
-import {
-  buildSyntheticSeries,
-  formatCurrency,
-  formatPercent,
-  trendOf,
-} from '../../dashboard/dashboard.util';
+import { PerformanceSummary } from '../../../shared/ui/performance-summary/performance-summary';
 
 type Status = 'loading' | 'ready' | 'error';
 
 /** Performance tab: account-scoped returns over an optional date range. */
 @Component({
   selector: 'app-account-performance',
-  imports: [StatCard, CompletenessBadge, PerfChart],
+  imports: [PerformanceSummary],
   templateUrl: './account-performance.html',
   styleUrl: './account-performance.scss',
 })
@@ -72,45 +64,4 @@ export class AccountPerformance {
   protected onTo(event: Event): void {
     this.to.set((event.target as HTMLInputElement).value);
   }
-
-  protected readonly currency = computed(() => this.performance()?.currencyCode ?? 'USD');
-
-  protected money(value: number | undefined): string {
-    return value === undefined ? '—' : formatCurrency(value, this.currency());
-  }
-
-  protected readonly netTrend = computed(() =>
-    trendOf(this.performance()?.contributions.net ?? null),
-  );
-
-  protected readonly twrLabel = computed(() =>
-    formatPercent(this.performance()?.returns.timeWeighted.rate ?? null),
-  );
-  protected readonly twrTrend = computed(() =>
-    trendOf(this.performance()?.returns.timeWeighted.rate ?? null),
-  );
-  protected readonly mwrLabel = computed(() =>
-    formatPercent(this.performance()?.returns.moneyWeighted.rate ?? null),
-  );
-  protected readonly mwrTrend = computed(() =>
-    trendOf(this.performance()?.returns.moneyWeighted.rate ?? null),
-  );
-
-  protected readonly chartLabels = computed(() => {
-    const p = this.performance();
-    return p ? buildSyntheticSeries(p).labels : [];
-  });
-
-  protected readonly chartDatasets = computed<PerfDataset[]>(() => {
-    const p = this.performance();
-    if (!p) {
-      return [];
-    }
-    const series = buildSyntheticSeries(p);
-    return [
-      { label: 'Value', data: series.value, kind: 'line', colorVar: '--color-primary' },
-      { label: 'Deposits', data: series.deposits, kind: 'bar', colorVar: '--color-accent' },
-      { label: 'Withdrawals', data: series.withdrawals, kind: 'bar', colorVar: '--color-negative' },
-    ];
-  });
 }

@@ -1,0 +1,132 @@
+<section class="settings">
+  <header class="page-header">
+    <h1>Settings</h1>
+    <p class="page-subtitle">Reference data and appearance.</p>
+  </header>
+
+  <!-- Reference data sync -->
+  <div class="card">
+    <h2 class="card-title">Reference data</h2>
+    <p class="card-hint">
+      Refresh securities and fund data from the open Vizfolio extract repositories. Only one
+      import runs at a time.
+    </p>
+
+    <div class="action">
+      <div class="action-head">
+        <h3>Securities</h3>
+        <button type="button" class="btn btn--primary"
+          [disabled]="securities().status === 'running'" (click)="runSecurities()">
+          {{ securities().status === 'running' ? 'Running…' : 'Import securities' }}
+        </button>
+      </div>
+      <div class="fields">
+        <label class="field">
+          <span class="field-label">Tickers <span class="optional">(optional, comma-separated)</span></span>
+          <input type="text" placeholder="AAPL, MSFT" [value]="secTickers()"
+            (input)="onText(secTickers.set, $event)" />
+        </label>
+        <label class="check">
+          <input type="checkbox" [checked]="secForce()" (change)="onCheck(secForce.set, $event)" />
+          <span>Force (bypass delta check)</span>
+        </label>
+      </div>
+      @if (securities().result; as r) {
+        <p class="result" role="status">
+          Considered {{ r.considered }} · upserted {{ r.upserted }} · skipped {{ r.skipped }} ·
+          failed {{ r.failed }} · {{ r.duration }}
+        </p>
+      }
+      @if (securities().error; as e) {
+        <p class="error" role="alert">{{ e }}</p>
+      }
+    </div>
+
+    <div class="action">
+      <div class="action-head">
+        <h3>Funds</h3>
+        <button type="button" class="btn btn--primary"
+          [disabled]="funds().status === 'running'" (click)="runFunds()">
+          {{ funds().status === 'running' ? 'Running…' : 'Import funds' }}
+        </button>
+      </div>
+      <div class="fields">
+        <label class="field">
+          <span class="field-label">Series IDs <span class="optional">(optional, comma-separated)</span></span>
+          <input type="text" placeholder="S000012345" [value]="fundSeries()"
+            (input)="onText(fundSeries.set, $event)" />
+        </label>
+        <label class="check">
+          <input type="checkbox" [checked]="fundForce()" (change)="onCheck(fundForce.set, $event)" />
+          <span>Force (bypass delta check)</span>
+        </label>
+      </div>
+      @if (funds().result; as r) {
+        <p class="result" role="status">
+          Considered {{ r.considered }} · upserted {{ r.upserted }} · skipped {{ r.skipped }} ·
+          failed {{ r.failed }} · {{ r.duration }}
+        </p>
+      }
+      @if (funds().error; as e) {
+        <p class="error" role="alert">{{ e }}</p>
+      }
+    </div>
+
+    <div class="action">
+      <div class="action-head">
+        <h3>Import everything</h3>
+        <button type="button" class="btn btn--primary"
+          [disabled]="all().status === 'running'" (click)="runAll()">
+          {{ all().status === 'running' ? 'Running…' : 'Import all' }}
+        </button>
+      </div>
+      <label class="check">
+        <input type="checkbox" [checked]="allForce()" (change)="onCheck(allForce.set, $event)" />
+        <span>Force (bypass delta checks)</span>
+      </label>
+      <p class="card-hint">Securities → funds → holding re-link, under a single run.</p>
+      @if (all().result; as r) {
+        <p class="result" role="status">
+          Securities: upserted {{ r.securities.upserted }}, skipped {{ r.securities.skipped }} ·
+          Funds: upserted {{ r.funds.upserted }}, skipped {{ r.funds.skipped }} ·
+          Re-linked {{ r.relinked }}
+        </p>
+      }
+      @if (all().error; as e) {
+        <p class="error" role="alert">{{ e }}</p>
+      }
+    </div>
+  </div>
+
+  <!-- Ledger relink -->
+  <div class="card">
+    <h2 class="card-title">Ledger</h2>
+    <div class="action">
+      <div class="action-head">
+        <h3>Re-link transactions</h3>
+        <button type="button" class="btn btn--primary"
+          [disabled]="relink().status === 'running'" (click)="runRelink()">
+          {{ relink().status === 'running' ? 'Running…' : 'Re-link ledger' }}
+        </button>
+      </div>
+      <p class="card-hint">
+        Re-resolve account transactions to securities by ticker. Useful after a securities import.
+      </p>
+      @if (relink().result; as r) {
+        <p class="result" role="status">Linked {{ r.linked }} transaction(s).</p>
+      }
+      @if (relink().error; as e) {
+        <p class="error" role="alert">{{ e }}</p>
+      }
+    </div>
+  </div>
+
+  <!-- Appearance -->
+  <div class="card">
+    <h2 class="card-title">Appearance</h2>
+    <div class="appearance">
+      <span>Theme</span>
+      <app-theme-toggle />
+    </div>
+  </div>
+</section>

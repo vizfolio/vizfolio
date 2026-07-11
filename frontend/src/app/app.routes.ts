@@ -34,16 +34,14 @@ export const routes: Routes = [
   {
     path: 'performance',
     title: 'Performance · Vizfolio',
-    data: { title: 'Performance' },
     loadComponent: () =>
-      import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
+      import('./features/performance/performance').then((m) => m.Performance),
   },
   {
     path: 'settings',
     title: 'Settings · Vizfolio',
-    data: { title: 'Settings' },
     loadComponent: () =>
-      import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
+      import('./features/settings/settings').then((m) => m.Settings),
   },
   { path: '**', redirectTo: 'dashboard' },
 ];
