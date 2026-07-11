@@ -22,10 +22,10 @@ public sealed class SwaggerDocumentTests : IClassFixture<VizfolioApiFactory>
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var paths = document.RootElement.GetProperty("paths");
 
-        paths.TryGetProperty("/health", out _).ShouldBeTrue();
-        paths.TryGetProperty("/admin/imports/securities", out _).ShouldBeTrue();
-        paths.TryGetProperty("/admin/imports/funds", out _).ShouldBeTrue();
-        paths.TryGetProperty("/admin/imports/all", out _).ShouldBeTrue();
+        paths.TryGetProperty("/api/health", out _).ShouldBeTrue();
+        paths.TryGetProperty("/api/admin/imports/securities", out _).ShouldBeTrue();
+        paths.TryGetProperty("/api/admin/imports/funds", out _).ShouldBeTrue();
+        paths.TryGetProperty("/api/admin/imports/all", out _).ShouldBeTrue();
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class SwaggerDocumentTests : IClassFixture<VizfolioApiFactory>
 
         var summary = document.RootElement
             .GetProperty("paths")
-            .GetProperty("/admin/imports/securities")
+            .GetProperty("/api/admin/imports/securities")
             .GetProperty("post")
             .GetProperty("summary")
             .GetString();

@@ -6,8 +6,8 @@ The Performance API surfaces how a portfolio (or a single account inside it) per
 
 | Route | Verb | Handler |
 |---|---|---|
-| `/portfolios/{portfolioId}/performance` | GET | `GetPortfolioPerformanceEndpoint` |
-| `/portfolios/{portfolioId}/accounts/{accountId}/performance` | GET | `GetAccountPerformanceEndpoint` |
+| `/api/portfolios/{portfolioId}/performance` | GET | `GetPortfolioPerformanceEndpoint` |
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/performance` | GET | `GetAccountPerformanceEndpoint` |
 
 Both accept two optional query parameters:
 
@@ -209,7 +209,7 @@ Snapshots and transactions describe the same account from two angles, and it's t
 
 Rejecting a snapshot on the strict value delta would therefore reject *every honest snapshot*. Rejecting on quantity mismatch would block partial-history users (whose earlier transactions aren't imported yet) from ever recording an opening balance.
 
-The right posture is **accept always, report separately**. A future `GET /portfolios/{id}/accounts/{accountId}/reconciliation` endpoint would walk adjacent snapshot pairs and, for each holding, return findings labeled:
+The right posture is **accept always, report separately**. A future `GET /api/portfolios/{id}/accounts/{accountId}/reconciliation` endpoint would walk adjacent snapshot pairs and, for each holding, return findings labeled:
 
 - `QuantityMismatch` — hard, actionable. `expectedQty ≠ snapshot.Quantity`.
 - `LargeValueDelta` — soft, informational. `|impliedMarketMovement|` exceeds a configurable ratio of the prior balance (default: 3× — twenty-five hundred percent between two snapshots is a real signal, five percent is not).

@@ -2,8 +2,8 @@
 
 | Route | Verb | Handler |
 |---|---|---|
-| `/portfolios/{portfolioId}/accounts/{accountId}/history-coverage` | GET | `GetAccountHistoryCoverageEndpoint` |
-| `/portfolios/{portfolioId}/accounts/{accountId}/opening-balance` | POST | `SetOpeningBalanceEndpoint` |
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/history-coverage` | GET | `GetAccountHistoryCoverageEndpoint` |
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/opening-balance` | POST | `SetOpeningBalanceEndpoint` |
 
 The last two endpoints exist to close the "no historical data" gap that partial imports create — see the [History coverage and opening balance](#history-coverage-and-opening-balance) section below.
 
@@ -11,7 +11,7 @@ The last two endpoints exist to close the "no historical data" gap that partial 
 
 When a user imports a single QFX with only the past year of activity, the only snapshot is at that file's `<DTASOF>` (the end of the imported period). Any performance query whose `from` predates that snapshot will show `startingBalance.isComplete: false` and null returns with `Reason = "IncompleteStartingBalance"`. Two endpoints let a UI detect that state and let the user close it without waiting for another statement.
 
-### `GET /portfolios/{portfolioId}/accounts/{accountId}/history-coverage`
+### `GET /api/portfolios/{portfolioId}/accounts/{accountId}/history-coverage`
 
 Reports whether the account has a *history gap*: transactions exist before any snapshot.
 
@@ -32,7 +32,7 @@ Reports whether the account has a *history gap*: transactions exist before any s
 - The date fields are all nullable. An empty account (no transactions, no snapshots) returns them all as `null` and `hasHistoryGap: false`.
 - The three snapshot-count fields let the UI distinguish "no coverage at all" from "coverage exists but only from broker statements" from "user has already supplied an opening balance."
 
-### `POST /portfolios/{portfolioId}/accounts/{accountId}/opening-balance`
+### `POST /api/portfolios/{portfolioId}/accounts/{accountId}/opening-balance`
 
 Records the user-attested per-holding position at a chosen date. Creates one `AccountHoldingSnapshot` per holding with `Source = OpeningBalance` and `AsOf = request.asOf`.
 
@@ -78,7 +78,7 @@ Rationale: the user calling this endpoint is explicitly asserting "here's my ope
 
 1. After the user completes their first import, the client calls `GET .../history-coverage`. If `hasHistoryGap` is true, render a banner: *"Add an opening balance to see accurate historical returns."*
 2. The banner offers two CTAs:
-    - **Upload an older statement.** Points at `POST /portfolios/{id}/imports`. If the broker provides an earlier QFX, its `<DTASOF>` becomes a `BrokerPosition` snapshot that closes the gap with no manual data entry — this is the low-friction path when it works.
+    - **Upload an older statement.** Points at `POST /api/portfolios/{id}/imports`. If the broker provides an earlier QFX, its `<DTASOF>` becomes a `BrokerPosition` snapshot that closes the gap with no manual data entry — this is the low-friction path when it works.
     - **Enter opening balances manually.** Opens a form pre-filled with `suggestedOpeningDate` as `asOf`. The user fills quantity + market value (and optionally unit price / cost basis) per holding. Submit calls `POST .../opening-balance`.
 3. After either action, re-fetch `history-coverage`; when `hasHistoryGap` is false, dismiss the banner. Re-run the performance query; `returns.timeWeighted.rate` and `returns.moneyWeighted.rate` should now be populated.
 

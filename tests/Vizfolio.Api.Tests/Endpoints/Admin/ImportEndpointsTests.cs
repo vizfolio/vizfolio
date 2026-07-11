@@ -27,7 +27,7 @@ public sealed class ImportEndpointsTests : IClassFixture<VizfolioApiFactory>
             ["TEST1"], ["NASDAQ"], "0.1",
             new SecurityExtractSource(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
 
-        var response = await _client.PostAsJsonAsync("/admin/imports/securities",
+        var response = await _client.PostAsJsonAsync("/api/admin/imports/securities",
             new { tickers = new[] { "TEST1" }, force = true });
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -44,7 +44,7 @@ public sealed class ImportEndpointsTests : IClassFixture<VizfolioApiFactory>
         gate.TryAcquire(out var handle).ShouldBeTrue();
         try
         {
-            var response = await _client.PostAsJsonAsync("/admin/imports/securities", new { force = false });
+            var response = await _client.PostAsJsonAsync("/api/admin/imports/securities", new { force = false });
             response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
         }
         finally
@@ -67,7 +67,7 @@ public sealed class ImportEndpointsTests : IClassFixture<VizfolioApiFactory>
                 "Endpoint Fund", null, null, null, null, null, null, false, null, null),
             Holdings: []);
 
-        var response = await _client.PostAsJsonAsync("/admin/imports/funds",
+        var response = await _client.PostAsJsonAsync("/api/admin/imports/funds",
             new { seriesIds = new[] { "S000111111" }, force = true });
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);

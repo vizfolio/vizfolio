@@ -127,7 +127,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     [Fact]
     public async Task POST_portfolio_creates_and_returns_201()
     {
-        var response = await _client.PostAsJsonAsync("/portfolios", new CreatePortfolioRequest("E2E Portfolio"));
+        var response = await _client.PostAsJsonAsync("/api/portfolios", new CreatePortfolioRequest("E2E Portfolio"));
 
         response.StatusCode.ShouldBe(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<PortfolioResponse>();
@@ -141,7 +141,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     public async Task POST_account_under_unknown_portfolio_returns_404()
     {
         var response = await _client.PostAsJsonAsync(
-            $"/portfolios/{Guid.NewGuid()}/accounts",
+            $"/api/portfolios/{Guid.NewGuid()}/accounts",
             new CreateAccountRequest(Guid.Empty, "Brokerage", "fidelity.com", "1234", "Brokerage"));
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
@@ -153,12 +153,12 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var portfolio = await CreatePortfolioAsync();
 
         var first = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts",
             new CreateAccountRequest(portfolio.PortfolioId, "A1", "fidelity.com", "1234", "Brokerage"));
         first.StatusCode.ShouldBe(HttpStatusCode.Created);
 
         var second = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts",
             new CreateAccountRequest(portfolio.PortfolioId, "A2", "Fidelity.COM", "1234", "Brokerage"));
 
         second.StatusCode.ShouldBe(HttpStatusCode.Conflict);
@@ -267,7 +267,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         import.EnsureSuccessStatusCode();
 
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/performance?from=2025-06-01&to=2026-06-01");
+            $"/api/portfolios/{portfolio.PortfolioId}/performance?from=2025-06-01&to=2026-06-01");
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
@@ -292,7 +292,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         import.EnsureSuccessStatusCode();
 
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/performance?from=2025-06-01&to=2026-06-01");
+            $"/api/portfolios/{portfolio.PortfolioId}/performance?from=2025-06-01&to=2026-06-01");
 
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
@@ -328,7 +328,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var accountId = importBody!.Accounts[0].AccountId;
 
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance?from=2025-06-01&to=2026-06-01");
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance?from=2025-06-01&to=2026-06-01");
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
@@ -338,7 +338,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     [Fact]
     public async Task GET_portfolio_performance_unknown_portfolio_returns_404()
     {
-        var response = await _client.GetAsync($"/portfolios/{Guid.NewGuid()}/performance");
+        var response = await _client.GetAsync($"/api/portfolios/{Guid.NewGuid()}/performance");
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
@@ -347,7 +347,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     {
         var portfolio = await CreatePortfolioAsync();
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/performance");
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/performance");
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
@@ -359,7 +359,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var otherPortfolio = await CreatePortfolioAsync();
 
         var response = await _client.GetAsync(
-            $"/portfolios/{otherPortfolio.PortfolioId}/accounts/{account.AccountId}/performance");
+            $"/api/portfolios/{otherPortfolio.PortfolioId}/accounts/{account.AccountId}/performance");
 
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
@@ -369,7 +369,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     {
         var portfolio = await CreatePortfolioAsync();
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/performance?from=2026-06-01&to=2026-01-01");
+            $"/api/portfolios/{portfolio.PortfolioId}/performance?from=2026-06-01&to=2026-01-01");
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
@@ -383,7 +383,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var accountId = (await import.Content.ReadFromJsonAsync<PortfolioImportResult>())!.Accounts[0].AccountId;
 
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<HistoryCoverageResponse>();
@@ -401,7 +401,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     {
         var portfolio = await CreatePortfolioAsync();
         var response = await _client.GetAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/history-coverage");
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/history-coverage");
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
@@ -417,7 +417,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         // Snap the suggested opening date from the coverage endpoint, then POST an opening balance
         // that supplies both holdings so the starting balance becomes complete.
         var coverageBefore = await _client.GetFromJsonAsync<HistoryCoverageResponse>(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
         var openingDate = coverageBefore!.SuggestedOpeningDate!.Value;
 
         var openingRequest = new SetOpeningBalanceRequest(
@@ -432,7 +432,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
             });
 
         var setResponse = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
             openingRequest);
         setResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var setBody = await setResponse.Content.ReadFromJsonAsync<OpeningBalanceResponse>();
@@ -440,14 +440,14 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         setBody.SnapshotsUpdated.ShouldBe(0);
 
         var coverageAfter = await _client.GetFromJsonAsync<HistoryCoverageResponse>(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/history-coverage");
         coverageAfter!.HasHistoryGap.ShouldBeFalse();
         coverageAfter.EarliestSnapshotDate.ShouldBe(openingDate);
         coverageAfter.OpeningBalanceSnapshotCount.ShouldBe(2);
 
         // Performance is now honest — starting balance is complete, returns should be populated.
         var perfResponse = await _client.GetFromJsonAsync<PortfolioPerformanceResponse>(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance" +
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance" +
             $"?from={openingDate:yyyy-MM-dd}&to=2026-06-01");
         perfResponse!.StartingBalance.IsComplete.ShouldBeTrue();
         perfResponse.StartingBalance.Value.ShouldBe(5900m); // 5000 + 900
@@ -466,7 +466,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
 
         var asOf = new DateOnly(2025, 6, 1);
         var first = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
             new SetOpeningBalanceRequest(portfolio.PortfolioId, accountId, asOf, "USD",
                 new List<OpeningBalanceHoldingInput>
                 {
@@ -476,7 +476,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         (await first.Content.ReadFromJsonAsync<OpeningBalanceResponse>())!.SnapshotsCreated.ShouldBe(1);
 
         var second = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/opening-balance",
             new SetOpeningBalanceRequest(portfolio.PortfolioId, accountId, asOf, "USD",
                 new List<OpeningBalanceHoldingInput>
                 {
@@ -496,7 +496,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var account = await CreateAccountAsync(portfolio.PortfolioId, "OB-1");
 
         var response = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{account.AccountId}/opening-balance",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{account.AccountId}/opening-balance",
             new SetOpeningBalanceRequest(portfolio.PortfolioId, account.AccountId, new DateOnly(2025, 1, 1), "USD",
                 new List<OpeningBalanceHoldingInput>()));
 
@@ -509,7 +509,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var portfolio = await CreatePortfolioAsync();
 
         var response = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/opening-balance",
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/opening-balance",
             new SetOpeningBalanceRequest(portfolio.PortfolioId, Guid.NewGuid(), new DateOnly(2025, 1, 1), "USD",
                 new List<OpeningBalanceHoldingInput>
                 {
@@ -540,7 +540,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     private async Task<PortfolioResponse> CreatePortfolioAsync()
     {
         var response = await _client.PostAsJsonAsync(
-            "/portfolios", new CreatePortfolioRequest($"P-{Guid.NewGuid():N}"));
+            "/api/portfolios", new CreatePortfolioRequest($"P-{Guid.NewGuid():N}"));
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<PortfolioResponse>())!;
     }
@@ -548,7 +548,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     private async Task<AccountResponse> CreateAccountAsync(Guid portfolioId, string accountNumber)
     {
         var response = await _client.PostAsJsonAsync(
-            $"/portfolios/{portfolioId}/accounts",
+            $"/api/portfolios/{portfolioId}/accounts",
             new CreateAccountRequest(portfolioId, $"A-{accountNumber}", "fidelity.com", accountNumber, "Brokerage"));
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AccountResponse>())!;
@@ -558,13 +558,13 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(content)), "File", fileName);
-        return await _client.PostAsync($"/portfolios/{portfolioId}/accounts/{accountId}/imports", multipart);
+        return await _client.PostAsync($"/api/portfolios/{portfolioId}/accounts/{accountId}/imports", multipart);
     }
 
     private async Task<HttpResponseMessage> UploadPortfolioFileAsync(Guid portfolioId, string fileName, string content)
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(content)), "File", fileName);
-        return await _client.PostAsync($"/portfolios/{portfolioId}/imports", multipart);
+        return await _client.PostAsync($"/api/portfolios/{portfolioId}/imports", multipart);
     }
 }

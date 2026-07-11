@@ -24,7 +24,7 @@ if (app.Configuration.GetValue("Database:AutoMigrate", false))
     db.Database.Migrate();
 }
 
-app.UseFastEndpoints();
+app.UseFastEndpoints(c => c.Endpoints.RoutePrefix = "api");
 
 if (app.Environment.IsDevelopment())
 {

@@ -18,7 +18,7 @@ public sealed class HealthEndpointTests : IClassFixture<VizfolioApiFactory>
     [Fact]
     public async Task GET_health_returns_200_with_healthy_status()
     {
-        var response = await _client.GetAsync("/health");
+        var response = await _client.GetAsync("/api/health");
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
 
