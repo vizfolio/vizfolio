@@ -59,3 +59,35 @@
 .chart-body {
   height: 320px;
 }
+
+/* Call-to-action buttons projected into the first-run empty state. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  border-color: transparent;
+  color: var(--color-primary-contrast);
+}
+
+.btn--primary:hover {
+  opacity: 0.9;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.btn--ghost:hover {
+  background: var(--color-surface-2);
+}

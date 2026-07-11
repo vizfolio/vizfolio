@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
 
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
@@ -51,18 +52,28 @@ class MockApi {
   }
 }
 
+/**
+ * Builds the Dashboard with a mocked API. `TestBed.tick()` flushes the effect behind
+ * `toObservable(activeId)` (which emits asynchronously) without rendering the template —
+ * keeping the Chart.js child out of jsdom.
+ */
 function createDashboard(api: MockApi) {
   TestBed.configureTestingModule({
     imports: [Dashboard],
-    providers: [{ provide: PortfolioApiService, useValue: api }],
+    providers: [
+      { provide: PortfolioApiService, useValue: api },
+      provideRouter([]),
+    ],
   });
-  // Not calling detectChanges keeps the Chart.js child out of jsdom; the constructor's
-  // synchronous subscription has already populated the signals we assert on.
-  return TestBed.createComponent(Dashboard).componentInstance as any;
+  const cmp = TestBed.createComponent(Dashboard).componentInstance as any;
+  TestBed.tick();
+  return cmp;
 }
 
 describe('Dashboard', () => {
-  it('maps a real performance response into card signals', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('maps the active portfolio performance into card signals', () => {
     const cmp = createDashboard(new MockApi());
 
     expect(cmp.status()).toBe('ready');
@@ -75,19 +86,29 @@ describe('Dashboard', () => {
     expect(cmp.chartDatasets().length).toBe(3);
   });
 
-  it('falls back to sample data when there are no portfolios', () => {
+  it('shows the first-run empty state when there are no portfolios', () => {
     const api = new MockApi();
     api.portfolios = of([]);
     const cmp = createDashboard(api);
 
-    expect(cmp.status()).toBe('sample');
-    expect(cmp.notice()).toContain('sample data');
+    expect(cmp.status()).toBe('empty');
+    expect(cmp.portfolioName()).toBeNull();
+    expect(cmp.notice()).toBeNull();
+  });
+
+  it('falls back to sample data when the portfolio list cannot be loaded', () => {
+    const api = new MockApi();
+    api.portfolios = throwError(() => new Error('boom'));
+    const cmp = createDashboard(api);
+
+    expect(cmp.status()).toBe('error');
+    expect(cmp.notice()).toContain("Couldn't reach the API");
     expect(cmp.valueLabel()).not.toBe('—');
   });
 
-  it('falls back to sample data when the API errors', () => {
+  it('falls back to sample data when the performance request fails', () => {
     const api = new MockApi();
-    api.portfolios = throwError(() => new Error('boom'));
+    api.performance = throwError(() => new Error('nope'));
     const cmp = createDashboard(api);
 
     expect(cmp.status()).toBe('error');

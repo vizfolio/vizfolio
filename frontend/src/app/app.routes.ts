@@ -16,9 +16,8 @@ export const routes: Routes = [
   {
     path: 'portfolios',
     title: 'Portfolios · Vizfolio',
-    data: { title: 'Portfolios' },
     loadComponent: () =>
-      import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
+      import('./features/portfolios/portfolios').then((m) => m.Portfolios),
   },
   {
     path: 'accounts',

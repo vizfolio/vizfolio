@@ -1,0 +1,57 @@
+<section class="portfolios">
+  <header class="page-header">
+    <h1>Portfolios</h1>
+    <p class="page-subtitle">Group your brokerage accounts into portfolios.</p>
+  </header>
+
+  <form class="create-form" (submit)="$event.preventDefault(); create()">
+    <label class="field">
+      <span class="field-label">New portfolio name</span>
+      <input
+        class="field-input"
+        type="text"
+        name="portfolioName"
+        placeholder="e.g. Retirement"
+        [value]="name()"
+        (input)="onNameInput($event)"
+        [disabled]="submitting()"
+      />
+    </label>
+    <button type="submit" class="btn btn--primary" [disabled]="!canCreate()">
+      {{ submitting() ? 'Creating…' : 'Create portfolio' }}
+    </button>
+  </form>
+
+  @if (error(); as message) {
+    <p class="form-error" role="alert">{{ message }}</p>
+  }
+
+  @if (portfolios().length === 0) {
+    <app-empty-state
+      title="No portfolios yet"
+      message="Create your first portfolio above to start tracking accounts and performance."
+    />
+  } @else {
+    <ul class="portfolio-list">
+      @for (portfolio of portfolios(); track portfolio.portfolioId) {
+        <li class="portfolio-card" [class.active]="portfolio.portfolioId === activeId()">
+          <div class="portfolio-info">
+            <div class="portfolio-name">
+              <span>{{ portfolio.name }}</span>
+              @if (portfolio.portfolioId === activeId()) {
+                <span class="active-badge">Active</span>
+              }
+            </div>
+            <p class="portfolio-meta">
+              {{ accountsLabel(portfolio.accountCount) }} · Created
+              {{ formatDate(portfolio.createdAt) }}
+            </p>
+          </div>
+          <button type="button" class="btn btn--ghost" (click)="open(portfolio.portfolioId)">
+            Open
+          </button>
+        </li>
+      }
+    </ul>
+  }
+</section>
