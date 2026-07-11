@@ -28,6 +28,13 @@ export const routes: Routes = [
       import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
   },
   {
+    path: 'performance',
+    title: 'Performance · Vizfolio',
+    data: { title: 'Performance' },
+    loadComponent: () =>
+      import('./features/coming-soon/coming-soon').then((m) => m.ComingSoon),
+  },
+  {
     path: 'settings',
     title: 'Settings · Vizfolio',
     data: { title: 'Settings' },

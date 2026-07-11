@@ -14,14 +14,21 @@
   </div>
 
   <div class="topbar-right">
+    <!-- Portfolio switcher: the whole app is scoped to the active portfolio. -->
+    @if (portfolios.portfolios().length > 0) {
+      <label class="portfolio-switcher">
+        <span class="visually-hidden">Active portfolio</span>
+        <select
+          class="portfolio-select"
+          [value]="portfolios.activeId() ?? ''"
+          (change)="onSelect($event)"
+        >
+          @for (portfolio of portfolios.portfolios(); track portfolio.portfolioId) {
+            <option [value]="portfolio.portfolioId">{{ portfolio.name }}</option>
+          }
+        </select>
+      </label>
+    }
     <app-theme-toggle />
-    <!-- Account menu slot — placeholder until auth lands. -->
-    <button type="button" class="account-btn" aria-label="Account" disabled>
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor">
-        <path
-          d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-5 0-9 2.5-9 5.5V21h18v-1.5c0-3-4-5.5-9-5.5Z"
-        />
-      </svg>
-    </button>
   </div>
 </header>

@@ -25,6 +25,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
       'M12 3 2 8l10 5 10-5-10-5Zm0 7.2L5.3 7 12 5l6.7 2L12 10.2ZM4 12v4c0 1.7 3.6 3 8 3s8-1.3 8-3v-4l-8 4-8-4Z',
   },
   {
+    label: 'Performance',
+    route: '/performance',
+    iconPath:
+      'M3 3h2v16h16v2H3V3Zm4 10 4-4 3 3 5-5 1.4 1.4L14 10l-3-3-4 4-1.4-1.4L7 13Z',
+  },
+  {
     label: 'Settings',
     route: '/settings',
     iconPath:

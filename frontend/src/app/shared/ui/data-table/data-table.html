@@ -1,0 +1,44 @@
+<table class="data-table">
+  @if (caption()) {
+    <caption class="caption">{{ caption() }}</caption>
+  }
+  <thead>
+    <tr>
+      @for (column of columns(); track column.key) {
+        <th
+          scope="col"
+          [class.align-end]="column.align === 'end'"
+          [attr.aria-sort]="ariaSort(column)"
+        >
+          @if (isSortable(column)) {
+            <button type="button" class="sort-btn" (click)="toggleSort(column)">
+              <span>{{ column.header }}</span>
+              <span class="sort-indicator" aria-hidden="true">
+                @if (ariaSort(column) === 'ascending') {
+                  ▲
+                } @else if (ariaSort(column) === 'descending') {
+                  ▼
+                }
+              </span>
+            </button>
+          } @else {
+            <span>{{ column.header }}</span>
+          }
+        </th>
+      }
+    </tr>
+  </thead>
+  <tbody>
+    @for (row of sortedRows(); track $index) {
+      <tr>
+        @for (column of columns(); track column.key) {
+          <td [class.align-end]="column.align === 'end'">{{ cell(column, row) }}</td>
+        }
+      </tr>
+    } @empty {
+      <tr>
+        <td class="empty-row" [attr.colspan]="columns().length">{{ emptyMessage() }}</td>
+      </tr>
+    }
+  </tbody>
+</table>

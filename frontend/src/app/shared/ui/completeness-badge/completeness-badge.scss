@@ -1,0 +1,18 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.1rem var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: color-mix(in oklch, var(--color-positive) 16%, transparent);
+  color: var(--color-positive);
+}
+
+.badge--estimate {
+  background: color-mix(in oklch, var(--color-negative) 16%, transparent);
+  color: var(--color-negative);
+}
