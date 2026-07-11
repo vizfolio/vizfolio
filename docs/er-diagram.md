@@ -1,6 +1,6 @@
 # ER Diagram
 
-This is the persistence-layer view of the Vizfolio domain — what's in the database, how the tables relate, and which fields carry identity. Read it when you need a quick map before touching schema, migrations, or queries. Source of truth is `src/Vizfolio.Domain/` for the classes and `src/Vizfolio.Infrastructure/Persistence/Configurations/` for the EF mappings.
+This is the persistence-layer view of the Vizfolio domain — what's in the database, how the tables relate, and which fields carry identity. Read it when you need a quick map before touching schema, migrations, or queries. Source of truth is `backend/src/Vizfolio.Domain/` for the classes and `backend/src/Vizfolio.Infrastructure/Persistence/Configurations/` for the EF mappings.
 
 ## Diagram
 
@@ -180,10 +180,10 @@ There is intentionally **no DB-level uniqueness** on `(AccountId, SecurityId)` o
 
 | Topic                                            | Source                                                                  |
 | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Domain classes                                   | `src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference}/`             |
-| EF mappings, table/column names, indexes         | `src/Vizfolio.Infrastructure/Persistence/Configurations/`                  |
-| Reference-data seeds                             | `src/Vizfolio.Infrastructure/Persistence/Seeding/`                         |
-| Current schema as SQL                            | `src/Vizfolio.Infrastructure/Persistence/Migrations/*_Init.cs`             |
-| Resolving a transaction's holding                | `src/Vizfolio.Application/Portfolios/AccountHoldingResolver.cs`            |
-| Backfilling existing transactions to Holdings    | `src/Vizfolio.Application/PortfolioImports/Services/LedgerRelinker.cs`     |
-| Backfilling fund holdings to Securities          | `src/Vizfolio.Application/Extracts/Importers/HoldingRelinker.cs`           |
+| Domain classes                                   | `backend/src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference}/`             |
+| EF mappings, table/column names, indexes         | `backend/src/Vizfolio.Infrastructure/Persistence/Configurations/`                  |
+| Reference-data seeds                             | `backend/src/Vizfolio.Infrastructure/Persistence/Seeding/`                         |
+| Current schema as SQL                            | `backend/src/Vizfolio.Infrastructure/Persistence/Migrations/*_Init.cs`             |
+| Resolving a transaction's holding                | `backend/src/Vizfolio.Application/Portfolios/AccountHoldingResolver.cs`            |
+| Backfilling existing transactions to Holdings    | `backend/src/Vizfolio.Application/PortfolioImports/Services/LedgerRelinker.cs`     |
+| Backfilling fund holdings to Securities          | `backend/src/Vizfolio.Application/Extracts/Importers/HoldingRelinker.cs`           |

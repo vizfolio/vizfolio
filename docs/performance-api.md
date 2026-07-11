@@ -1,6 +1,6 @@
 # Performance API
 
-The Performance API surfaces how a portfolio (or a single account inside it) performed over a date range. Read this doc when you're touching anything under `src/Vizfolio.Application/Portfolios/` (the performance service and calculator strategies), the endpoints at `src/Vizfolio.Api/Endpoints/Portfolios/GetPortfolioPerformanceEndpoint.cs` and `GetAccountPerformanceEndpoint.cs`, or the QFX parsing that feeds them (`src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs`).
+The Performance API surfaces how a portfolio (or a single account inside it) performed over a date range. Read this doc when you're touching anything under `backend/src/Vizfolio.Application/Portfolios/` (the performance service and calculator strategies), the endpoints at `backend/src/Vizfolio.Api/Endpoints/Portfolios/GetPortfolioPerformanceEndpoint.cs` and `GetAccountPerformanceEndpoint.cs`, or the QFX parsing that feeds them (`backend/src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs`).
 
 ## Endpoints
 
@@ -139,7 +139,7 @@ R = ∏ (1 + Rᵢ) − 1
 
 Requires interior snapshots (i.e., snapshot `AsOf` strictly between `from` and `to`) where every relevant holding has coverage at that date. In the v1 QFX-only case (snapshot at end only), this calculator returns `null` with reason `InsufficientIntermediateSnapshots`.
 
-To swap this in as the TWRR strategy, change one line in `src/Vizfolio.Application/DependencyInjection.cs`:
+To swap this in as the TWRR strategy, change one line in `backend/src/Vizfolio.Application/DependencyInjection.cs`:
 
 ```csharp
 services.AddScoped<ITimeWeightedReturnCalculator, ChainedSubPeriodTimeWeightedReturnCalculator>();
@@ -182,7 +182,7 @@ Adding a new return metric is a matter of implementing the corresponding interfa
 
 ## QFX ingestion nuances
 
-The performance numbers are only as good as the transactions and snapshots imported from QFX. The parser at `src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs` has three important behaviors that affect performance results:
+The performance numbers are only as good as the transactions and snapshots imported from QFX. The parser at `backend/src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs` has three important behaviors that affect performance results:
 
 ### Cash contributions live in `<INVBANKTRAN>` inside `<INVSTMTRS>`
 
@@ -220,6 +220,6 @@ Nothing is built for this yet. Current behavior: any snapshot is accepted at fac
 
 ## Extending the response
 
-New sibling metrics slot onto `PerformanceReturnsResult` or as top-level fields on `PortfolioPerformanceResult`. Route and existing metrics don't change. The mapping layer (`src/Vizfolio.Api/Endpoints/Portfolios/PerformanceMapping.cs`) projects Application-layer records into API records; add a new mapping method there when the shape grows.
+New sibling metrics slot onto `PerformanceReturnsResult` or as top-level fields on `PortfolioPerformanceResult`. Route and existing metrics don't change. The mapping layer (`backend/src/Vizfolio.Api/Endpoints/Portfolios/PerformanceMapping.cs`) projects Application-layer records into API records; add a new mapping method there when the shape grows.
 
 The service currently issues one round-trip per data set (holdings, snapshots, active-in-range holdings, contribution rows, default-`from` resolution). Adding another metric that needs the same data should reuse the loaded lists rather than requerying.

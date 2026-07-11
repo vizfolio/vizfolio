@@ -20,8 +20,8 @@
     {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          # Backend: .NET SDK 10 (must match global.json 10.0.300).
-          # Frontend: Node.js 22 (Angular CLI is pinned in web/package.json and
+          # Backend: .NET SDK 10 (must match backend/global.json 10.0.301).
+          # Frontend: Node.js 22 (Angular CLI is pinned in frontend/package.json and
           # run via npm/npx, not packaged by Nix, so the frontend stays portable
           # and easy to extract to its own repo later).
           packages = [
@@ -39,8 +39,8 @@
           shellHook = ''
             echo "vizfolio dev shell"
             echo "  dotnet $(dotnet --version)   node $(node --version)"
-            echo "  backend:  dotnet run --project src/Vizfolio.Api   (http://localhost:5261)"
-            echo "  frontend: npm --prefix web start                  (http://localhost:4200)"
+            echo "  backend:  (cd backend && dotnet run --project src/Vizfolio.Api)   (http://localhost:5261)"
+            echo "  frontend: npm --prefix frontend start                            (http://localhost:4200)"
           '';
         };
       });

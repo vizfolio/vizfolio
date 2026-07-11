@@ -1,17 +1,27 @@
 # Frontend
 
-The Vizfolio UI is an Angular single-page app that lives in `web/` and talks to the .NET API over REST. It is intentionally **self-contained**: it has its own `package.json`, `angular.json`, and `web/.gitignore`, holds no references into the .NET projects, and communicates only over HTTP. That keeps it easy to extract into its own repository later without touching the backend.
+The Vizfolio UI is an Angular single-page app that lives in `frontend/` and talks to the .NET API (in `backend/`) over REST. It is intentionally **self-contained**: it has its own `package.json`, `angular.json`, and `frontend/.gitignore`, holds no references into the .NET projects, and communicates only over HTTP. That keeps it easy to extract into its own repository later without touching the backend.
+
+## Repo layout
+
+```
+backend/     # .NET solution (Vizfolio.slnx, global.json, dotnet-tools.json, src/, tests/)
+frontend/    # Angular workspace (this doc)
+docs/        # shared documentation
+```
+
+Run `dotnet` commands from `backend/` (that is where `global.json` pins the SDK). Run `ng`/`npm` from `frontend/` (or with `npm --prefix frontend …`).
 
 ## Stack
 
 - **Angular** (standalone components, signals, zoneless change detection — `OnPush` is the default). Scaffolded with `ng new … --zoneless --style scss --ssr=false`.
 - **Angular CDK** (`@angular/cdk`) for accessible headless primitives (overlay, a11y, drag-drop, `CdkTable`, virtual scroll). We deliberately did **not** pull in Angular Material — styling stays custom. Material can be layered on later if a full design system is wanted.
-- **Node 22** + npm. The Angular CLI is pinned as a dev dependency in `web/package.json` and run via `npm`/`npx` (not packaged by Nix), so the frontend toolchain travels with the workspace.
+- **Node 22** + npm. The Angular CLI is pinned as a dev dependency in `frontend/package.json` and run via `npm`/`npx` (not packaged by Nix), so the frontend toolchain travels with the workspace.
 
-## Layout
+## Frontend layout
 
 ```
-web/
+frontend/
 ├── angular.json          # serve builder wires proxy.conf.json
 ├── package.json          # Angular + @angular/cdk deps, ng scripts
 ├── proxy.conf.json       # dev proxy: /api → http://localhost:5261
@@ -24,29 +34,29 @@ The Nix flake (`flake.nix`) provides both toolchains. Enter it with `nix develop
 
 ```bash
 # terminal 1 — API on http://localhost:5261
-dotnet run --project src/Vizfolio.Api
+cd backend && dotnet run --project src/Vizfolio.Api
 
 # terminal 2 — SPA on http://localhost:4200
-npm --prefix web start        # == ng serve
+npm --prefix frontend start        # == ng serve
 ```
 
-`ng serve` proxies every `/api/*` request to the API (`web/proxy.conf.json`), so the browser sees a single origin and **no CORS configuration is needed** in development. Open `http://localhost:4200`.
+`ng serve` proxies every `/api/*` request to the API (`frontend/proxy.conf.json`), so the browser sees a single origin and **no CORS configuration is needed** in development. Open `http://localhost:4200`.
 
 ## API contract
 
-All API routes are served under a global **`/api`** prefix (set in `src/Vizfolio.Api/Program.cs` via `app.UseFastEndpoints(c => c.Endpoints.RoutePrefix = "api")`). For example the health check is `GET /api/health` and portfolio performance is `GET /api/portfolios/{id}/performance`. Swagger UI remains at `/swagger` and the OpenAPI document at `/swagger/v1/swagger.json` (these are not affected by the route prefix).
+All API routes are served under a global **`/api`** prefix (set in `backend/src/Vizfolio.Api/Program.cs` via `app.UseFastEndpoints(c => c.Endpoints.RoutePrefix = "api")`). For example the health check is `GET /api/health` and portfolio performance is `GET /api/portfolios/{id}/performance`. Swagger UI remains at `/swagger` and the OpenAPI document at `/swagger/v1/swagger.json` (these are not affected by the route prefix).
 
 ## Angular CLI MCP server
 
-The workspace ships an `angular-cli` MCP server config in the repo-root `.mcp.json`, run via `npx -y @angular/cli mcp`. It grounds AI-assisted development in current Angular guidance rather than stale training data. **Before writing or modifying Angular code, call its `get_best_practices` tool** (and `search_documentation` / `find_examples` as needed) so generated code uses standalone components, signals, `inject()`, and native control flow (`@if`/`@for`). In Claude Code, confirm it is connected with `/mcp` (you should see the `angular-cli` server and its tools).
+The repo-root `.mcp.json` registers an `angular-cli` MCP server. Because Claude Code launches MCP servers from the project root (there is no `cwd` field) and Angular's `list_projects` reads `angular.json`, the command wraps `npx -y @angular/cli mcp` in a `cd "$CLAUDE_PROJECT_DIR/frontend"` so the workspace is found. It grounds AI-assisted development in current Angular guidance rather than stale training data. **Before writing or modifying Angular code, call its `get_best_practices` tool** (and `search_documentation` / `find_examples` as needed) so generated code uses standalone components, signals, `inject()`, and native control flow (`@if`/`@for`). In Claude Code, confirm it is connected with `/mcp`.
 
-## Deferred: hosting the SPA inside the .NET app
+## Deferred: hosting the SPA inside the backend image
 
-Today the frontend is served independently (`ng serve`) and the .NET app is API-only — the cleanest arrangement while the UI is young and most likely to move to its own repo. When co-hosting is wanted, it is a small additive change on the backend:
+Today the frontend is served independently (`ng serve`) and the .NET app is API-only — the cleanest arrangement while the UI is young and most likely to move to its own repo. The intended production path is a **multi-stage container build**: build the SPA, then copy its `dist` into the backend image so a single image serves both.
 
-1. `npm --prefix web run build` emits static assets to `web/dist/vizfolio-web/`.
-2. In `Program.cs`, add `app.UseStaticFiles()` (pointed at the built assets) and `app.MapFallbackToFile("index.html")` so client-side routes resolve to the SPA. Gate it behind config so it is off by default.
-3. Optionally add an MSBuild step to run `ng build` during `dotnet publish`.
+1. Stage 1 (`node:22`): `npm ci && npm run build` in `frontend/` → static assets in `frontend/dist/vizfolio-web/`.
+2. Stage 2 (`dotnet/sdk:10` → `dotnet/aspnet:10`): `dotnet publish backend/…`, then `COPY --from=stage1 /frontend/dist/vizfolio-web ./wwwroot`.
+3. In `Program.cs`, add `app.UseStaticFiles()` + `app.MapFallbackToFile("index.html")` so client-side routes resolve to the SPA. Gate it behind config so local `dotnet run` stays API-only.
 
 Because the API already lives under `/api`, the SPA fallback at `/` will not collide with it.
 

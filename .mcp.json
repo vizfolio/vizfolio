@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "angular-cli": {
-      "command": "npx",
-      "args": ["-y", "@angular/cli", "mcp"]
+      "command": "sh",
+      "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR/frontend\" && exec npx -y @angular/cli mcp"]
     }
   }
 }

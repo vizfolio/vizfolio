@@ -11,7 +11,7 @@ obj/
 *.db-shm
 *.db-wal
 
-# Frontend (web/ Angular workspace; web/.gitignore covers the rest)
-web/node_modules/
-web/dist/
-web/.angular/
+# Frontend (frontend/ Angular workspace; frontend/.gitignore covers the rest)
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
