@@ -10,3 +10,8 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+
+# Frontend (frontend/ Angular workspace; frontend/.gitignore covers the rest)
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
