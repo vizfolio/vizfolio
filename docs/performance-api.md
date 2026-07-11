@@ -200,6 +200,24 @@ If cost basis for the transferred shares matters for performance, upload an `Acc
 
 `<INVBAL>` inside `<INVSTMTRS>` carries the account's cash balance at `DTASOF`. The current parser does not read it, so `AccountHoldingSnapshot` records represent *securities market value only*. For accounts with meaningful cash positions, the reported balance understates portfolio value by the cash amount. This is an explicit v1 limitation, not a bug in the performance service.
 
+## Reconciliation (future work)
+
+Snapshots and transactions describe the same account from two angles, and it's tempting to want the service to *reject* a snapshot that doesn't tie out against the ledger. In practice we deliberately don't, because two invariants behave differently:
+
+- **Quantity is a hard invariant.** For any holding, `expectedQtyAtB = qtyAtA + Σ (Buy.qty − Sell.qty + Reinvest.qty + Transfer.qty) over (A, B]`. When `snapshot.Quantity` disagrees with `expectedQty`, the ledger is genuinely wrong — a transaction is missing, duplicated, or a corporate action (split, spin-off) wasn't captured. This is actionable, and the fix belongs in the ledger.
+- **Market value is a soft invariant.** `actualValueDelta − Σ contributions − Σ income` equals *implied market movement* (unrealized gain/loss + reinvested dividends at unknown prices + FX + fees not otherwise captured). That number is never zero for a snapshot pair spanning real time, because market movement is by definition not in the transaction ledger. There is no threshold at which "tied out" is a defensible cutoff.
+
+Rejecting a snapshot on the strict value delta would therefore reject *every honest snapshot*. Rejecting on quantity mismatch would block partial-history users (whose earlier transactions aren't imported yet) from ever recording an opening balance.
+
+The right posture is **accept always, report separately**. A future `GET /portfolios/{id}/accounts/{accountId}/reconciliation` endpoint would walk adjacent snapshot pairs and, for each holding, return findings labeled:
+
+- `QuantityMismatch` — hard, actionable. `expectedQty ≠ snapshot.Quantity`.
+- `LargeValueDelta` — soft, informational. `|impliedMarketMovement|` exceeds a configurable ratio of the prior balance (default: 3× — twenty-five hundred percent between two snapshots is a real signal, five percent is not).
+
+The endpoint would be report-only; imports and `POST .../opening-balance` continue to succeed regardless. The UI decides whether to render findings quietly on a data-hygiene screen or loudly on onboarding, and could later persist per-finding acknowledgements.
+
+Nothing is built for this yet. Current behavior: any snapshot is accepted at face value, and any transaction ledger is used as-is. When this becomes a real UX requirement — most likely once the app has enough long-term users to accumulate quantity drift — this is the section to expand into an actual endpoint.
+
 ## Extending the response
 
 New sibling metrics slot onto `PerformanceReturnsResult` or as top-level fields on `PortfolioPerformanceResult`. Route and existing metrics don't change. The mapping layer (`src/Vizfolio.Api/Endpoints/Portfolios/PerformanceMapping.cs`) projects Application-layer records into API records; add a new mapping method there when the shape grows.
