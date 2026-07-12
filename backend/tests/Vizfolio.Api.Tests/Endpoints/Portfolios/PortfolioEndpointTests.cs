@@ -1,11 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Vizfolio.Api.Endpoints.Portfolios;
 using Vizfolio.Application.PortfolioImports.Models;
+using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Securities;
 using Vizfolio.Infrastructure.Persistence;
 
@@ -225,6 +227,50 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType);
         var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
         body!.Status.ShouldBe(PortfolioImportStatus.UnknownParser);
+    }
+
+    [Fact]
+    public async Task POST_account_import_vanguard_xlsx_inserts_and_persists_source_type()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "9020");
+
+        using var multipart = new MultipartFormDataContent();
+        multipart.Add(new ByteArrayContent(BuildVanguardXlsx()), "File", "report.xlsx");
+        var response = await _client.PostAsync(
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{account.AccountId}/imports", multipart);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.SourceSystem.ShouldBe("VANGUARD");
+        body.Accounts[0].Inserted.ShouldBe(2);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var sweep = await db.AccountTransactions.AsNoTracking()
+            .SingleAsync(t => t.AccountId == account.AccountId && t.SourceType == "Sweep in");
+        sweep.Type.ShouldBe(TransactionType.Other);
+    }
+
+    private static byte[] BuildVanguardXlsx()
+    {
+        using var workbook = new XLWorkbook();
+        var ws = workbook.AddWorksheet("Transactions");
+        string[] headers =
+        [
+            "Settlement date", "Trade date", "Symbol", "Name", "Type", "Account type",
+            "Quantity", "Price", "Commission & fees**", "Amount",
+        ];
+        for (var c = 0; c < headers.Length; c++) ws.Cell(4, c + 1).Value = headers[c];
+
+        string?[] buy = ["6/1/2026", "6/1/2026", "VOO", "Vanguard S&P 500 ETF", "Buy", "CASH", "2", "$500.0000", "Free", "-$1000.0000"];
+        string?[] sweep = ["6/2/2026", "6/2/2026", "VMFXX", "Settlement Fund", "Sweep in", "CASH", null, null, null, "-$50.0000"];
+        for (var c = 0; c < buy.Length; c++) if (buy[c] is { } v) ws.Cell(5, c + 1).Value = v;
+        for (var c = 0; c < sweep.Length; c++) if (sweep[c] is { } v) ws.Cell(6, c + 1).Value = v;
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
 
     [Fact]

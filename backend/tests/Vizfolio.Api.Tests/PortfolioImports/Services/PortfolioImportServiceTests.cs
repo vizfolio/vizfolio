@@ -655,6 +655,126 @@ public sealed class PortfolioImportServiceTests
         result.SourceSystem.ShouldBe("SPECIFIC");
     }
 
+    [Fact]
+    public async Task ImportToAccountAsync_dedupes_the_same_transaction_across_source_systems()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+
+        // The same economic buy (identical date/ticker/signed qty/signed amount) appears in two sources
+        // with different labels/ids; plus one row unique to each source.
+        var shared = Buy("VOO", tradeDate: new DateOnly(2026, 6, 1), quantity: 10m, amount: -5000m);
+        var onlyA = Buy("AAPL", tradeDate: new DateOnly(2026, 6, 2), quantity: 5m, amount: -1000m);
+        var onlyB = Buy("MSFT", tradeDate: new DateOnly(2026, 6, 3), quantity: 3m, amount: -1200m);
+
+        var parserA = new LedgerStubParser("SRCA", [shared, onlyA]);
+        var parserB = new LedgerStubParser("SRCB", [shared, onlyB]);
+        var service = new PortfolioImportService(
+            ctx.Db, new IPortfolioFileParser[] { parserA, parserB }, NullLogger<PortfolioImportService>.Instance);
+
+        await service.ImportToAccountAsync(account.AccountId, Stream("a"), "a.dat", CancellationToken.None, "SRCA");
+        var second = await service.ImportToAccountAsync(account.AccountId, Stream("b"), "b.dat", CancellationToken.None, "SRCB");
+
+        second.Accounts[0].Inserted.ShouldBe(1); // onlyB
+        second.Accounts[0].Skipped.ShouldBe(1);  // shared already covered by SRCA
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync(t => t.AccountId == account.AccountId)).ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_dedupes_across_sources_even_after_a_db_round_trip_changes_decimal_scale()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+
+        // The class of bug a user hit: the same cash deposit (no ticker/quantity) in both sources, but the
+        // amount stored from QFX comes back from SQLite with a different decimal scale than the
+        // freshly-parsed Vanguard amount. The fingerprint must ignore scale so the second import dedupes.
+        var qfxLike = new ParsedTransaction(
+            ExternalId: "FIT-500", Type: TransactionType.Deposit, TradeDate: new DateOnly(2026, 6, 15),
+            SettlementDate: null, Ticker: null, Cusip: null, Quantity: null, Price: null,
+            Amount: 500.00m, Fees: null, CurrencyCode: null, Memo: null);
+        var vanguardLike = new ParsedTransaction(
+            ExternalId: null, Type: TransactionType.Deposit, TradeDate: new DateOnly(2026, 6, 15),
+            SettlementDate: new DateOnly(2026, 6, 15), Ticker: null, Cusip: null, Quantity: null, Price: null,
+            Amount: 500.0000m, Fees: null, CurrencyCode: null, Memo: "To: MY CREDIT UNION", SourceType: "Funds Received");
+
+        var service = new PortfolioImportService(
+            ctx.Db,
+            new IPortfolioFileParser[] { new LedgerStubParser("QFX", [qfxLike]), new LedgerStubParser("VANGUARD", [vanguardLike]) },
+            NullLogger<PortfolioImportService>.Instance);
+
+        await service.ImportToAccountAsync(account.AccountId, Stream("q"), "q.qfx", CancellationToken.None, "QFX");
+        var second = await service.ImportToAccountAsync(account.AccountId, Stream("v"), "v.xlsx", CancellationToken.None, "VANGUARD");
+
+        second.Accounts[0].Inserted.ShouldBe(0);
+        second.Accounts[0].Skipped.ShouldBe(1);
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync(t => t.AccountId == account.AccountId)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_keeps_genuine_same_day_duplicates_but_is_idempotent_on_re_upload()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+
+        // Two truly-identical rows in one file are distinct transactions and must both import.
+        var dup = Buy("VOO", tradeDate: new DateOnly(2026, 6, 1), quantity: 1m, amount: -100m);
+        var parser = new LedgerStubParser("SRCA", [dup, dup]);
+        var service = new PortfolioImportService(
+            ctx.Db, new IPortfolioFileParser[] { parser }, NullLogger<PortfolioImportService>.Instance);
+
+        var first = await service.ImportToAccountAsync(account.AccountId, Stream("x"), "x.dat", CancellationToken.None, "SRCA");
+        first.Accounts[0].Inserted.ShouldBe(2);
+
+        var second = await service.ImportToAccountAsync(account.AccountId, Stream("x"), "x.dat", CancellationToken.None, "SRCA");
+        second.Accounts[0].Inserted.ShouldBe(0);
+        second.Accounts[0].Skipped.ShouldBe(2);
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync()).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_persists_the_raw_source_type()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+
+        var sweep = new ParsedTransaction(
+            ExternalId: null, Type: TransactionType.Other, TradeDate: new DateOnly(2026, 4, 3),
+            SettlementDate: null, Ticker: null, Cusip: null, Quantity: null, Price: null,
+            Amount: -391.54m, Fees: null, CurrencyCode: null, Memo: null, SourceType: "Sweep in");
+        var parser = new LedgerStubParser("SRCA", [sweep]);
+        var service = new PortfolioImportService(
+            ctx.Db, new IPortfolioFileParser[] { parser }, NullLogger<PortfolioImportService>.Instance);
+
+        await service.ImportToAccountAsync(account.AccountId, Stream("x"), "x.dat", CancellationToken.None, "SRCA");
+
+        var row = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync();
+        row.SourceType.ShouldBe("Sweep in");
+    }
+
+    private static ParsedTransaction Buy(string ticker, DateOnly tradeDate, decimal quantity, decimal amount) =>
+        new(ExternalId: null, Type: TransactionType.Buy, TradeDate: tradeDate, SettlementDate: null,
+            Ticker: ticker, Cusip: null, Quantity: quantity, Price: null, Amount: amount,
+            Fees: null, CurrencyCode: null, Memo: null);
+
+    /// <summary>A metadata-less parser that emits a fixed transaction list. Only an explicit
+    /// <c>sourceSystem</c> override selects it (CanParse is false), so tests can drive each source.</summary>
+    private sealed class LedgerStubParser(string sourceSystem, IReadOnlyList<ParsedTransaction> transactions)
+        : IPortfolioFileParser
+    {
+        public string SourceSystem { get; } = sourceSystem;
+        public string DisplayName => SourceSystem;
+        public int Priority => 0;
+        public IReadOnlyCollection<string> FileExtensions { get; } = [".dat"];
+
+        public Task<bool> CanParseAsync(Stream stream, string fileName, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+
+        public Task<ParsedPortfolioFile> ParseAsync(Stream stream, string fileName, CancellationToken cancellationToken) =>
+            Task.FromResult(new ParsedPortfolioFile(
+                SourceSystem, [new ParsedAccountStatement(null, null, transactions, [], null)]));
+    }
+
     /// <summary>A parser that claims every file, used to assert auto-detect priority ordering.</summary>
     private sealed class StubParser(string sourceSystem, int priority) : IPortfolioFileParser
     {
