@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Domain.Funds;
 using Vizfolio.Domain.Portfolios;
+using Vizfolio.Domain.Pricing;
 using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
 
@@ -25,6 +26,10 @@ public interface IAppDbContext
     DbSet<FundSnapshot> FundSnapshots { get; }
 
     DbSet<FundHolding> FundHoldings { get; }
+
+    DbSet<PriceHistory> PriceHistories { get; }
+
+    DbSet<CorporateAction> CorporateActions { get; }
 
     DbSet<CitSubstitution> CitSubstitutions { get; }
 

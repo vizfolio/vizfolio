@@ -187,6 +187,64 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "CorporateAction",
+                columns: table => new
+                {
+                    CorporateActionId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Kind = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
+                    SecurityId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    SymbolKey = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
+                    Type = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
+                    ExDate = table.Column<DateOnly>(type: "TEXT", nullable: false),
+                    SplitNumerator = table.Column<decimal>(type: "decimal(28,8)", nullable: false),
+                    SplitDenominator = table.Column<decimal>(type: "decimal(28,8)", nullable: false),
+                    Source = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
+                    FetchedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_CorporateAction", x => x.CorporateActionId);
+                    table.ForeignKey(
+                        name: "FK_CorporateAction_Security_SecurityId",
+                        column: x => x.SecurityId,
+                        principalTable: "Security",
+                        principalColumn: "SecurityId",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PriceHistory",
+                columns: table => new
+                {
+                    PriceHistoryId = table.Column<Guid>(type: "TEXT", nullable: false),
+                    Kind = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
+                    SecurityId = table.Column<Guid>(type: "TEXT", nullable: true),
+                    SymbolKey = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
+                    AsOf = table.Column<DateOnly>(type: "TEXT", nullable: false),
+                    Close = table.Column<decimal>(type: "decimal(28,4)", nullable: false),
+                    CurrencyCode = table.Column<string>(type: "TEXT", maxLength: 3, nullable: true),
+                    Source = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false),
+                    Adjusted = table.Column<bool>(type: "INTEGER", nullable: false),
+                    FetchedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PriceHistory", x => x.PriceHistoryId);
+                    table.ForeignKey(
+                        name: "FK_PriceHistory_Currency_CurrencyCode",
+                        column: x => x.CurrencyCode,
+                        principalTable: "Currency",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_PriceHistory_Security_SecurityId",
+                        column: x => x.SecurityId,
+                        principalTable: "Security",
+                        principalColumn: "SecurityId",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "FundHolding",
                 columns: table => new
                 {
@@ -403,6 +461,7 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                     Fees = table.Column<decimal>(type: "decimal(28,4)", nullable: true),
                     CurrencyCode = table.Column<string>(type: "TEXT", maxLength: 3, nullable: true),
                     Memo = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
+                    SourceType = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
                     ImportedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
@@ -1000,6 +1059,16 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 column: "SubstituteTicker");
 
             migrationBuilder.CreateIndex(
+                name: "IX_CorporateAction_SecurityId_ExDate",
+                table: "CorporateAction",
+                columns: new[] { "SecurityId", "ExDate" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CorporateAction_SymbolKey_ExDate",
+                table: "CorporateAction",
+                columns: new[] { "SymbolKey", "ExDate" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Fund_SeriesId",
                 table: "Fund",
                 column: "SeriesId",
@@ -1058,6 +1127,26 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_PriceHistory_AsOf",
+                table: "PriceHistory",
+                column: "AsOf");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PriceHistory_CurrencyCode",
+                table: "PriceHistory",
+                column: "CurrencyCode");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PriceHistory_SecurityId_AsOf",
+                table: "PriceHistory",
+                columns: new[] { "SecurityId", "AsOf" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PriceHistory_SymbolKey_AsOf",
+                table: "PriceHistory",
+                columns: new[] { "SymbolKey", "AsOf" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Security_Cik",
                 table: "Security",
                 column: "Cik",
@@ -1082,6 +1171,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                 name: "CitSubstitution");
 
             migrationBuilder.DropTable(
+                name: "CorporateAction");
+
+            migrationBuilder.DropTable(
                 name: "FundHolding");
 
             migrationBuilder.DropTable(
@@ -1089,6 +1181,9 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "FundShareClass");
+
+            migrationBuilder.DropTable(
+                name: "PriceHistory");
 
             migrationBuilder.DropTable(
                 name: "AccountHolding");

@@ -370,7 +370,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     }
 
     [Fact]
-    public async Task GET_portfolio_performance_partial_history_scenario_starts_at_zero_and_incomplete()
+    public async Task GET_portfolio_performance_before_account_existed_starts_at_zero_complete_and_returns_compute()
     {
         await EnsurePerfSecuritiesAsync();
         var portfolio = await CreatePortfolioAsync();
@@ -383,17 +383,21 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
 
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
-        body!.StartingBalance.Value.ShouldBe(0m);
-        body.StartingBalance.IsComplete.ShouldBeFalse();
-        body.StartingBalance.SnapshotAsOf.ShouldBeNull();
-        body.StartingBalance.HoldingsMissingSnapshot.ShouldBeGreaterThan(0);
 
-        // Both returns should be null with reason IncompleteStartingBalance in this scenario.
-        body.Returns.TimeWeighted.Rate.ShouldBeNull();
-        body.Returns.TimeWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+        // The account's first activity is a deposit on 2025-10-01, so nothing was held at the 2025-06-01
+        // `from`: the starting balance is a legitimate $0 and complete (ledger roll-forward, no missing
+        // snapshot). Previously this reported incomplete — the §7 not-yet-held bug.
+        body!.StartingBalance.Value.ShouldBe(0m);
+        body.StartingBalance.IsComplete.ShouldBeTrue();
+        body.StartingBalance.SnapshotAsOf.ShouldBeNull();
+        body.StartingBalance.HoldingsMissingSnapshot.ShouldBe(0);
+
+        // With an honest $0 start and a known end, the windowed return now computes instead of exploding
+        // or returning null: $7500 deposited, now worth $6255 → a negative period return.
+        body.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        body.Returns.TimeWeighted.Rate!.Value.ShouldBeLessThan(0m);
         body.Returns.TimeWeighted.Method.ShouldBe("ModifiedDietz");
-        body.Returns.MoneyWeighted.Rate.ShouldBeNull();
-        body.Returns.MoneyWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+        body.Returns.MoneyWeighted.Rate.ShouldNotBeNull();
         body.Returns.MoneyWeighted.Method.ShouldBe("XIRR");
 
         // The QFX includes a $7500 ACH deposit wrapped in <INVBANKTRAN> — must surface as a Deposit contribution.

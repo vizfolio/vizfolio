@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Infrastructure.Extracts;
 using Vizfolio.Infrastructure.Persistence;
+using Vizfolio.Infrastructure.Pricing;
 
 namespace Vizfolio.Infrastructure;
 
@@ -18,6 +19,7 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(options => ConfigureProvider(options, provider, connectionString));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddExtracts(configuration);
+        services.AddPricing(configuration);
 
         return services;
     }

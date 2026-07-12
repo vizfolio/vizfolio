@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Domain.Funds;
 using Vizfolio.Domain.Portfolios;
+using Vizfolio.Domain.Pricing;
 using Vizfolio.Domain.Reference;
 using Vizfolio.Domain.Securities;
 
@@ -30,6 +31,10 @@ public sealed class AppDbContext : DbContext, IAppDbContext
     public DbSet<FundSnapshot> FundSnapshots => Set<FundSnapshot>();
 
     public DbSet<FundHolding> FundHoldings => Set<FundHolding>();
+
+    public DbSet<PriceHistory> PriceHistories => Set<PriceHistory>();
+
+    public DbSet<CorporateAction> CorporateActions => Set<CorporateAction>();
 
     public DbSet<CitSubstitution> CitSubstitutions => Set<CitSubstitution>();
 

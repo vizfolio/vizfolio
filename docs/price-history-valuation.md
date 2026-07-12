@@ -1,12 +1,18 @@
-# PriceHistory valuation — windowed-return bug & planned fix
+# PriceHistory valuation — windowed-return bug & the shipped fix
 
-> **STATUS: TODO / not yet implemented.** This is a handoff note. It documents a real,
-> reproducible bug in the windowed performance return, explains why the current design
-> can't fix it, and specifies the `PriceHistory` design that will. The `PriceHistory`
-> table and its data-fetch pipeline are being designed in a separate session; **no code
-> in the performance service changes until that lands.** Read this before touching
-> `backend/src/Vizfolio.Application/Portfolios/` valuation code — it exists so the fix
-> can be picked up without re-deriving any of the analysis below.
+> **STATUS: IMPLEMENTED.** The `PriceHistory` table + fetch pipeline and the resolved valuation
+> described below have shipped. This document is kept as the design rationale — read it before
+> touching `backend/src/Vizfolio.Application/Portfolios/` valuation code or the price pipeline.
+>
+> **What shipped:**
+> - Domain: `PriceHistory` + `CorporateAction` (`backend/src/Vizfolio.Domain/Pricing/`), raw/as-traded basis.
+> - Roll-forward + resolver: `HoldingQuantityCalculator`, `HoldingValuationResolver`, wired into
+>   `PortfolioPerformanceService.BuildResolverAsync` / `ComputeBalance`.
+> - Pluggable fetch: `IPriceHistorySource` (keyless `StooqPriceHistorySource` default, optional
+>   `EodhdPriceHistorySource` / `AlphaVantagePriceHistorySource`), `PriceHistoryImporter`,
+>   `PriceHistoryRefreshHostedService`, and `POST /admin/imports/price-history`.
+> - Model: per-user-instance fetch into the local DB for personal use — **not** a redistributed public
+>   dataset (exchange price data licensing forbids that; unlike public-domain EDGAR data).
 >
 > Related: [performance-api.md](./performance-api.md) (balance basis, reconciliation).
 
@@ -124,13 +130,16 @@ already behave correctly once fed an honest balance.
 **Quantity source.** Ledger roll-forward from account inception, consistent with the
 reconciliation invariant. (Snapshots also carry quantity and can cross-check it.)
 
-**Schema sketch** (to be finalized in the PriceHistory design session):
+**Schema as shipped** (`backend/src/Vizfolio.Domain/Pricing/`):
 
-- Keyed by **`Security` / `Fund`** (a shared price series), **not** per-account `AccountHolding`.
-- Columns: `SecurityId` (or symbol/identifier key), `AsOf` (date), `Close` (decimal),
-  `CurrencyCode`, `Source` (provider label).
-- Unique on `(SecurityId, AsOf)`.
-- EF Core, provider-agnostic (per `CLAUDE.md` rule 5).
+- A shared price series keyed by **`Security`** (`Kind=Security`, `SecurityId`) or a bare uppercased
+  **`SymbolKey`** (`Kind=Symbol`) for holdings with no SEC match — **not** per-account `AccountHolding`.
+- `PriceHistory`: `Kind`, `SecurityId?`/`SymbolKey?`, `AsOf`, `Close` (raw), `CurrencyCode`, `Source`,
+  `Adjusted` (always `false` — documents the raw basis).
+- `CorporateAction` (separate, sparse): `Kind`, series key, `Type` (`Split`), `ExDate`,
+  `SplitNumerator`/`SplitDenominator`, `Source`.
+- No filtered/partial unique index (not provider-portable); one row per series per date is enforced in
+  `PriceHistoryImporter`'s in-memory upsert. EF Core, provider-agnostic (per `CLAUDE.md` rule 5).
 
 ## 5. Gotchas to carry forward
 
@@ -150,15 +159,20 @@ The expensive-to-rediscover bits — read these before implementing:
   described in §3/§4 does not exist yet. So today a `Split` row does **not** change computed
   quantity at all.
 
-  **Two decisions the PriceHistory work must make explicit (do not leave implicit):**
-  1. **Price series basis** — fetch/store prices on the **raw (as-traded)** basis to match the
-     ledger, *or* store split-adjusted prices and split-adjust the quantity roll-forward to match.
-     Mixing the two silently breaks every holding that ever split.
-  2. **Make `Split` actually adjust quantity** — the roll-forward (`Buy − Sell + Reinvest +
-     Transfer ± Split`) is only correct if `Split` rows multiply the running quantity. Until that
-     exists, quantity is wrong across any split regardless of the price basis. If you instead rely
-     on brokers reporting post-split `UNITS` on later trades, document that assumption — it does
-     not hold across a QFX that predates the split.
+  **Decisions taken (both explicit in the shipped code):**
+  1. **Price series basis = raw (as-traded)** to match the ledger. `PriceHistory.Close` is the raw
+     close; `Adjusted` is always `false`. API-key providers are queried for unadjusted closes
+     (EODHD `close`, not `adjusted_close`; Alpha Vantage `TIME_SERIES_DAILY`). ⚠️ The keyless Stooq
+     daily feed is split/dividend *adjusted* — it's a best-effort default; configure an API-key
+     provider for a clean raw series and split events. ⚠️ Stooq also gates automated requests with a
+     200-OK HTML JavaScript proof-of-work challenge (common from server/datacenter IPs);
+     `StooqPriceHistorySource` detects that page and throws a clear error instead of importing zero
+     rows, and sends a browser-like `User-Agent` (reduces but doesn't eliminate it). Use an API-key
+     provider for dependable fetching.
+  2. **`Split` adjusts quantity, `CorporateAction`-authoritative.** `HoldingQuantityCalculator`
+     multiplies the running quantity by the split factor **only** when a matching `CorporateAction`
+     exists for the `Split` row's date; otherwise it's a logged no-op (never silently corrupts).
+     This also avoids double-counting when a broker already reports post-split `UNITS` on later trades.
 - **Currency.** The price's currency must reconcile with the reporting-currency resolution the
   service already does (`ResolveReportingCurrency`, `PortfolioPerformanceService.cs:258-271`).
   Multi-currency conversion is still out of scope; don't mix currencies into one sum.
@@ -166,30 +180,84 @@ The expensive-to-rediscover bits — read these before implementing:
   to `incomplete`. The completeness/honest-`null` behavior is **complementary** to PriceHistory,
   not replaced by it — PriceHistory shrinks the gap; it never eliminates the need to say "I don't
   know."
-- **Interim behavior (this task ships nothing here).** Until PriceHistory exists, mid-history
-  windows without a real boundary valuation still report the huge number described in §2. A
-  smaller stop-gap — a *staleness guard* that marks a carried-forward snapshot incomplete when a
-  quantity-changing trade occurred between the snapshot and the window boundary — was considered
-  and **deliberately deferred** so the real (PriceHistory) fix can be built once. If the huge
-  number becomes a problem before PriceHistory lands, that guard is the minimal honest patch:
-  treat the holding as missing at `from` when a share-changing transaction falls strictly between
-  the snapshot's `AsOf` and `from` (exclude trades *on* `from`, which are period cash flows — the
-  inception window must keep working).
+- **Interim staleness guard — no longer needed.** The stop-gap once considered here (mark a
+  carried-forward snapshot incomplete when a share-changing trade falls between it and `from`) was
+  never built: PriceHistory is the real fix. Where no price exists the resolver still falls through
+  to the snapshot and then to an honest incomplete, so the §2 explosion only survives for a window
+  with *no* price at `from` for a security — the remedy there is to import its price history.
 
-## 6. Pick-up checklist (after the PriceHistory table + fetch exist)
+## 7. Related item — not-yet-held holdings counted as "missing" (FIXED)
 
-1. Add a valuation resolver: `marketValue(holding, date)` via `quantity(ledger) × price(PriceHistory)`,
-   with the fallback order in §4.
-2. Swap it into `ComputeBalance` (`PortfolioPerformanceService.cs:185`); keep snapshot `MarketValue`
-   as the second-tier fallback and `incomplete` as the last resort.
-3. Reuse the already-loaded ledger/snapshot data where possible — the service note in
-   [performance-api.md → Extending the response](./performance-api.md#extending-the-response) warns
-   against extra round-trips.
-4. Tests: a mid-history window (the §1 repro) now returns a **sensible** TWR/MWR from PriceHistory;
-   a window over a security with **no** price still returns `null` with a completeness reason; the
-   since-inception window is unchanged. Put these in
-   `backend/tests/Vizfolio.Api.Tests/Portfolios/PortfolioPerformanceServiceTests.cs`.
-5. Update [performance-api.md](./performance-api.md): document that balances are valued from
-   PriceHistory with snapshot fallback, and retire the "partial-history starts at 0" caveat where
-   PriceHistory now covers it.
-6. Delete or update this file once the fix is implemented.
+**STATUS: FIXED (shipped with §4).** This was a *separate* bug from §2 living in the same
+`ComputeBalance` code and sharing the ledger roll-forward, so it landed in the same pass. Unlike §2
+it needs **no price data** — only "was the holding held at `from`."
+
+**Symptom.** The account **Holdings / History** screens and the **/dashboard** show every account's
+opening balance as fully filled, but the portfolio **/performance** screen shows
+`startingBalance.isComplete = false` (`holdingsMissingSnapshot > 0`).
+
+**Concrete trigger (the reporter's setup).** A portfolio with accounts started on **different
+dates** — two in **2011**, one in **2014** — each with opening balances entered for every holding.
+
+**Why the screens disagree — two different completeness rules:**
+
+- **Account/coverage screens are per-account, at that account's own inception.**
+  `AccountHistoryService.GetCoverageAsync` (`AccountHistoryService.cs:81`) sets `hasGap` from
+  "earliest *valued* snapshot ≤ that account's first transaction," and each account's opening
+  balance is written at `suggestedOpeningDate = firstTx − 1` (`:82`; the form submits at exactly
+  that date, `opening-balance-form.ts:99,116`). So each account is fully covered relative to *its
+  own* start.
+- **/performance uses one portfolio-wide `from`.** `ResolveDefaultFromAsync`
+  (`PortfolioPerformanceService.cs:168-174`) resolves `from` to the **earliest transaction across
+  all accounts** — here **2011**. `ComputeBalance` (`:185-219`) then marks a holding **missing** if
+  it has no valued snapshot with `AsOf ≤ from`. The **2014** account's opening snapshots are dated
+  ~2014, i.e. *after* the 2011 `from`, so at `from` those holdings have no snapshot yet → counted
+  missing → starting balance reported incomplete. The `relevantHoldings` set
+  (`:129-135`, plus `holdingsActiveInRange` `:106-114`) includes those later-account holdings, so
+  they're evaluated at a date before they existed.
+
+**Root cause.** `ComputeBalance` treats *"no snapshot at/before `from`"* as **"unknown / missing,"**
+conflating it with *"not held yet, so worth $0."* A holding that wasn't held at `from` has a **true
+starting value of $0** and should count as **complete**, not missing. The same bug also fires within
+a single account for any holding **acquired after `from`** (bought mid-window).
+
+**Fix as shipped (no PriceHistory needed).** In `HoldingValuationResolver`, a relevant holding that
+was **not held at `from`** — ledger quantity 0 *and* no broker-position snapshot at/before `from` —
+resolves to `NotHeld`: **$0 and complete** (not counted toward covered or missing). Only a holding
+that *was* held at `from` (nonzero ledger position, or a snapshot reporting a position) but lacks a
+valuation is `Missing`. This uses the same `HoldingQuantityCalculator` roll-forward that (b) values
+held holdings via price in §4.
+
+**Watch-outs.**
+- Apply the same "held at date?" logic to the **ending balance** and interior points for
+  consistency, but a fully-divested holding (held at `from`, sold before `to`) is correctly $0 at
+  `to` and should stay complete.
+- Keep the honest-`null` behavior for a holding that *was* held but has no valuation — that's the
+  §2 case, not this one.
+
+**Test.** Portfolio scope with **staggered account inceptions** (e.g. accounts starting 2011, 2011,
+2014), opening balances on each account's own inception, default `from`: the later account's
+holdings must resolve to $0-and-complete at the 2011 `from`, so `startingBalance.isComplete = true`.
+
+## 8. What shipped (map to the code)
+
+1. Ledger **quantity-at-date** roll-forward: `HoldingQuantityCalculator` — reused for both §4
+   (valuation) and §7 (not-yet-held → $0). `Split` rows apply the authoritative `CorporateAction` factor.
+2. Valuation resolver: `HoldingValuationResolver` — `quantity(ledger) × price(PriceHistory)` with the
+   §4 fallback order; built by `PortfolioPerformanceService.BuildResolverAsync` (batch-loads ledger,
+   prices, splits, snapshots once — no per-holding round-trips).
+3. `ComputeBalance` consumes the resolver: `NotHeld` → $0-complete (§7); held+price → valued;
+   held+snapshot → `MarketValue`; held+neither → incomplete (honest null).
+4. Prices are filtered to the reporting currency (a null price currency, e.g. from the keyless source,
+   is treated as matching); multi-currency conversion remains out of scope.
+5. Tests in `backend/tests/Vizfolio.Api.Tests/`: valuation scenarios (a)–(e) in
+   `Portfolios/PortfolioPerformanceServiceTests.cs`, roll-forward/split units in
+   `Portfolios/HoldingQuantityCalculatorTests.cs`, and pipeline in `Pricing/` (selector + importer).
+6. [performance-api.md](./performance-api.md) updated (balances valued from PriceHistory with snapshot
+   fallback; not-yet-held → $0-complete). [er-diagram.md](./er-diagram.md) adds `PriceHistory` /
+   `CorporateAction`.
+
+**Remaining follow-ups (not blocking):** funds are still valued from `FundSnapshot` NAV, not
+`PriceHistory` — a `Kind=Fund` holding falls through to a `Symbol` series only if it carries a ticker;
+and the keyless Stooq feed is split-adjusted (see §5), so a raw series + split events want an API-key
+provider.

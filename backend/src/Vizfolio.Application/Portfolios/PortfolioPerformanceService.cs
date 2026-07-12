@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Domain.Portfolios;
+using Vizfolio.Domain.Pricing;
 
 namespace Vizfolio.Application.Portfolios;
 
@@ -13,6 +14,15 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         TransactionType.Deposit,
         TransactionType.Withdrawal,
         TransactionType.Transfer,
+    };
+
+    private static readonly TransactionType[] ShareAffectingTypes =
+    {
+        TransactionType.Buy,
+        TransactionType.Sell,
+        TransactionType.Reinvest,
+        TransactionType.Transfer,
+        TransactionType.Split,
     };
 
     private readonly IAppDbContext _db;
@@ -100,7 +110,7 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var snapshots = await _db.AccountHoldingSnapshots
             .AsNoTracking()
             .Where(s => holdingIds.Contains(s.AccountHoldingId) && s.AsOf <= to)
-            .Select(s => new SnapshotProjection(s.AccountHoldingId, s.AsOf, s.MarketValue, s.CurrencyCode))
+            .Select(s => new SnapshotProjection(s.AccountHoldingId, s.AsOf, s.MarketValue, s.CurrencyCode, s.Quantity))
             .ToListAsync(cancellationToken);
 
         var holdingsActiveInRange = await _db.AccountTransactions
@@ -131,8 +141,13 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 
         var currency = ResolveReportingCurrency(snapshots);
 
-        var ending = ComputeBalance(relevantHoldings, snapshotsByHolding, to);
-        var starting = ComputeBalance(relevantHoldings, snapshotsByHolding, from);
+        // Resolve each holding's value from PriceHistory (quantity × price) with a snapshot fallback,
+        // so windowed balances are honest at any date — see docs/price-history-valuation.md §4.
+        var resolver = await BuildResolverAsync(
+            relevantHoldings, snapshotsByHolding, currency, to, cancellationToken);
+
+        var ending = ComputeBalance(relevantHoldings, resolver, to);
+        var starting = ComputeBalance(relevantHoldings, resolver, from);
 
         var contributions = SummarizeContributions(contributionRows.Select(r => new CashFlow(r.TradeDate, r.Amount)).ToList());
         var cashFlows = contributionRows
@@ -140,7 +155,13 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             .OrderBy(f => f.Date)
             .ToList();
 
-        var intermediateBalances = BuildIntermediateBalances(relevantHoldings, snapshotsByHolding, from, to);
+        var interiorDates = snapshots
+            .Where(s => s.AsOf > from && s.AsOf < to)
+            .Select(s => s.AsOf)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
+        var intermediateBalances = BuildIntermediateBalances(relevantHoldings, resolver, interiorDates);
 
         var context = new PerformanceComputationContext(
             From: from,
@@ -184,7 +205,7 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 
     private static PerformanceBalanceResult ComputeBalance(
         HashSet<Guid> relevantHoldings,
-        Dictionary<Guid, List<SnapshotProjection>> snapshotsByHolding,
+        HoldingValuationResolver resolver,
         DateOnly asOf)
     {
         decimal sum = 0m;
@@ -194,25 +215,21 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 
         foreach (var holdingId in relevantHoldings)
         {
-            SnapshotProjection? latest = null;
-            if (snapshotsByHolding.TryGetValue(holdingId, out var list))
+            var valuation = resolver.Resolve(holdingId, asOf);
+            switch (valuation.Status)
             {
-                foreach (var s in list)
-                {
-                    if (s.AsOf <= asOf) { latest = s; break; }
-                }
-            }
-
-            if (latest is not null && latest.MarketValue.HasValue)
-            {
-                sum += latest.MarketValue.Value;
-                covered++;
-                if (maxAsOf is null || latest.AsOf > maxAsOf.Value)
-                    maxAsOf = latest.AsOf;
-            }
-            else
-            {
-                missing++;
+                case HoldingValuationStatus.Covered:
+                    sum += valuation.Value;
+                    covered++;
+                    if (valuation.SnapshotAsOf is { } d && (maxAsOf is null || d > maxAsOf.Value))
+                        maxAsOf = d;
+                    break;
+                case HoldingValuationStatus.NotHeld:
+                    // A true $0 (not held on this date): contributes nothing and is complete.
+                    break;
+                case HoldingValuationStatus.Missing:
+                    missing++;
+                    break;
             }
         }
 
@@ -221,26 +238,138 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 
     private static List<BalancePoint> BuildIntermediateBalances(
         HashSet<Guid> relevantHoldings,
-        Dictionary<Guid, List<SnapshotProjection>> snapshotsByHolding,
-        DateOnly from,
-        DateOnly to)
+        HoldingValuationResolver resolver,
+        IReadOnlyList<DateOnly> interiorDates)
     {
-        var interiorDates = snapshotsByHolding.Values
-            .SelectMany(list => list)
-            .Where(s => s.AsOf > from && s.AsOf < to)
-            .Select(s => s.AsOf)
-            .Distinct()
-            .OrderBy(d => d)
-            .ToList();
-
         var points = new List<BalancePoint>();
         foreach (var date in interiorDates)
         {
-            var balance = ComputeBalance(relevantHoldings, snapshotsByHolding, date);
+            var balance = ComputeBalance(relevantHoldings, resolver, date);
             if (balance.IsComplete && balance.HoldingsCovered > 0)
                 points.Add(new BalancePoint(date, balance.Value));
         }
         return points;
+    }
+
+    private async Task<HoldingValuationResolver> BuildResolverAsync(
+        HashSet<Guid> relevantHoldings,
+        Dictionary<Guid, List<SnapshotProjection>> snapshotsByHolding,
+        string reportingCurrency,
+        DateOnly to,
+        CancellationToken cancellationToken)
+    {
+        if (relevantHoldings.Count == 0)
+            return new HoldingValuationResolver(new Dictionary<Guid, HoldingValuationData>());
+
+        var holdingIds = relevantHoldings.ToList();
+
+        var seriesRows = await _db.AccountHoldings
+            .AsNoTracking()
+            .Where(h => holdingIds.Contains(h.AccountHoldingId))
+            .Select(h => new { h.AccountHoldingId, h.SecurityId, h.Symbol })
+            .ToListAsync(cancellationToken);
+
+        var securityIds = seriesRows
+            .Where(r => r.SecurityId != null)
+            .Select(r => r.SecurityId!.Value)
+            .Distinct()
+            .ToList();
+        var symbolKeys = seriesRows
+            .Where(r => r.SecurityId == null && r.Symbol != null)
+            .Select(r => r.Symbol!.ToUpperInvariant())
+            .Distinct()
+            .ToList();
+
+        var ledgerRows = await _db.AccountTransactions
+            .AsNoTracking()
+            .Where(t => t.AccountHoldingId != null
+                        && holdingIds.Contains(t.AccountHoldingId!.Value)
+                        && t.TradeDate <= to
+                        && ShareAffectingTypes.Contains(t.Type))
+            .Select(t => new { HoldingId = t.AccountHoldingId!.Value, t.TradeDate, t.Type, t.Quantity })
+            .ToListAsync(cancellationToken);
+        var ledgerByHolding = ledgerRows
+            .GroupBy(r => r.HoldingId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<LedgerShareEntry>)g
+                    .Select(r => new LedgerShareEntry(r.TradeDate, r.Type, r.Quantity))
+                    .ToList());
+
+        // Prices/splits are shared reference series keyed by security or symbol. Filter prices to the
+        // reporting currency (null currency — e.g. from the keyless source — is treated as matching).
+        var priceRows = await _db.PriceHistories
+            .AsNoTracking()
+            .Where(p => p.AsOf <= to
+                        && (p.CurrencyCode == null || p.CurrencyCode == reportingCurrency)
+                        && ((p.SecurityId != null && securityIds.Contains(p.SecurityId!.Value))
+                            || (p.SymbolKey != null && symbolKeys.Contains(p.SymbolKey!))))
+            .Select(p => new { p.SecurityId, p.SymbolKey, p.AsOf, p.Close })
+            .ToListAsync(cancellationToken);
+        var pricesBySecurity = priceRows
+            .Where(p => p.SecurityId != null)
+            .GroupBy(p => p.SecurityId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.AsOf)
+                .Select(p => new PricePointData(p.AsOf, p.Close)).ToList());
+        var pricesBySymbol = priceRows
+            .Where(p => p.SymbolKey != null)
+            .GroupBy(p => p.SymbolKey!)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.AsOf)
+                .Select(p => new PricePointData(p.AsOf, p.Close)).ToList());
+
+        var splitRows = await _db.CorporateActions
+            .AsNoTracking()
+            .Where(c => c.Type == CorporateActionType.Split
+                        && c.ExDate <= to
+                        && ((c.SecurityId != null && securityIds.Contains(c.SecurityId!.Value))
+                            || (c.SymbolKey != null && symbolKeys.Contains(c.SymbolKey!))))
+            .Select(c => new { c.SecurityId, c.SymbolKey, c.ExDate, c.SplitNumerator, c.SplitDenominator })
+            .ToListAsync(cancellationToken);
+        var splitsBySecurity = splitRows
+            .Where(c => c.SecurityId != null)
+            .GroupBy(c => c.SecurityId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(c => c.ExDate, c => c.SplitNumerator / c.SplitDenominator));
+        var splitsBySymbol = splitRows
+            .Where(c => c.SymbolKey != null)
+            .GroupBy(c => c.SymbolKey!)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(c => c.ExDate, c => c.SplitNumerator / c.SplitDenominator));
+
+        var emptyPrices = (IReadOnlyList<PricePointData>)Array.Empty<PricePointData>();
+        var emptySplits = (IReadOnlyDictionary<DateOnly, decimal>)new Dictionary<DateOnly, decimal>();
+        var emptyLedger = (IReadOnlyList<LedgerShareEntry>)Array.Empty<LedgerShareEntry>();
+
+        var byHolding = new Dictionary<Guid, HoldingValuationData>();
+        foreach (var row in seriesRows)
+        {
+            var symbolKey = row.Symbol?.ToUpperInvariant();
+            var prices = emptyPrices;
+            var splits = emptySplits;
+            if (row.SecurityId is { } sid)
+            {
+                if (pricesBySecurity.TryGetValue(sid, out var pl)) prices = pl;
+                if (splitsBySecurity.TryGetValue(sid, out var sd)) splits = sd;
+            }
+            else if (symbolKey != null)
+            {
+                if (pricesBySymbol.TryGetValue(symbolKey, out var pl)) prices = pl;
+                if (splitsBySymbol.TryGetValue(symbolKey, out var sd)) splits = sd;
+            }
+
+            var ledger = ledgerByHolding.TryGetValue(row.AccountHoldingId, out var le) ? le : emptyLedger;
+            var snaps = snapshotsByHolding.TryGetValue(row.AccountHoldingId, out var sp)
+                ? sp.Select(s => new SnapshotData(s.AsOf, s.Quantity, s.MarketValue)).ToList()
+                : new List<SnapshotData>();
+
+            byHolding[row.AccountHoldingId] = new HoldingValuationData
+            {
+                Ledger = ledger,
+                SplitFactors = splits,
+                PricesDescending = prices,
+                SnapshotsDescending = snaps,
+            };
+        }
+
+        return new HoldingValuationResolver(byHolding);
     }
 
     private static PerformanceContributionsResult SummarizeContributions(IReadOnlyList<CashFlow> flows)
@@ -284,5 +413,6 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         Guid AccountHoldingId,
         DateOnly AsOf,
         decimal? MarketValue,
-        string? CurrencyCode);
+        string? CurrencyCode,
+        decimal Quantity);
 }

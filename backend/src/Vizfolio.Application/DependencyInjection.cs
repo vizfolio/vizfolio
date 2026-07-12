@@ -5,6 +5,8 @@ using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
 using Vizfolio.Application.Portfolios;
+using Vizfolio.Application.Pricing;
+using Vizfolio.Application.Pricing.Abstractions;
 
 namespace Vizfolio.Application;
 
@@ -30,6 +32,12 @@ public static class DependencyInjection
         // calculator (returns null until multiple snapshots exist across the period).
         services.AddScoped<ITimeWeightedReturnCalculator, ModifiedDietzTimeWeightedReturnCalculator>();
         services.AddScoped<IMoneyWeightedReturnCalculator, XirrMoneyWeightedReturnCalculator>();
+
+        // Price-history pipeline. Sources (IPriceHistorySource) are registered in the Infrastructure
+        // layer (they need HttpClients); the selector dispatches to the highest-priority one that
+        // supports a request, mirroring the parser plug-in model above.
+        services.AddScoped<IPriceHistorySourceSelector, PriceHistorySourceSelector>();
+        services.AddScoped<IPriceHistoryImporter, PriceHistoryImporter>();
         return services;
     }
 }

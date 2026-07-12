@@ -62,9 +62,14 @@ Both endpoints return **404** if the portfolio or account doesn't exist (an acco
 
 ## Balance basis: snapshot market value
 
-Both `startingBalance.value` and `endingBalance.value` are computed the same way: **for each holding in scope, take the latest `AccountHoldingSnapshot.MarketValue` whose `AsOf ≤ date`, then sum**. Same unit at both ends of the period, always comparable.
+Both `startingBalance.value` and `endingBalance.value` are computed the same way: **for each holding in scope, resolve a market value at the date, then sum**. Resolution (in `HoldingValuationResolver`, fed by `PortfolioPerformanceService.BuildResolverAsync`) applies this fallback order per holding per date — see [price-history-valuation.md](./price-history-valuation.md):
 
-This deliberately *does not* try to derive a balance by summing transaction amounts. Transaction sums don't include unrealized market movement and mix cash-flow units (Deposit $) with security-value units (MarketValue $), which produces meaningless numbers. The snapshot is the broker's ground truth; that's what we use.
+1. **PriceHistory** — if the holding is held (ledger quantity ≠ 0 from `HoldingQuantityCalculator`) and a raw close exists for its series on/before the date, use `quantity × close`. Prices and ledger quantities are both on the **raw / as-traded** basis, and `TransactionType.Split` adjusts the roll-forward from the authoritative `CorporateAction` factor.
+2. **Broker snapshot** — otherwise, the latest `AccountHoldingSnapshot.MarketValue` whose `AsOf ≤ date` (the broker's ground truth).
+3. **Not held → $0, complete** — a holding not held at the date (no ledger position and no broker position) has a true $0 value and counts as complete, not missing.
+4. **Missing** — held but neither priced nor snapshotted → the holding is missing and the balance is incomplete (honest null downstream).
+
+This deliberately *does not* derive a balance by summing transaction amounts. Transaction sums don't include unrealized market movement and mix cash-flow units (Deposit $) with security-value units (MarketValue $), which produces meaningless numbers.
 
 ### Completeness
 
@@ -77,15 +82,16 @@ This "valued snapshot" test is the canonical completeness rule. The history-cove
 **The canonical partial-history case** — user uploads one QFX with the last year of activity, so the only snapshot is at the end of period:
 
 - `endingBalance` is fully populated (`isComplete: true`, snapshot from the QFX's `<DTASOF>`).
-- `startingBalance.value` is `0` with `isComplete: false` and `holdingsMissingSnapshot > 0` — an honest "we don't know the starting balance." The fix is to upload an `OpeningBalance` or `Statement` snapshot at (or before) the `from` date.
+- If the account's first activity is *after* `from` (nothing was held yet), `startingBalance.value` is a legitimate `0` with `isComplete: true` — the not-held-yet case now resolves to `$0`-and-complete, and the windowed return computes.
+- If a holding *was* held at `from` (bought before the window) but has no price or snapshot there, `startingBalance` is `0` with `isComplete: false` and `holdingsMissingSnapshot > 0` — an honest "we don't know." Fix it by importing price history for that security, or uploading an `OpeningBalance` / `Statement` snapshot at (or before) `from`.
 
-> **Known limitation — windowed returns without a boundary valuation.** Because a balance is
-> valued from "the latest snapshot with `AsOf ≤ date`", a *valued* prior snapshot (e.g. a
-> correct `$0` opening balance at inception) is carried forward and treated as the market value
-> at any later `from`. For a mid-history window this reports `startingBalance = 0` with
-> `isComplete: true`, so the completeness guard doesn't fire and the return can explode (grows as
-> `from` approaches today). A `PriceHistory` table (`quantity × price` at any date) is the planned
-> root fix. Full write-up and pick-up steps: [price-history-valuation.md](./price-history-valuation.md).
+> **Windowed returns are valued from PriceHistory.** A mid-history `from` no longer reuses a stale
+> carried-forward snapshot: when a raw price exists for the security at `from`, the starting balance
+> is the honest `quantity × price`, so the return is sensible rather than exploding. Where no price
+> exists the balance falls through to the broker snapshot, then to an honest incomplete — PriceHistory
+> shrinks the gap, it never invents a value. Holdings not *held* at `from` (a later-opened account, or
+> a holding bought mid-window) resolve to a true **$0** and count as complete. Full design and the raw
+> vs. split-adjusted basis rules: [price-history-valuation.md](./price-history-valuation.md).
 
 ## Contributions
 

@@ -29,6 +29,11 @@ erDiagram
     %% Security reference data
     Security     }o--o| Country              : "country code"
 
+    %% Price history & corporate actions — shared reference series keyed by Security or bare symbol
+    PriceHistory    }o--o| Security          : "series when linked"
+    PriceHistory    }o--o| Currency          : "priced in"
+    CorporateAction }o--o| Security          : "series when linked"
+
     %% Fund aggregate — snapshots own share classes and monthly returns
     Fund         ||--o{ FundSnapshot         : "history"
     FundSnapshot ||--o{ FundShareClass       : "owned"
@@ -149,6 +154,30 @@ erDiagram
         string   Patterns                "JSON array (primitive collection)"
     }
 
+    PriceHistory {
+        Guid     PriceHistoryId      PK
+        string   Kind                    "Security|Symbol (series key discriminator)"
+        Guid     SecurityId          FK "set iff Kind=Security"
+        string   SymbolKey               "uppercased ticker; set iff Kind=Symbol"
+        DateOnly AsOf
+        decimal  Close                   "raw / as-traded close"
+        string   CurrencyCode        FK "nullable"
+        string   Source                  "enum stored as string (Stooq|Eodhd|AlphaVantage)"
+        bool     Adjusted                "always false — documents the raw basis"
+    }
+
+    CorporateAction {
+        Guid     CorporateActionId   PK
+        string   Kind                    "Security|Symbol"
+        Guid     SecurityId          FK "set iff Kind=Security"
+        string   SymbolKey               "set iff Kind=Symbol"
+        string   Type                    "enum stored as string (Split)"
+        DateOnly ExDate
+        decimal  SplitNumerator
+        decimal  SplitDenominator
+        string   Source                  "enum stored as string"
+    }
+
     %% Reference tables (string-PK code lookups)
     AssetCategory { string Code PK }
     AssetClass    { string Code PK }
@@ -176,11 +205,14 @@ There is intentionally **no DB-level uniqueness** on `(AccountId, SecurityId)` o
 
 **CitSubstitution** is standalone — it maps user-entered Collective Investment Trust names to substitute tickers via the `Patterns` JSON array. It doesn't FK anywhere; lookups are by name pattern matching.
 
+**PriceHistory → CorporateAction** are shared reference price series (not per-account). A series is keyed by either a linked `Security` (`Kind=Security`, `SecurityId` set) or a bare uppercased ticker (`Kind=Symbol`, `SymbolKey` set) for holdings with no SEC match — a guarded constructor enforces exactly one. `PriceHistory` holds one **raw / as-traded** daily `Close` per series per date (the same basis as ledger quantities), and the performance service values a holding as `quantity(from ledger roll-forward) × Close` with a broker-snapshot fallback — see [price-history-valuation.md](./price-history-valuation.md). `CorporateAction` records sparse split events separately (dense prices vs. sparse actions), and is the authoritative source of split factors the quantity roll-forward applies to `TransactionType.Split` rows. Neither table uses a filtered unique index (not provider-portable); one row per series per date is enforced in `PriceHistoryImporter`'s in-memory upsert. Prices are fetched per-user-instance into the local DB by a pluggable `IPriceHistorySource` (keyless Stooq by default, optional EODHD / Alpha Vantage).
+
 ## Quick references
 
 | Topic                                            | Source                                                                  |
 | ------------------------------------------------ | ----------------------------------------------------------------------- |
-| Domain classes                                   | `backend/src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference}/`             |
+| Domain classes                                   | `backend/src/Vizfolio.Domain/{Portfolios,Securities,Funds,Reference,Pricing}/`     |
+| Price fetch pipeline (sources, importer)         | `backend/src/Vizfolio.Application/Pricing/`, `backend/src/Vizfolio.Infrastructure/Pricing/` |
 | EF mappings, table/column names, indexes         | `backend/src/Vizfolio.Infrastructure/Persistence/Configurations/`                  |
 | Reference-data seeds                             | `backend/src/Vizfolio.Infrastructure/Persistence/Seeding/`                         |
 | Current schema as SQL                            | `backend/src/Vizfolio.Infrastructure/Persistence/Migrations/*_Init.cs`             |
