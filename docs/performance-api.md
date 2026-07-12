@@ -79,6 +79,14 @@ This "valued snapshot" test is the canonical completeness rule. The history-cove
 - `endingBalance` is fully populated (`isComplete: true`, snapshot from the QFX's `<DTASOF>`).
 - `startingBalance.value` is `0` with `isComplete: false` and `holdingsMissingSnapshot > 0` — an honest "we don't know the starting balance." The fix is to upload an `OpeningBalance` or `Statement` snapshot at (or before) the `from` date.
 
+> **Known limitation — windowed returns without a boundary valuation.** Because a balance is
+> valued from "the latest snapshot with `AsOf ≤ date`", a *valued* prior snapshot (e.g. a
+> correct `$0` opening balance at inception) is carried forward and treated as the market value
+> at any later `from`. For a mid-history window this reports `startingBalance = 0` with
+> `isComplete: true`, so the completeness guard doesn't fire and the return can explode (grows as
+> `from` approaches today). A `PriceHistory` table (`quantity × price` at any date) is the planned
+> root fix. Full write-up and pick-up steps: [price-history-valuation.md](./price-history-valuation.md).
+
 ## Contributions
 
 `Contributions` is the sum of `AccountTransaction.Amount` for rows whose `Type ∈ {Deposit, Withdrawal, Transfer}` and `TradeDate ∈ [from, to]`. Other types (Buy, Sell, Dividend, Interest, Reinvest, CapitalGain, Fee, Split, Other) are internal rearrangements of value inside the account and are **not** contributions.
