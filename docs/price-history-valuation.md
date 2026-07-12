@@ -139,8 +139,26 @@ The expensive-to-rediscover bits — read these before implementing:
 - **Split adjustment (sharpest trap).** Prices and ledger quantities must be on the **same
   basis** (both raw, or both split-adjusted). If a provider returns split-adjusted prices while
   the ledger stores as-traded quantities (or vice versa), valuations break *silently* across any
-  corporate action. Decide the basis explicitly and make the roll-forward and the price series
-  agree.
+  corporate action.
+
+  **Current basis in this codebase (verified, as of this writing):** ledger quantities are stored
+  **raw / as-traded — exactly as the broker reports them** on the trade date (QFX `UNITS` in
+  `QfxFileParser.cs:167/249/323`, the Vanguard `quantity` column in
+  `VanguardTransactionHistoryReportParser.cs:99/133`). There is **no split-adjustment logic** —
+  `TransactionType.Split` (`TransactionType.cs:15`) is a declared enum value that **nothing
+  applies**: no service adjusts running quantity for a split, and the quantity roll-forward
+  described in §3/§4 does not exist yet. So today a `Split` row does **not** change computed
+  quantity at all.
+
+  **Two decisions the PriceHistory work must make explicit (do not leave implicit):**
+  1. **Price series basis** — fetch/store prices on the **raw (as-traded)** basis to match the
+     ledger, *or* store split-adjusted prices and split-adjust the quantity roll-forward to match.
+     Mixing the two silently breaks every holding that ever split.
+  2. **Make `Split` actually adjust quantity** — the roll-forward (`Buy − Sell + Reinvest +
+     Transfer ± Split`) is only correct if `Split` rows multiply the running quantity. Until that
+     exists, quantity is wrong across any split regardless of the price basis. If you instead rely
+     on brokers reporting post-split `UNITS` on later trades, document that assumption — it does
+     not hold across a QFX that predates the split.
 - **Currency.** The price's currency must reconcile with the reporting-currency resolution the
   service already does (`ResolveReportingCurrency`, `PortfolioPerformanceService.cs:258-271`).
   Multi-currency conversion is still out of scope; don't mix currencies into one sum.
