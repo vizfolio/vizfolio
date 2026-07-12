@@ -50,6 +50,7 @@ internal sealed class AccountTransactionConfiguration : IEntityTypeConfiguration
             .IsRequired(false);
 
         builder.Property(t => t.Memo).HasMaxLength(500);
+        builder.Property(t => t.SourceType).HasMaxLength(50);
         builder.Property(t => t.ImportedAt).IsRequired();
 
         builder.HasIndex(t => new { t.AccountId, t.SourceSystem, t.ExternalId }).IsUnique();

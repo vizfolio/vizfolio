@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Vizfolio.Application.Abstractions;
@@ -153,13 +151,28 @@ public sealed class PortfolioImportService : IPortfolioImportService
         IReadOnlySet<string> validCurrencies,
         CancellationToken cancellationToken)
     {
-        var existingKeys = accountCreated
-            ? new List<string>()
+        // Load existing rows across ALL sources so a trade present in both (e.g.) a QFX export and a
+        // Vanguard report is caught, not just same-file re-uploads.
+        var existingRows = accountCreated
+            ? []
             : await _db.AccountTransactions
-                .Where(t => t.AccountId == account.AccountId && t.SourceSystem == sourceSystem)
-                .Select(t => t.ExternalId)
+                .Where(t => t.AccountId == account.AccountId)
+                .Select(t => new { t.SourceSystem, t.ExternalId, t.TradeDate, t.Ticker, t.Quantity, t.Amount })
                 .ToListAsync(cancellationToken);
-        var existing = existingKeys.ToHashSet(StringComparer.Ordinal);
+
+        // Exact (source, externalId) fast-path — keeps same-file re-imports idempotent.
+        var existingExternalIds = existingRows
+            .Select(r => ExternalKey(r.SourceSystem, r.ExternalId))
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Cross-source fingerprint multiset — skip an incoming row only while an unmatched existing row
+        // with the same economic fingerprint remains, so genuine same-day duplicates are preserved.
+        var fingerprintCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in existingRows)
+        {
+            var fp = TransactionFingerprint.Compute(account.AccountId, r.TradeDate, r.Ticker, r.Quantity, r.Amount);
+            fingerprintCounts[fp] = fingerprintCounts.GetValueOrDefault(fp) + 1;
+        }
 
         var tickerSet = statement.Transactions
             .Select(t => t.Ticker)
@@ -180,12 +193,25 @@ public sealed class PortfolioImportService : IPortfolioImportService
         {
             try
             {
+                var fingerprint = TransactionFingerprint.Compute(account.AccountId, parsedTx);
+
+                // ID-less formats (e.g. the Vanguard report) get a stable, unique synthetic id so genuine
+                // same-day duplicates remain storable and a same-file re-upload stays idempotent.
                 var externalId = !string.IsNullOrWhiteSpace(parsedTx.ExternalId)
                     ? parsedTx.ExternalId!.Trim()
-                    : ComputeHash(account.AccountId, parsedTx);
+                    : $"{fingerprint}-{index}";
 
-                if (existing.Contains(externalId))
+                // Same-source exact duplicate (re-upload of the same file).
+                if (existingExternalIds.Contains(ExternalKey(sourceSystem, externalId)))
                 {
+                    skipped++;
+                    continue;
+                }
+
+                // Cross-source / overlap duplicate: an existing row already covers this economic event.
+                if (fingerprintCounts.TryGetValue(fingerprint, out var remaining) && remaining > 0)
+                {
+                    fingerprintCounts[fingerprint] = remaining - 1;
                     skipped++;
                     continue;
                 }
@@ -202,6 +228,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 entity.SetTradeDetails(parsedTx.Quantity, parsedTx.Price, parsedTx.Fees, parsedTx.SettlementDate);
                 entity.SetCurrency(NormalizeCurrency(parsedTx.CurrencyCode, validCurrencies));
                 entity.SetMemo(parsedTx.Memo);
+                entity.SetSourceType(parsedTx.SourceType);
 
                 if (!string.IsNullOrWhiteSpace(entity.Ticker))
                 {
@@ -211,7 +238,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 }
 
                 _db.AccountTransactions.Add(entity);
-                existing.Add(externalId);
+                existingExternalIds.Add(ExternalKey(sourceSystem, externalId));
                 inserted++;
             }
             catch (Exception ex)
@@ -348,18 +375,6 @@ public sealed class PortfolioImportService : IPortfolioImportService
         return validCodes.Contains(normalized) ? normalized : null;
     }
 
-    private static string ComputeHash(Guid accountId, ParsedTransaction tx)
-    {
-        var raw = string.Join('|',
-            accountId.ToString("N"),
-            tx.TradeDate.ToString("yyyy-MM-dd"),
-            tx.Type.ToString(),
-            (tx.Ticker ?? string.Empty).ToUpperInvariant(),
-            tx.Quantity?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
-            tx.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
-        var sb = new StringBuilder(32);
-        for (var i = 0; i < 16; i++) sb.Append(bytes[i].ToString("x2"));
-        return sb.ToString();
-    }
+    private static string ExternalKey(string sourceSystem, string externalId) =>
+        $"{sourceSystem.Trim().ToUpperInvariant()}|{externalId}";
 }

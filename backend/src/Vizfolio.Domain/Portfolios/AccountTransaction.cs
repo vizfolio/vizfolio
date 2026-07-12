@@ -61,6 +61,13 @@ public sealed class AccountTransaction
 
     public string? Memo { get; private set; }
 
+    /// <summary>
+    /// The broker's original, un-normalized transaction type label (e.g. Vanguard's "Sweep in" or
+    /// "TRANSFER TO [account]"), preserved verbatim next to the normalized <see cref="Type"/> so no
+    /// provenance is lost. Null when the source has no richer type than <see cref="Type"/> already carries.
+    /// </summary>
+    public string? SourceType { get; private set; }
+
     public DateTimeOffset ImportedAt { get; private set; }
 
     public void SetSecurityReference(string? ticker, string? cusip)
@@ -95,5 +102,10 @@ public sealed class AccountTransaction
     public void SetMemo(string? memo)
     {
         Memo = string.IsNullOrWhiteSpace(memo) ? null : memo.Trim();
+    }
+
+    public void SetSourceType(string? sourceType)
+    {
+        SourceType = string.IsNullOrWhiteSpace(sourceType) ? null : sourceType.Trim();
     }
 }
