@@ -71,22 +71,16 @@
               />
             }
             @case ('holdings') {
-              <div class="stub">
-                <h2>Holdings</h2>
-                <p>
-                  Current positions will appear here once the API exposes a read endpoint for an
-                  account's holdings and snapshots.
-                </p>
-              </div>
+              <app-account-holdings
+                [portfolioId]="portfolioId()!"
+                [accountId]="accountId()"
+              />
             }
             @case ('ledger') {
-              <div class="stub">
-                <h2>Ledger</h2>
-                <p>
-                  The transaction ledger will appear here once the API exposes a read endpoint for
-                  an account's transactions.
-                </p>
-              </div>
+              <app-account-ledger
+                [portfolioId]="portfolioId()!"
+                [accountId]="accountId()"
+              />
             }
           }
         </div>

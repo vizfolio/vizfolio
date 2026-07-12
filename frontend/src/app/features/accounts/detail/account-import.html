@@ -1,11 +1,20 @@
 <div class="account-import">
   <p class="hint">
-    Upload a single-account broker export (QFX/OFX or CSV) for this account. Re-importing the
-    same file is safe — duplicate transactions are skipped.
+    Upload a single-account broker export for this account. The format is detected automatically;
+    override it below if needed. Re-importing the same file is safe — duplicate transactions are skipped.
   </p>
 
+  <app-select-field
+    class="format-select"
+    label="Format"
+    [value]="sourceSystem()"
+    [options]="formatOptions()"
+    [disabled]="importing()"
+    (valueChange)="sourceSystem.set($event)"
+  />
+
   <app-file-upload
-    accept=".qfx,.ofx,.csv"
+    [accept]="acceptAttr()"
     label="Drag a statement here, or choose one"
     [disabled]="importing()"
     (fileSelected)="onFileSelected($event)"

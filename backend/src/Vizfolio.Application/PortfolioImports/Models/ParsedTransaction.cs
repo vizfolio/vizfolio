@@ -14,4 +14,7 @@ public sealed record ParsedTransaction(
     decimal Amount,
     decimal? Fees,
     string? CurrencyCode,
-    string? Memo);
+    string? Memo,
+    // The broker's raw type label, preserved verbatim (see AccountTransaction.SourceType).
+    // Trailing with a default so existing parsers/tests compile unchanged.
+    string? SourceType = null);

@@ -4,7 +4,11 @@ import { provideRouter } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
 
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
-import { PortfolioImportResult, PortfolioImportStatus } from '../../core/api/models/imports.models';
+import {
+  ImportParser,
+  PortfolioImportResult,
+  PortfolioImportStatus,
+} from '../../core/api/models/imports.models';
 import {
   AccountSummary,
   PortfolioSummary,
@@ -47,6 +51,11 @@ const IMPORT_RESULT: PortfolioImportResult = {
   duration: 'PT0.2S',
 };
 
+const PARSERS: ImportParser[] = [
+  { sourceSystem: 'QFX', displayName: 'OFX / QFX statement', fileExtensions: ['.qfx', '.ofx'] },
+  { sourceSystem: 'VANGUARD', displayName: 'Vanguard transaction report', fileExtensions: ['.xlsx', '.xls'] },
+];
+
 class MockApi {
   portfolios: Observable<PortfolioSummary[]> = of([portfolio('p1')]);
   accountsList: AccountSummary[] = [account('a1', 'Brokerage')];
@@ -54,9 +63,13 @@ class MockApi {
   importResult: Observable<PortfolioImportResult> = of(IMPORT_RESULT);
   createBody: unknown = null;
   importedFile: File | null = null;
+  sourceSystem: string | undefined;
 
   getPortfolios() {
     return this.portfolios;
+  }
+  getImportParsers() {
+    return of(PARSERS);
   }
   getAccounts() {
     return of(this.accountsList);
@@ -65,8 +78,9 @@ class MockApi {
     this.createBody = body;
     return this.createResult;
   }
-  importPortfolioFile(_pid: string, file: File) {
+  importPortfolioFile(_pid: string, file: File, sourceSystem?: string) {
     this.importedFile = file;
+    this.sourceSystem = sourceSystem;
     return this.importResult;
   }
 }
@@ -146,8 +160,19 @@ describe('Accounts', () => {
     cmp.onFileSelected(file);
 
     expect(api.importedFile).toBe(file);
+    expect(api.sourceSystem).toBeUndefined(); // auto-detect by default
     expect(cmp.importResult()?.accounts.length).toBe(1);
     expect(cmp.accounts().length).toBe(2);
+  });
+
+  it('forwards the chosen format as the source-system override', () => {
+    const api = new MockApi();
+    const { cmp } = setup(api);
+
+    cmp.sourceSystem.set('VANGUARD');
+    cmp.onFileSelected(new File(['data'], 'report.xlsx'));
+
+    expect(api.sourceSystem).toBe('VANGUARD');
   });
 
   it('maps an unsupported-format import error to guidance', () => {

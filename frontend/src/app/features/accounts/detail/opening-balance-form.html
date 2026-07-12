@@ -2,6 +2,8 @@
   <p class="intro">
     Record positions held on a chosen date. Vizfolio creates opening-balance snapshots so
     performance before your earliest imported statement is based on real values, not estimates.
+    A holding is complete once it has a market value — enter one directly, or a unit price and
+    we'll derive it from the units.
   </p>
 
   <div class="top-fields">
@@ -23,8 +25,13 @@
     </label>
   </div>
 
+  @if (prefilling()) {
+    <p class="loading" role="status">Loading holdings…</p>
+  }
+
   <div class="rows" role="group" aria-label="Holdings">
     <div class="row row--head" aria-hidden="true">
+      <span>Status</span>
       <span>Symbol</span>
       <span>Units</span>
       <span>Market value</span>
@@ -35,7 +42,14 @@
       <span></span>
     </div>
     @for (row of rows(); track row.key) {
+      @let complete = isRowComplete(row);
       <div class="row">
+        <span
+          class="status"
+          [class.status--ok]="complete"
+          [attr.aria-label]="complete ? 'Complete' : 'Incomplete'"
+          [title]="complete ? 'Has a market value' : 'Add a market value or unit price to complete'"
+        >{{ complete ? '✓' : '✗' }}</span>
         <input aria-label="Symbol" placeholder="AAPL" [value]="row.symbol"
           (input)="updateRow(row.key, 'symbol', $event)" [disabled]="submitting()" />
         <input aria-label="Units" type="number" step="any" [value]="row.units"
@@ -55,6 +69,15 @@
       </div>
     }
   </div>
+
+  @if (namedRows().length > 0) {
+    <p class="completeness" role="status">
+      {{ completeCount() }} of {{ namedRows().length }} holding(s) have a complete opening balance.
+      @if (completeCount() < namedRows().length) {
+        Holdings marked ✗ have no market value and will still be flagged as an estimate.
+      }
+    </p>
+  }
 
   <div class="actions">
     <button type="button" class="btn btn--ghost" (click)="addRow()" [disabled]="submitting()">

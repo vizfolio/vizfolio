@@ -15,7 +15,9 @@ import {
   OpeningBalanceResponse,
   SetOpeningBalanceRequest,
 } from './models/coverage.models';
-import { PortfolioImportResult } from './models/imports.models';
+import { HoldingRow } from './models/holdings.models';
+import { ImportParser, PortfolioImportResult } from './models/imports.models';
+import { LedgerEntry } from './models/ledger.models';
 import {
   AccountSummary,
   PortfolioPerformance,
@@ -46,10 +48,16 @@ function dateRangeParams(from?: string, to?: string): HttpParams {
   return params;
 }
 
-/** Wraps a File in the multipart form-data body the import endpoints expect. */
-function fileForm(file: File): FormData {
+/**
+ * Wraps a File in the multipart form-data body the import endpoints expect. Pass `sourceSystem`
+ * to force a specific parser; omit it to let the backend auto-detect the format.
+ */
+function fileForm(file: File, sourceSystem?: string): FormData {
   const form = new FormData();
   form.append('file', file, file.name);
+  if (sourceSystem) {
+    form.append('sourceSystem', sourceSystem);
+  }
   return form;
 }
 
@@ -109,32 +117,41 @@ export class PortfolioApiService {
 
   // ---- Imports -------------------------------------------------------------
 
+  /** GET /api/imports/parsers — available parsers for the "Format" override, highest priority first. */
+  getImportParsers(): Observable<ImportParser[]> {
+    return this.http.get<ImportParser[]>(`${API_BASE}/imports/parsers`);
+  }
+
   /**
    * POST /api/portfolios/{portfolioId}/imports
    * Multi-account broker file (e.g. QFX carrying account metadata).
+   * `sourceSystem` forces a specific parser; omit to auto-detect.
    */
   importPortfolioFile(
     portfolioId: string,
     file: File,
+    sourceSystem?: string,
   ): Observable<PortfolioImportResult> {
     return this.http.post<PortfolioImportResult>(
       `${API_BASE}/portfolios/${portfolioId}/imports`,
-      fileForm(file),
+      fileForm(file, sourceSystem),
     );
   }
 
   /**
    * POST /api/portfolios/{portfolioId}/accounts/{accountId}/imports
    * Single-account broker file uploaded to a specific account.
+   * `sourceSystem` forces a specific parser; omit to auto-detect.
    */
   importAccountFile(
     portfolioId: string,
     accountId: string,
     file: File,
+    sourceSystem?: string,
   ): Observable<PortfolioImportResult> {
     return this.http.post<PortfolioImportResult>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/imports`,
-      fileForm(file),
+      fileForm(file, sourceSystem),
     );
   }
 
@@ -164,6 +181,43 @@ export class PortfolioApiService {
   ): Observable<PortfolioPerformance> {
     return this.http.get<PortfolioPerformance>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/performance`,
+      { params: dateRangeParams(from, to) },
+    );
+  }
+
+  // ---- Holdings & ledger ---------------------------------------------------
+
+  /**
+   * GET /api/portfolios/{portfolioId}/accounts/{accountId}/holdings
+   * `asOf` is an optional ISO date (`YYYY-MM-DD`); omit to value as of today (UTC).
+   */
+  getAccountHoldings(
+    portfolioId: string,
+    accountId: string,
+    asOf?: string,
+  ): Observable<HoldingRow[]> {
+    let params = new HttpParams();
+    if (asOf) {
+      params = params.set('asOf', asOf);
+    }
+    return this.http.get<HoldingRow[]>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/holdings`,
+      { params },
+    );
+  }
+
+  /**
+   * GET /api/portfolios/{portfolioId}/accounts/{accountId}/ledger
+   * `from`/`to` are optional ISO dates (`YYYY-MM-DD`); omit to use the account's full history.
+   */
+  getAccountLedger(
+    portfolioId: string,
+    accountId: string,
+    from?: string,
+    to?: string,
+  ): Observable<LedgerEntry[]> {
+    return this.http.get<LedgerEntry[]>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/ledger`,
       { params: dateRangeParams(from, to) },
     );
   }

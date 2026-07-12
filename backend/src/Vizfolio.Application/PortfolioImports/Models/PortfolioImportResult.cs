@@ -4,6 +4,7 @@ public enum PortfolioImportStatus
 {
     Success,
     UnsupportedFormat,
+    UnknownParser,
     AccountNotFound,
     PortfolioNotFound,
     FileHasNoAccountInfo,
@@ -20,6 +21,10 @@ public sealed record PortfolioImportResult(
 {
     public static PortfolioImportResult UnsupportedFormat(TimeSpan duration) =>
         new(PortfolioImportStatus.UnsupportedFormat, null, Array.Empty<AccountImportResult>(), duration);
+
+    /// <summary>The UI forced a specific parser via <c>sourceSystem</c>, but no registered parser owns that key.</summary>
+    public static PortfolioImportResult UnknownParser(string requestedSourceSystem, TimeSpan duration) =>
+        new(PortfolioImportStatus.UnknownParser, requestedSourceSystem, Array.Empty<AccountImportResult>(), duration);
 
     public static PortfolioImportResult AccountNotFound(TimeSpan duration) =>
         new(PortfolioImportStatus.AccountNotFound, null, Array.Empty<AccountImportResult>(), duration);

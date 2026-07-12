@@ -1,11 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Vizfolio.Api.Endpoints.Portfolios;
 using Vizfolio.Application.PortfolioImports.Models;
+using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Securities;
 using Vizfolio.Infrastructure.Persistence;
 
@@ -184,6 +186,91 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         secondResult.ShouldNotBeNull();
         secondResult.Accounts[0].Inserted.ShouldBe(0);
         secondResult.Accounts[0].Skipped.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task GET_import_parsers_lists_registered_parsers_highest_priority_first()
+    {
+        var parsers = await _client.GetFromJsonAsync<List<ImportParserResponse>>("/api/imports/parsers");
+
+        parsers.ShouldNotBeNull();
+        // Vanguard (200) > QFX (100) > generic test CSV (0).
+        parsers.Select(p => p.SourceSystem).ShouldBe(new[] { "VANGUARD", "QFX", "CSV" });
+        parsers.Single(p => p.SourceSystem == "QFX").FileExtensions.ShouldContain(".qfx");
+        parsers.Single(p => p.SourceSystem == "VANGUARD").DisplayName.ShouldBe("Vanguard transaction report");
+    }
+
+    [Fact]
+    public async Task POST_account_import_honours_explicit_source_system_override()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "9010");
+
+        var response = await UploadAccountFileAsync(
+            portfolio.PortfolioId, account.AccountId, "ledger.csv", CanonicalCsv, sourceSystem: "CSV");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.SourceSystem.ShouldBe("CSV");
+        body.Accounts[0].Inserted.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task POST_account_import_unknown_source_system_returns_415()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "9011");
+
+        var response = await UploadAccountFileAsync(
+            portfolio.PortfolioId, account.AccountId, "ledger.csv", CanonicalCsv, sourceSystem: "does-not-exist");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.Status.ShouldBe(PortfolioImportStatus.UnknownParser);
+    }
+
+    [Fact]
+    public async Task POST_account_import_vanguard_xlsx_inserts_and_persists_source_type()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "9020");
+
+        using var multipart = new MultipartFormDataContent();
+        multipart.Add(new ByteArrayContent(BuildVanguardXlsx()), "File", "report.xlsx");
+        var response = await _client.PostAsync(
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{account.AccountId}/imports", multipart);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.SourceSystem.ShouldBe("VANGUARD");
+        body.Accounts[0].Inserted.ShouldBe(2);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var sweep = await db.AccountTransactions.AsNoTracking()
+            .SingleAsync(t => t.AccountId == account.AccountId && t.SourceType == "Sweep in");
+        sweep.Type.ShouldBe(TransactionType.Other);
+    }
+
+    private static byte[] BuildVanguardXlsx()
+    {
+        using var workbook = new XLWorkbook();
+        var ws = workbook.AddWorksheet("Transactions");
+        string[] headers =
+        [
+            "Settlement date", "Trade date", "Symbol", "Name", "Type", "Account type",
+            "Quantity", "Price", "Commission & fees**", "Amount",
+        ];
+        for (var c = 0; c < headers.Length; c++) ws.Cell(4, c + 1).Value = headers[c];
+
+        string?[] buy = ["6/1/2026", "6/1/2026", "VOO", "Vanguard S&P 500 ETF", "Buy", "CASH", "2", "$500.0000", "Free", "-$1000.0000"];
+        string?[] sweep = ["6/2/2026", "6/2/2026", "VMFXX", "Settlement Fund", "Sweep in", "CASH", null, null, null, "-$50.0000"];
+        for (var c = 0; c < buy.Length; c++) if (buy[c] is { } v) ws.Cell(5, c + 1).Value = v;
+        for (var c = 0; c < sweep.Length; c++) if (sweep[c] is { } v) ws.Cell(6, c + 1).Value = v;
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
 
     [Fact]
@@ -554,10 +641,13 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         return (await response.Content.ReadFromJsonAsync<AccountResponse>())!;
     }
 
-    private async Task<HttpResponseMessage> UploadAccountFileAsync(Guid portfolioId, Guid accountId, string fileName, string content)
+    private async Task<HttpResponseMessage> UploadAccountFileAsync(
+        Guid portfolioId, Guid accountId, string fileName, string content, string? sourceSystem = null)
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(content)), "File", fileName);
+        if (sourceSystem is not null)
+            multipart.Add(new StringContent(sourceSystem), "SourceSystem");
         return await _client.PostAsync($"/api/portfolios/{portfolioId}/accounts/{accountId}/imports", multipart);
     }
 

@@ -50,6 +50,12 @@ class MockApi {
   getAccountPerformance() {
     return of(PERF);
   }
+  getAccountHoldings() {
+    return of([]);
+  }
+  getAccountLedger() {
+    return of([]);
+  }
 }
 
 function setup(api: MockApi): { fixture: ComponentFixture<Account>; cmp: any; el: HTMLElement } {
@@ -80,11 +86,13 @@ describe('Account (detail)', () => {
     expect(cmp.tab()).toBe('performance');
   });
 
-  it('switches to the Holdings stub tab', () => {
+  it('switches to the Holdings tab', () => {
     const { cmp, fixture, el } = setup(new MockApi());
     cmp.select('holdings');
     fixture.detectChanges();
-    expect(el.querySelector('.stub')?.textContent).toContain('Holdings');
+    TestBed.tick();
+    fixture.detectChanges();
+    expect(el.querySelector('app-account-holdings')).toBeTruthy();
   });
 
   it('shows a no-portfolio message when no portfolio is active', () => {

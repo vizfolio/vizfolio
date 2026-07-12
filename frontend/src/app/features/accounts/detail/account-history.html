@@ -13,7 +13,8 @@
             <div>
               <strong>History gap detected.</strong>
               <p>
-                Transactions begin before the earliest snapshot, so early balances are estimates.
+                Transactions begin before the earliest valued snapshot, so early balances are
+                estimates.
                 @if (c.suggestedOpeningDate) {
                   Record an opening balance as of <strong>{{ c.suggestedOpeningDate }}</strong> to
                   close the gap.
@@ -34,7 +35,7 @@
             <dd>{{ orDash(c.firstTransactionDate) }}</dd>
           </div>
           <div>
-            <dt>Earliest snapshot</dt>
+            <dt>Earliest valued snapshot</dt>
             <dd>{{ orDash(c.earliestSnapshotDate) }}</dd>
           </div>
           <div>

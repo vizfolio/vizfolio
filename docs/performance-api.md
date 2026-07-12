@@ -1,6 +1,6 @@
 # Performance API
 
-The Performance API surfaces how a portfolio (or a single account inside it) performed over a date range. Read this doc when you're touching anything under `backend/src/Vizfolio.Application/Portfolios/` (the performance service and calculator strategies), the endpoints at `backend/src/Vizfolio.Api/Endpoints/Portfolios/GetPortfolioPerformanceEndpoint.cs` and `GetAccountPerformanceEndpoint.cs`, or the QFX parsing that feeds them (`backend/src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs`).
+The Performance API surfaces how a portfolio (or a single account inside it) performed over a date range. Read this doc when you're touching anything under `backend/src/Vizfolio.Application/Portfolios/` (the performance service and calculator strategies), the endpoints at `backend/src/Vizfolio.Api/Endpoints/Portfolios/GetPortfolioPerformanceEndpoint.cs` and `GetAccountPerformanceEndpoint.cs`, or the import parser pipeline that feeds them (`backend/src/Vizfolio.Application/PortfolioImports/`, see "Import pipeline & parser plugins" below).
 
 ## Endpoints
 
@@ -68,7 +68,9 @@ This deliberately *does not* try to derive a balance by summing transaction amou
 
 ### Completeness
 
-`isComplete = true` iff every "relevant" holding had a snapshot at-or-before the date. A holding is **relevant** if it either (a) has a snapshot with `AsOf ≤ to`, or (b) has a transaction in `[from, to]`. Holdings that never existed in-window don't inflate the missing count.
+`isComplete = true` iff every "relevant" holding had a **valued** snapshot at-or-before the date — a snapshot whose `AsOf ≤ date` **and** whose `MarketValue` is non-null (a quantity-only snapshot contributes nothing to a market-value balance, so it counts as *missing*). A holding is **relevant** if it either (a) has a snapshot with `AsOf ≤ to`, or (b) has a transaction in `[from, to]`. Holdings that never existed in-window don't inflate the missing count.
+
+This "valued snapshot" test is the canonical completeness rule. The history-coverage gap (`hasHistoryGap`) and the opening-balance screen's per-holding ✓/✗ status derive from the same rule, so all three surfaces agree — see [account-maintenance.md](./account-maintenance.md#history-coverage-and-opening-balance). The opening-balance endpoint derives `MarketValue = units × unitPrice` when only a unit price is supplied, so a price-only entry still produces a *valued* snapshot.
 
 `snapshotAsOf` is the latest contributing snapshot's date (null when no snapshot contributed). `holdingsCovered` and `holdingsMissingSnapshot` let the caller diagnose *why* a balance is incomplete without exposing per-holding detail.
 
@@ -76,6 +78,14 @@ This deliberately *does not* try to derive a balance by summing transaction amou
 
 - `endingBalance` is fully populated (`isComplete: true`, snapshot from the QFX's `<DTASOF>`).
 - `startingBalance.value` is `0` with `isComplete: false` and `holdingsMissingSnapshot > 0` — an honest "we don't know the starting balance." The fix is to upload an `OpeningBalance` or `Statement` snapshot at (or before) the `from` date.
+
+> **Known limitation — windowed returns without a boundary valuation.** Because a balance is
+> valued from "the latest snapshot with `AsOf ≤ date`", a *valued* prior snapshot (e.g. a
+> correct `$0` opening balance at inception) is carried forward and treated as the market value
+> at any later `from`. For a mid-history window this reports `startingBalance = 0` with
+> `isComplete: true`, so the completeness guard doesn't fire and the return can explode (grows as
+> `from` approaches today). A `PriceHistory` table (`quantity × price` at any date) is the planned
+> root fix. Full write-up and pick-up steps: [price-history-valuation.md](./price-history-valuation.md).
 
 ## Contributions
 
@@ -180,6 +190,84 @@ Each calculator receives a `PerformanceComputationContext` — from/to dates, bo
 
 Adding a new return metric is a matter of implementing the corresponding interface and swapping the DI registration. Adding a *new* metric (e.g., drawdown, contribution-vs-market-effect decomposition) means adding a sibling record to `PerformanceReturnsResult` and a new field to the response — no changes to the route or existing metrics.
 
+## Import pipeline & parser plugins
+
+Broker files feed the ledger through a plug-in parser pipeline. Each format implements
+`IPortfolioFileParser` (`backend/src/Vizfolio.Application/PortfolioImports/Abstractions/IPortfolioFileParser.cs`)
+and is registered in `DependencyInjection.AddApplication`. `PortfolioImportService`
+(`.../PortfolioImports/Services/PortfolioImportService.cs`) does the dispatch. Parsers ship today:
+`QfxFileParser` (OFX/QFX, `SourceSystem="QFX"`) and `VanguardTransactionHistoryReportParser`
+(the per-account "Create a Report" `.xlsx`, `SourceSystem="VANGUARD"`, read with ClosedXML — MIT).
+
+The parser contract carries selection metadata beyond `SourceSystem`:
+
+- **`DisplayName`** — human label shown in the UI "Format" dropdown.
+- **`Priority`** — auto-detect offers parsers highest-first, so provider-specific parsers sit above
+  any generic fallback (QFX = 100, Vanguard = 200). Ties fall back to registration order.
+- **`FileExtensions`** — powers the UI `accept` hint (aggregated across parsers).
+
+**Selection.** By default the format is **auto-detected**: the buffered upload is offered to each
+parser's `CanParseAsync` in priority order and the first match wins (415 `UnsupportedFormat` if none
+claim it). Callers may **force** a parser by passing `sourceSystem` (the `SourceSystem` key) on the
+import endpoints — this skips detection; an unregistered key returns 415 `UnknownParser`. The UI
+happy path sends no override (0 extra clicks); the dropdown defaults to *Auto-detect* and only sends
+`sourceSystem` when the user overrides.
+
+**Discovery.** `GET /api/imports/parsers` returns `[{ sourceSystem, displayName, fileExtensions }]`
+(priority order) so the UI can build the dropdown and the file-picker `accept` list.
+
+**Dedup is content-based and cross-source.** Because formats overlap (the Vanguard report and the QFX
+export share the recent ~18 months) and carry no common transaction id, dedup keys on a
+**`TransactionFingerprint`** (`.../PortfolioImports/Services/TransactionFingerprint.cs`): a hash of
+`account | tradeDate | symbol | signed quantity | signed amount`, rounded to absorb representation
+noise. It deliberately **excludes** the source system and the (normalized) `TransactionType` — the type
+is the field most likely to diverge across sources and would defeat the match; the **sign** of amount and
+quantity is what separates a Buy from a Sell instead.
+
+On import, `ImportStatementAsync` loads the account's existing rows across **all** sources and builds a
+fingerprint **multiset** (counts). Each incoming row is skipped if an unmatched existing fingerprint
+remains (decrementing the count) — so a trade already imported from QFX is not re-imported from the
+Vanguard report, while N genuine same-day duplicates are preserved. `ExternalId` stays the unique/index
+key: QFX uses `FITID`; id-less formats synthesize `"{fingerprint}-{rowOrdinal}"` (keeps genuine
+duplicates storable and same-file re-uploads idempotent).
+
+Residual edges (accepted): a Deposit vs an inbound Transfer of the identical amount on the same day can't
+be told apart without an id; QFX records in-kind `<TRANSFER>` with `Amount = 0` while Vanguard transfers
+carry a real amount, so those specific rows won't cross-dedup (rare in the overlap).
+
+**`SourceType` — preserving the raw label.** `AccountTransaction.SourceType` (nullable) stores the
+broker's verbatim type next to the normalized `TransactionType`, so nothing is lost when a messy label is
+mapped. The Vanguard parser maps its types as follows (raw kept in `SourceType`):
+
+| Raw Vanguard `Type` | `TransactionType` |
+|---|---|
+| `Buy`, `Buy (exchange)` | `Buy` |
+| `Sell`, `Sell (exchange)` | `Sell` |
+| `Dividend` | `Dividend` |
+| `Capital gain (ST\|LT)` | `CapitalGain` |
+| `Reinvestment` | `Reinvest` |
+| `Interest` | `Interest` |
+| `Fee` | `Fee` |
+| `Funds Received`, `Contribution` | `Deposit` (external in; `Contribution` = IRA contribution) |
+| `Transfer (incoming)` | `Transfer` (money in) |
+| `TRANSFER TO …` | `Transfer` (money out) |
+| `Sweep`, `Sweep in`, `Sweep out` | `Other` |
+
+The Vanguard `Amount` reflects settlement-fund mechanics, so the parser sets the **sign of the external
+cash types from the label**, not the reported amount: `Funds Received`/`Transfer (incoming)` → `+|amount|`,
+`TRANSFER TO …` → `−|amount|`. Sweeps → `Other` keeps internal money-market cash a no-op for
+`Contributions` (which only sum `{Deposit, Withdrawal, Transfer}`).
+
+### Adding a provider parser
+
+1. Implement `IPortfolioFileParser` (populate the shared `ParsedTransaction`/`ParsedPosition` records —
+   no new parsed models needed).
+2. Register it in `DependencyInjection.AddApplication`.
+3. Set `Priority` above any generic parser and give it distinctive `CanParseAsync` signature detection.
+
+That's the whole extension surface — the endpoints, discovery, dedup, and UI dropdown pick it up
+automatically.
+
 ## QFX ingestion nuances
 
 The performance numbers are only as good as the transactions and snapshots imported from QFX. The parser at `backend/src/Vizfolio.Application/PortfolioImports/Parsers/QfxFileParser.cs` has three important behaviors that affect performance results:
@@ -223,3 +311,16 @@ Nothing is built for this yet. Current behavior: any snapshot is accepted at fac
 New sibling metrics slot onto `PerformanceReturnsResult` or as top-level fields on `PortfolioPerformanceResult`. Route and existing metrics don't change. The mapping layer (`backend/src/Vizfolio.Api/Endpoints/Portfolios/PerformanceMapping.cs`) projects Application-layer records into API records; add a new mapping method there when the shape grows.
 
 The service currently issues one round-trip per data set (holdings, snapshots, active-in-range holdings, contribution rows, default-`from` resolution). Adding another metric that needs the same data should reuse the loaded lists rather than requerying.
+
+## Holdings & ledger endpoints
+
+Two account-scoped read endpoints back the **Holdings** and **Ledger** tabs of the account detail UI. They live alongside the performance endpoints and share its conventions (FastEndpoints, `AllowAnonymous`, account-in-portfolio scope → **404**).
+
+| Route | Verb | Handler |
+|---|---|---|
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/holdings` | GET | `GetAccountHoldingsEndpoint` |
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/ledger` | GET | `GetAccountLedgerEndpoint` |
+
+**Holdings** (`HoldingResponse[]`, ordered by symbol) lists each `AccountHolding` valued from the latest `AccountHoldingSnapshot` with `AsOf <= asOf` — the same "Balance basis: snapshot market value" rule the performance balances use. Query param `asOf` (ISO date) defaults to today (UTC). When no snapshot exists on or before `asOf`, `hasSnapshot` is `false` and the valuation fields (`quantity`, `unitPrice`, `marketValue`, `costBasis`, `gainLoss`) are `null`. `gainLoss` is `marketValue - costBasis`, populated only when both are present.
+
+**Ledger** (`LedgerEntryResponse[]`, newest trade date first) lists the account's `AccountTransaction`s. Optional `from`/`to` filter on `TradeDate` (**400** on `from > to`, matching performance); omit for full history. `type` is the normalized `TransactionType`; `sourceType` preserves the broker's original label; `holdingName` carries the linked holding's name when the transaction is linked. The newest-first sort is applied in memory (SQLite can't `ORDER BY` the `DateTimeOffset` tiebreak — keep it provider-agnostic).

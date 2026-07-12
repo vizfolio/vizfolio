@@ -5,7 +5,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Vizfolio.Api.Tests.Extracts.Fakes;
+using Vizfolio.Api.Tests.PortfolioImports.Fakes;
 using Vizfolio.Application.Extracts.Abstractions;
+using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Infrastructure.Persistence;
 
 namespace Vizfolio.Api.Tests;
@@ -48,6 +50,11 @@ public sealed class VizfolioApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IFundsExtractSource>();
             services.AddSingleton<ISecuritiesExtractSource>(SecuritiesSource);
             services.AddSingleton<IFundsExtractSource>(FundsSource);
+
+            // Provide a generic, metadata-less CSV parser for tests. Production ships only
+            // provider-specific parsers, but the endpoint tests need a format that carries no
+            // account metadata (which QFX always does) to exercise account-scoped imports.
+            services.AddScoped<IPortfolioFileParser, CsvLedgerTestParser>();
         });
     }
 

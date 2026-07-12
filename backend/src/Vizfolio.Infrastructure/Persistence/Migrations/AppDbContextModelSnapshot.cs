@@ -417,6 +417,10 @@ namespace Vizfolio.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SourceType")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Ticker")
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");

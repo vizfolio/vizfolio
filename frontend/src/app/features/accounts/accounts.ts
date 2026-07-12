@@ -5,11 +5,13 @@ import { RouterLink } from '@angular/router';
 import { catchError, of, switchMap } from 'rxjs';
 
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
-import { PortfolioImportResult } from '../../core/api/models/imports.models';
+import { ImportParser, PortfolioImportResult } from '../../core/api/models/imports.models';
 import { AccountSummary } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
 import { FileUpload } from '../../shared/ui/file-upload/file-upload';
+import { SelectField } from '../../shared/ui/select-field/select-field';
+import { parserAcceptAttr, parserFormatOptions } from './import-format-options';
 
 type ListStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -34,7 +36,7 @@ const EMPTY_FORM: AccountForm = {
  */
 @Component({
   selector: 'app-accounts',
-  imports: [EmptyState, FileUpload, RouterLink],
+  imports: [EmptyState, FileUpload, RouterLink, SelectField],
   templateUrl: './accounts.html',
   styleUrl: './accounts.scss',
 })
@@ -66,7 +68,18 @@ export class Accounts {
   protected readonly importResult = signal<PortfolioImportResult | null>(null);
   protected readonly importError = signal<string | null>(null);
 
+  // Format override; '' selection means auto-detect.
+  private readonly parsers = signal<ImportParser[]>([]);
+  protected readonly sourceSystem = signal('');
+  protected readonly formatOptions = computed(() => parserFormatOptions(this.parsers()));
+  protected readonly acceptAttr = computed(() => parserAcceptAttr(this.parsers()));
+
   constructor() {
+    this.api
+      .getImportParsers()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((parsers) => this.parsers.set(parsers));
+
     // (Re)load accounts whenever the active portfolio changes.
     toObservable(this.activeId)
       .pipe(
@@ -145,7 +158,7 @@ export class Accounts {
     this.importError.set(null);
     this.importResult.set(null);
     this.api
-      .importPortfolioFile(portfolioId, file)
+      .importPortfolioFile(portfolioId, file, this.sourceSystem() || undefined)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
@@ -183,7 +196,7 @@ function importErrorMessage(err: HttpErrorResponse): string {
     case 413:
       return 'That file is too large. The import limit is 10 MB.';
     case 415:
-      return 'Unsupported file type. Upload a QFX/OFX or CSV export.';
+      return 'Unsupported file type. Upload a QFX/OFX statement or a Vanguard report — or pick the format explicitly.';
     case 422:
       return 'This file has no account metadata. Import it from a specific account instead.';
     case 404:
