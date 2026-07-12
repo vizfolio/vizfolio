@@ -1,0 +1,74 @@
+:host {
+  display: block;
+  height: 100dvh;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: var(--topbar-height) 1fr;
+  grid-template-areas:
+    'topbar topbar'
+    'sidebar main';
+  height: 100dvh;
+}
+
+.shell-topbar {
+  grid-area: topbar;
+  z-index: 3;
+}
+
+.shell-sidebar {
+  grid-area: sidebar;
+  min-height: 0;
+  z-index: 2;
+}
+
+.shell-main {
+  grid-area: main;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-6);
+  background: var(--color-bg);
+}
+
+/* Scrim only participates on narrow screens (see below). */
+.shell-scrim {
+  display: none;
+  border: 0;
+  padding: 0;
+}
+
+/* ---- Narrow screens: sidebar becomes an off-canvas drawer ---- */
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'topbar'
+      'main';
+  }
+
+  .shell-sidebar {
+    position: fixed;
+    top: var(--topbar-height);
+    bottom: 0;
+    left: 0;
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+
+  .shell.sidebar-open .shell-sidebar {
+    transform: translateX(0);
+    box-shadow: var(--shadow-md);
+  }
+
+  .shell.sidebar-open .shell-scrim {
+    display: block;
+    position: fixed;
+    inset: var(--topbar-height) 0 0 0;
+    background: oklch(0% 0 0 / 0.4);
+    z-index: 1;
+    cursor: pointer;
+  }
+}

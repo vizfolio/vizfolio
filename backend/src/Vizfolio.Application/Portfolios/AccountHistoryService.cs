@@ -43,9 +43,13 @@ public sealed class AccountHistoryService : IAccountHistoryService
 
         if (holdingIds.Count > 0)
         {
+            // Only a snapshot with a market value can close the gap — a quantity-only snapshot
+            // yields no usable balance, so performance still treats the start as incomplete.
+            // Keying the gap off the earliest *valued* snapshot keeps this screen consistent
+            // with the performance starting balance and the opening-balance screen.
             earliestSnap = await _db.AccountHoldingSnapshots
                 .AsNoTracking()
-                .Where(s => holdingIds.Contains(s.AccountHoldingId))
+                .Where(s => holdingIds.Contains(s.AccountHoldingId) && s.MarketValue != null)
                 .OrderBy(s => s.AsOf)
                 .Select(s => (DateOnly?)s.AsOf)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -112,6 +116,12 @@ public sealed class AccountHistoryService : IAccountHistoryService
             var holding = await ResolveOrCreateHoldingAsync(
                 accountId, input.Symbol, input.Cusip, currency, cancellationToken);
 
+            // A snapshot is only usable for a balance if it carries a market value (that's what
+            // performance sums). When the user gives units + unit price but no explicit market
+            // value, derive it so a price-only entry still yields a complete opening balance.
+            var marketValue = input.MarketValue
+                ?? (input.UnitPrice.HasValue ? input.Units * input.UnitPrice.Value : (decimal?)null);
+
             var existing = await _db.AccountHoldingSnapshots
                 .FirstOrDefaultAsync(
                     s => s.AccountHoldingId == holding.AccountHoldingId && s.AsOf == command.AsOf,
@@ -135,14 +145,14 @@ public sealed class AccountHistoryService : IAccountHistoryService
                 command.AsOf,
                 input.Units,
                 AccountHoldingSnapshotSource.OpeningBalance);
-            snapshot.SetValuation(input.CostBasis, input.MarketValue, input.UnitPrice, currency);
+            snapshot.SetValuation(input.CostBasis, marketValue, input.UnitPrice, currency);
             _db.AccountHoldingSnapshots.Add(snapshot);
 
             outcomes.Add(new OpeningBalanceHoldingOutcome(
                 input.Symbol.Trim().ToUpperInvariant(),
                 holding.AccountHoldingId,
                 input.Units,
-                input.MarketValue,
+                marketValue,
                 input.UnitPrice,
                 input.CostBasis,
                 currency,

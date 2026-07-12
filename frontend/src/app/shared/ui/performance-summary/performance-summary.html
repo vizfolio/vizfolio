@@ -1,0 +1,94 @@
+@let p = performance();
+<div class="perf-summary">
+  <div class="stat-grid">
+    <app-stat-card
+      label="Starting balance"
+      [value]="money(p.startingBalance.value)"
+      [incomplete]="!p.startingBalance.isComplete"
+    />
+    <app-stat-card
+      label="Ending balance"
+      [value]="money(p.endingBalance.value)"
+      [incomplete]="!p.endingBalance.isComplete"
+    />
+    <app-stat-card
+      label="Net contributions"
+      [value]="money(p.contributions.net)"
+      [trend]="netTrend()"
+    />
+    <app-stat-card label="Time-weighted return" [value]="twrLabel()" [trend]="twrTrend()" />
+    <app-stat-card label="Money-weighted return" [value]="mwrLabel()" [trend]="mwrTrend()" />
+  </div>
+
+  <div class="details">
+    <div class="detail-card">
+      <h3>Balances</h3>
+      <dl>
+        <div>
+          <dt>Starting <app-completeness-badge
+              [complete]="p.startingBalance.isComplete"
+              [missing]="p.startingBalance.holdingsMissingSnapshot"
+              [asOf]="p.startingBalance.snapshotAsOf"
+            /></dt>
+          <dd>{{ money(p.startingBalance.value) }}</dd>
+        </div>
+        <div>
+          <dt>Ending <app-completeness-badge
+              [complete]="p.endingBalance.isComplete"
+              [missing]="p.endingBalance.holdingsMissingSnapshot"
+              [asOf]="p.endingBalance.snapshotAsOf"
+            /></dt>
+          <dd>{{ money(p.endingBalance.value) }}</dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="detail-card">
+      <h3>Contributions</h3>
+      <dl>
+        <div><dt>Deposits</dt><dd>{{ money(p.contributions.deposits) }}</dd></div>
+        <div><dt>Withdrawals</dt><dd>{{ money(p.contributions.withdrawals) }}</dd></div>
+        <div><dt>Net</dt><dd>{{ money(p.contributions.net) }}</dd></div>
+        <div><dt>Count</dt><dd>{{ p.contributions.count }}</dd></div>
+      </dl>
+    </div>
+
+    <div class="detail-card">
+      <h3>Returns</h3>
+      <dl>
+        <div>
+          <dt>{{ p.returns.timeWeighted.method }} ({{ p.returns.timeWeighted.basis }})</dt>
+          <dd>
+            {{ twrLabel() }}
+            @if (p.returns.timeWeighted.rate === null && p.returns.timeWeighted.reason) {
+              <span class="reason">{{ p.returns.timeWeighted.reason }}</span>
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>{{ p.returns.moneyWeighted.method }} ({{ p.returns.moneyWeighted.basis }})</dt>
+          <dd>
+            {{ mwrLabel() }}
+            @if (p.returns.moneyWeighted.rate === null && p.returns.moneyWeighted.reason) {
+              <span class="reason">{{ p.returns.moneyWeighted.reason }}</span>
+            }
+          </dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-head">
+      <h3>Value over period</h3>
+      <span class="chart-note">Illustrative — real time series coming soon</span>
+    </div>
+    <div class="chart-body">
+      <app-perf-chart
+        [labels]="chartLabels()"
+        [datasets]="chartDatasets()"
+        ariaLabel="Value with deposits and withdrawals over the period"
+      />
+    </div>
+  </div>
+</div>

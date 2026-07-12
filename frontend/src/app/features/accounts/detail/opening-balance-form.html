@@ -1,0 +1,100 @@
+<form class="opening" (submit)="$event.preventDefault(); submit()">
+  <p class="intro">
+    Record positions held on a chosen date. Vizfolio creates opening-balance snapshots so
+    performance before your earliest imported statement is based on real values, not estimates.
+    A holding is complete once it has a market value — enter one directly, or a unit price and
+    we'll derive it from the units.
+  </p>
+
+  <div class="top-fields">
+    <app-date-field
+      label="As of"
+      [value]="asOf()"
+      [disabled]="submitting()"
+      (valueChange)="asOf.set($event)"
+    />
+    <label class="field">
+      <span class="field-label">Default currency <span class="optional">(optional)</span></span>
+      <input
+        type="text"
+        placeholder="USD"
+        [value]="defaultCurrency()"
+        (input)="onDefaultCurrency($event)"
+        [disabled]="submitting()"
+      />
+    </label>
+  </div>
+
+  @if (prefilling()) {
+    <p class="loading" role="status">Loading holdings…</p>
+  }
+
+  <div class="rows" role="group" aria-label="Holdings">
+    <div class="row row--head" aria-hidden="true">
+      <span>Status</span>
+      <span>Symbol</span>
+      <span>Units</span>
+      <span>Market value</span>
+      <span>Unit price</span>
+      <span>Cost basis</span>
+      <span>Currency</span>
+      <span>CUSIP</span>
+      <span></span>
+    </div>
+    @for (row of rows(); track row.key) {
+      @let complete = isRowComplete(row);
+      <div class="row">
+        <span
+          class="status"
+          [class.status--ok]="complete"
+          [attr.aria-label]="complete ? 'Complete' : 'Incomplete'"
+          [title]="complete ? 'Has a market value' : 'Add a market value or unit price to complete'"
+        >{{ complete ? '✓' : '✗' }}</span>
+        <input aria-label="Symbol" placeholder="AAPL" [value]="row.symbol"
+          (input)="updateRow(row.key, 'symbol', $event)" [disabled]="submitting()" />
+        <input aria-label="Units" type="number" step="any" [value]="row.units"
+          (input)="updateRow(row.key, 'units', $event)" [disabled]="submitting()" />
+        <input aria-label="Market value" type="number" step="any" [value]="row.marketValue"
+          (input)="updateRow(row.key, 'marketValue', $event)" [disabled]="submitting()" />
+        <input aria-label="Unit price" type="number" step="any" [value]="row.unitPrice"
+          (input)="updateRow(row.key, 'unitPrice', $event)" [disabled]="submitting()" />
+        <input aria-label="Cost basis" type="number" step="any" [value]="row.costBasis"
+          (input)="updateRow(row.key, 'costBasis', $event)" [disabled]="submitting()" />
+        <input aria-label="Currency" placeholder="USD" [value]="row.currencyCode"
+          (input)="updateRow(row.key, 'currencyCode', $event)" [disabled]="submitting()" />
+        <input aria-label="CUSIP" [value]="row.cusip"
+          (input)="updateRow(row.key, 'cusip', $event)" [disabled]="submitting()" />
+        <button type="button" class="remove" aria-label="Remove holding"
+          (click)="removeRow(row.key)" [disabled]="submitting() || rows().length === 1">×</button>
+      </div>
+    }
+  </div>
+
+  @if (namedRows().length > 0) {
+    <p class="completeness" role="status">
+      {{ completeCount() }} of {{ namedRows().length }} holding(s) have a complete opening balance.
+      @if (completeCount() < namedRows().length) {
+        Holdings marked ✗ have no market value and will still be flagged as an estimate.
+      }
+    </p>
+  }
+
+  <div class="actions">
+    <button type="button" class="btn btn--ghost" (click)="addRow()" [disabled]="submitting()">
+      + Add holding
+    </button>
+    <button type="submit" class="btn btn--primary" [disabled]="!canSubmit()">
+      {{ submitting() ? 'Saving…' : 'Save opening balance' }}
+    </button>
+  </div>
+
+  @if (error(); as message) {
+    <p class="form-error" role="alert">{{ message }}</p>
+  }
+  @if (result(); as r) {
+    <p class="form-ok" role="status">
+      Saved — {{ r.snapshotsCreated }} created, {{ r.snapshotsUpdated }} updated across
+      {{ r.holdings.length }} holding(s) as of {{ r.asOf }}.
+    </p>
+  }
+</form>

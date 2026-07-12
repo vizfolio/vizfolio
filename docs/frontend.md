@@ -23,10 +23,54 @@ Run `dotnet` commands from `backend/` (that is where `global.json` pins the SDK)
 ```
 frontend/
 ├── angular.json          # serve builder wires proxy.conf.json
-├── package.json          # Angular + @angular/cdk deps, ng scripts
+├── package.json          # Angular + @angular/cdk + chart.js deps, ng scripts
 ├── proxy.conf.json       # dev proxy: /api → http://localhost:5261
-└── src/app/              # application shell (feature code added incrementally)
+└── src/
+    ├── styles.scss       # global reset + theme design tokens (see Theming)
+    └── app/
+        ├── app.ts        # root component; renders <app-shell/>
+        ├── app.config.ts # providers: zoneless, HttpClient, router (+ input binding)
+        ├── app.routes.ts # lazy routes (dashboard is default)
+        ├── core/         # cross-cutting singletons (no UI)
+        │   ├── api/      # PortfolioApiService + typed DTO models
+        │   └── theme/    # ThemeService (light/dark, persisted)
+        ├── layout/       # app chrome: shell, sidebar, topbar, theme-toggle, nav-items
+        ├── shared/ui/    # reusable presentational components (stat-card, perf-chart)
+        └── features/     # routed pages: dashboard, coming-soon (placeholders)
 ```
+
+## Application shell
+
+The UI is a **shell + features** structure so sections can be added without touching the chrome:
+
+- **`layout/shell`** — CSS-grid frame: fixed top bar, left sidebar, scrollable `<router-outlet>` main area. Owns the off-canvas sidebar state used on narrow (< 768px) screens.
+- **`layout/sidebar`** — primary nav rendered from the `NavItem[]` array in `layout/nav-items.ts`. **Add a nav link by adding one entry there.** Uses `routerLink` + `routerLinkActive`.
+- **`layout/topbar`** — brand, hamburger (narrow screens, emits `menuToggle`), theme toggle, and a disabled account-menu placeholder for when auth lands.
+- **`shared/ui`** — presentational, `input()`-driven components with no data dependencies: `stat-card` (label/value/trend/incomplete), `perf-chart`, and reusable form controls that wrap native inputs behind app design tokens (`date-field`, `select-field`, `file-upload`) so styling/behaviour live in one place and swap without touching call sites.
+- **`features/*`** — lazy-loaded routed pages. `dashboard` is the landing page; `coming-soon` is a shared placeholder whose heading is bound from route `data.title` via `withComponentInputBinding()`.
+
+## Theming
+
+Theming is driven entirely by CSS custom properties in `src/styles.scss`, split into two layers:
+
+- **Raw tokens** — the fixed brand palette (`--brand-*`, gradients). Never change per theme.
+- **Semantic tokens** — what components actually consume: `--color-bg`, `--color-surface`, `--color-surface-2`, `--color-text`, `--color-text-muted`, `--color-border`, `--color-primary`, `--color-accent`, `--color-positive`, `--color-negative`, plus `--radius-*`, `--space-*`, and shadows.
+
+Components reference **only** semantic tokens, so re-theming never touches component SCSS. Light is the default on `:root`; dark overrides live under `:root[data-theme='dark']`. **Adding a theme = one new `:root[data-theme='name'] { … }` block** plus widening the `ThemeName` union. `ThemeService` (`core/theme`) holds the active theme in a signal, reflects it onto `<html data-theme>` via an `effect`, persists it to `localStorage`, and seeds the initial value from storage → `prefers-color-scheme`.
+
+## Charts
+
+`shared/ui/perf-chart` is a thin wrapper around **Chart.js** (`chart.js`, MIT-licensed) — the only place Chart.js is imported, so the library is swappable from one file. It takes `labels` + typed `PerfDataset[]` inputs, resolves series colors from the semantic theme tokens (so charts follow light/dark), and rebuilds when inputs or the theme change. Note: the performance API returns period *aggregates*, not a time series, so the dashboard chart currently renders a **synthetic** monthly curve (`features/dashboard/dashboard.util.ts`, marked `TODO(perf-timeseries)`) until a time-series endpoint exists.
+
+## Data flow
+
+`core/api/portfolio-api.service.ts` (`@Service`, MIT-clean) wraps `HttpClient` against the `/api` prefix and returns typed Observables; DTO interfaces in `core/api/models/` mirror `backend/src/Vizfolio.Api/Endpoints/Portfolios/PerformanceResponses.cs`. Feature components adapt those Observables to signals at the edge. When the DB has no portfolios (or the API is unreachable) the dashboard degrades to clearly-labelled sample data so the shell stays legible.
+
+## Account detail tabs
+
+`features/accounts/detail/account.ts` is a tabbed container over the account-scoped endpoints. Each tab is its own small component taking `portfolioId`/`accountId` inputs and following the same shape: a `status` signal + `toObservable(query) → switchMap(api) → subscribe` feeding a data signal.
+
+- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings values come from the latest snapshot (see the Performance API's "Holdings & ledger endpoints"); a holding with no snapshot is left unvalued and surfaced in a "not valued" note. The ledger reuses the `date-field` control for its optional trade-date filter.
 
 ## Dev loop
 

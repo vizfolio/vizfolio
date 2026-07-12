@@ -1,0 +1,24 @@
+<div class="ledger">
+  <div class="range">
+    <app-date-field label="From" [value]="from()" (valueChange)="from.set($event)" />
+    <app-date-field label="To" [value]="to()" (valueChange)="to.set($event)" />
+    <span class="range-note">Leave blank to use the account's full history.</span>
+  </div>
+
+  @switch (status()) {
+    @case ('loading') {
+      <p class="loading" role="status">Loading transactions…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Couldn't load the ledger for this account.</p>
+    }
+    @default {
+      <app-data-table
+        [columns]="columns"
+        [rows]="entries()"
+        caption="Account transactions"
+        emptyMessage="No transactions in this range."
+      />
+    }
+  }
+</div>

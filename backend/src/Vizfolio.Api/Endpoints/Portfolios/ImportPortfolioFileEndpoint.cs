@@ -9,6 +9,9 @@ public sealed class ImportPortfolioFileRequest
 {
     public Guid PortfolioId { get; set; }
     public IFormFile File { get; set; } = default!;
+
+    /// <summary>Optional parser override (e.g. "QFX"). Omit/blank to auto-detect the format.</summary>
+    public string? SourceSystem { get; set; }
 }
 
 public sealed class ImportPortfolioFileEndpoint : Endpoint<ImportPortfolioFileRequest, PortfolioImportResult>
@@ -67,11 +70,12 @@ public sealed class ImportPortfolioFileEndpoint : Endpoint<ImportPortfolioFileRe
         }
 
         await using var stream = req.File.OpenReadStream();
-        var result = await _importer.ImportToPortfolioAsync(req.PortfolioId, stream, req.File.FileName, ct);
+        var result = await _importer.ImportToPortfolioAsync(req.PortfolioId, stream, req.File.FileName, ct, req.SourceSystem);
 
         var status = result.Status switch
         {
             PortfolioImportStatus.UnsupportedFormat => StatusCodes.Status415UnsupportedMediaType,
+            PortfolioImportStatus.UnknownParser => StatusCodes.Status415UnsupportedMediaType,
             PortfolioImportStatus.PortfolioNotFound => StatusCodes.Status404NotFound,
             PortfolioImportStatus.FileHasNoAccountInfo => StatusCodes.Status422UnprocessableEntity,
             _ => StatusCodes.Status200OK,

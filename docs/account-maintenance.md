@@ -13,13 +13,13 @@ When a user imports a single QFX with only the past year of activity, the only s
 
 ### `GET /api/portfolios/{portfolioId}/accounts/{accountId}/history-coverage`
 
-Reports whether the account has a *history gap*: transactions exist before any snapshot.
+Reports whether the account has a *history gap*: transactions exist before any **valued** snapshot.
 
 ```jsonc
 {
   "accountId": "…",
   "firstTransactionDate": "2025-06-15",
-  "earliestSnapshotDate": "2026-06-01",
+  "earliestSnapshotDate": "2026-06-01",  // earliest snapshot with a non-null MarketValue
   "hasHistoryGap": true,                 // firstTransactionDate is present AND (earliestSnapshotDate is null OR firstTransactionDate < earliestSnapshotDate)
   "suggestedOpeningDate": "2025-06-14",  // firstTransactionDate - 1, for use as the default asOf in the opening-balance form
   "openingBalanceSnapshotCount": 0,
@@ -31,6 +31,7 @@ Reports whether the account has a *history gap*: transactions exist before any s
 - All fields are read-only projections — no writes.
 - The date fields are all nullable. An empty account (no transactions, no snapshots) returns them all as `null` and `hasHistoryGap: false`.
 - The three snapshot-count fields let the UI distinguish "no coverage at all" from "coverage exists but only from broker statements" from "user has already supplied an opening balance."
+- **`earliestSnapshotDate` counts only *valued* snapshots** (non-null `MarketValue`). A performance starting balance is the sum of holdings' `MarketValue`, so a quantity-only snapshot yields no usable balance and must **not** close the gap. Keying the gap off the earliest valued snapshot keeps this endpoint consistent with `startingBalance.isComplete` (see [performance-api.md](./performance-api.md#completeness)) and with the opening-balance screen's per-holding status. The count fields are raw counts across all sources and are not filtered this way.
 
 ### `POST /api/portfolios/{portfolioId}/accounts/{accountId}/opening-balance`
 
@@ -51,6 +52,7 @@ Request:
 
 - `defaultCurrencyCode` is applied per holding when the holding omits `currencyCode`.
 - `symbol` is required per holding; everything else is optional except `units`.
+- **Market value is derived when omitted.** If a holding supplies `unitPrice` but no `marketValue`, the snapshot is stored with `MarketValue = units × unitPrice` (reflected back in the response's per-holding `marketValue`). A holding with neither `marketValue` nor `unitPrice` is stored with `MarketValue = null` — an *incomplete* opening balance that does not close the history gap and still reports `IncompleteStartingBalance` in performance. This is the single completeness rule shared by the history-coverage gap, the opening-balance screen, and the performance starting balance.
 - If a holding's `symbol` matches an existing per-account `AccountHolding.Symbol` (case-insensitive), that holding is reused. Otherwise a new `AccountHolding` is created with `Kind = Other`, holding the symbol and (if provided) `Cusip`. A subsequent import + relinker pass can promote it to `Kind = Security` or `Kind = Fund` when reference data catches up.
 
 Response:
@@ -79,7 +81,7 @@ Rationale: the user calling this endpoint is explicitly asserting "here's my ope
 1. After the user completes their first import, the client calls `GET .../history-coverage`. If `hasHistoryGap` is true, render a banner: *"Add an opening balance to see accurate historical returns."*
 2. The banner offers two CTAs:
     - **Upload an older statement.** Points at `POST /api/portfolios/{id}/imports`. If the broker provides an earlier QFX, its `<DTASOF>` becomes a `BrokerPosition` snapshot that closes the gap with no manual data entry — this is the low-friction path when it works.
-    - **Enter opening balances manually.** Opens a form pre-filled with `suggestedOpeningDate` as `asOf`. The user fills quantity + market value (and optionally unit price / cost basis) per holding. Submit calls `POST .../opening-balance`.
+    - **Enter opening balances manually.** Opens a form pre-filled with `suggestedOpeningDate` as `asOf` and one row per holding (via `GET .../holdings?asOf=suggestedOpeningDate`), carrying any values already recorded at that date. Each row shows a complete/incomplete (✓/✗) status: complete once it has a market value, either entered directly or derived from units × unit price. The user fills quantity + market value (or unit price) per holding. Submit calls `POST .../opening-balance`. Holdings left without a market value stay ✗ and remain flagged as an estimate.
 3. After either action, re-fetch `history-coverage`; when `hasHistoryGap` is false, dismiss the banner. Re-run the performance query; `returns.timeWeighted.rate` and `returns.moneyWeighted.rate` should now be populated.
 
 ### Why "first transaction date − 1" as the default `asOf`

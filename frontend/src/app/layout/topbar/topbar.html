@@ -1,0 +1,34 @@
+<header class="topbar">
+  <div class="topbar-left">
+    <button
+      type="button"
+      class="menu-btn"
+      aria-label="Toggle navigation menu"
+      (click)="menuToggle.emit()"
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor">
+        <path d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
+      </svg>
+    </button>
+    <span class="brand">Vizfolio</span>
+  </div>
+
+  <div class="topbar-right">
+    <!-- Portfolio switcher: the whole app is scoped to the active portfolio. -->
+    @if (portfolios.portfolios().length > 0) {
+      <label class="portfolio-switcher">
+        <span class="visually-hidden">Active portfolio</span>
+        <select
+          class="portfolio-select"
+          [value]="portfolios.activeId() ?? ''"
+          (change)="onSelect($event)"
+        >
+          @for (portfolio of portfolios.portfolios(); track portfolio.portfolioId) {
+            <option [value]="portfolio.portfolioId">{{ portfolio.name }}</option>
+          }
+        </select>
+      </label>
+    }
+    <app-theme-toggle />
+  </div>
+</header>

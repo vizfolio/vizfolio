@@ -1,0 +1,21 @@
+<div class="perf">
+  <div class="range">
+    <app-date-field label="From" [value]="from()" (valueChange)="from.set($event)" />
+    <app-date-field label="To" [value]="to()" (valueChange)="to.set($event)" />
+    <span class="range-note">Leave blank to use the account's full history.</span>
+  </div>
+
+  @switch (status()) {
+    @case ('loading') {
+      <p class="loading" role="status">Calculating performance…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Couldn't load performance for this account.</p>
+    }
+    @default {
+      @if (performance(); as p) {
+        <app-performance-summary [performance]="p" />
+      }
+    }
+  }
+</div>

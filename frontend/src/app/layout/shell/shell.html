@@ -1,0 +1,18 @@
+<div class="shell" [class.sidebar-open]="sidebarOpen()">
+  <app-topbar class="shell-topbar" (menuToggle)="toggleSidebar()" />
+
+  <app-sidebar class="shell-sidebar" />
+
+  <!-- Scrim closes the off-canvas sidebar on narrow screens. -->
+  <button
+    type="button"
+    class="shell-scrim"
+    aria-label="Close navigation menu"
+    tabindex="-1"
+    (click)="closeSidebar()"
+  ></button>
+
+  <main class="shell-main" id="main-content">
+    <router-outlet />
+  </main>
+</div>

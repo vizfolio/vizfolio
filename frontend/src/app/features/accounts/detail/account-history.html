@@ -1,0 +1,61 @@
+<div class="history">
+  @switch (status()) {
+    @case ('loading') {
+      <p class="loading" role="status">Checking history coverage…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Couldn't load history coverage for this account.</p>
+    }
+    @default {
+      @if (coverage(); as c) {
+        @if (c.hasHistoryGap) {
+          <div class="gap-callout" role="status">
+            <div>
+              <strong>History gap detected.</strong>
+              <p>
+                Transactions begin before the earliest valued snapshot, so early balances are
+                estimates.
+                @if (c.suggestedOpeningDate) {
+                  Record an opening balance as of <strong>{{ c.suggestedOpeningDate }}</strong> to
+                  close the gap.
+                }
+              </p>
+            </div>
+            <button type="button" class="btn btn--primary" (click)="fillGap.emit()">
+              Set opening balance
+            </button>
+          </div>
+        } @else {
+          <p class="ok" role="status">No history gap — snapshots cover the transaction history.</p>
+        }
+
+        <dl class="coverage-grid">
+          <div>
+            <dt>First transaction</dt>
+            <dd>{{ orDash(c.firstTransactionDate) }}</dd>
+          </div>
+          <div>
+            <dt>Earliest valued snapshot</dt>
+            <dd>{{ orDash(c.earliestSnapshotDate) }}</dd>
+          </div>
+          <div>
+            <dt>Suggested opening date</dt>
+            <dd>{{ orDash(c.suggestedOpeningDate) }}</dd>
+          </div>
+          <div>
+            <dt>Opening-balance snapshots</dt>
+            <dd>{{ c.openingBalanceSnapshotCount }}</dd>
+          </div>
+          <div>
+            <dt>Statement snapshots</dt>
+            <dd>{{ c.statementSnapshotCount }}</dd>
+          </div>
+          <div>
+            <dt>Broker-position snapshots</dt>
+            <dd>{{ c.brokerPositionSnapshotCount }}</dd>
+          </div>
+        </dl>
+      }
+    }
+  }
+</div>

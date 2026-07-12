@@ -1,0 +1,65 @@
+<section class="dashboard">
+  <header class="dash-header">
+    <div>
+      <h1>Dashboard</h1>
+      @if (portfolioName(); as name) {
+        <p class="dash-subtitle">{{ name }}</p>
+      }
+    </div>
+  </header>
+
+  @switch (status()) {
+    @case ('loading') {
+      <p class="dash-loading" role="status">Loading portfolio data…</p>
+    }
+    @case ('empty') {
+      <app-empty-state
+        title="No portfolios yet"
+        message="Create a portfolio and import a broker statement to see your real performance."
+        iconPath="M4 4h16a1 1 0 0 1 1 1v3H3V5a1 1 0 0 1 1-1Zm-1 6h18v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9Zm6 3v2h6v-2H9Z"
+      >
+        <a class="btn btn--primary" routerLink="/portfolios">Create a portfolio</a>
+        <a class="btn btn--ghost" routerLink="/accounts">Import a statement</a>
+      </app-empty-state>
+    }
+    @default {
+      @if (notice(); as message) {
+        <p class="dash-notice" role="status">{{ message }}</p>
+      }
+
+      <div class="stat-grid">
+        <app-stat-card
+          label="Portfolio value"
+          [value]="valueLabel()"
+          [incomplete]="valueIncomplete()"
+        />
+        <app-stat-card label="Deposits" [value]="depositsLabel()" trend="up" />
+        <app-stat-card label="Withdrawals" [value]="withdrawalsLabel()" trend="down" />
+        <app-stat-card
+          label="Net contributions"
+          [value]="netLabel()"
+          [trend]="netTrend()"
+        />
+        <app-stat-card
+          label="Return (time-weighted)"
+          [value]="returnLabel()"
+          [trend]="returnTrend()"
+        />
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-head">
+          <h2>Performance</h2>
+          <span class="chart-note">Illustrative — real time series coming soon</span>
+        </div>
+        <div class="chart-body">
+          <app-perf-chart
+            [labels]="chartLabels()"
+            [datasets]="chartDatasets()"
+            ariaLabel="Portfolio value with deposits and withdrawals over time"
+          />
+        </div>
+      </div>
+    }
+  }
+</section>

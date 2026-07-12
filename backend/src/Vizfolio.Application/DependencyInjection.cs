@@ -16,8 +16,10 @@ public static class DependencyInjection
         services.AddScoped<IFundsImporter, FundsImporter>();
         services.AddScoped<IHoldingRelinker, HoldingRelinker>();
 
+        // Import parsers are plug-ins: register an IPortfolioFileParser and the pipeline discovers it.
+        // Auto-detect offers them highest Priority first, so provider-specific parsers sit above generics.
         services.AddScoped<IPortfolioFileParser, QfxFileParser>();
-        services.AddScoped<IPortfolioFileParser, CsvFileParser>();
+        services.AddScoped<IPortfolioFileParser, VanguardTransactionHistoryReportParser>();
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
         services.AddScoped<IPortfolioPerformanceService, PortfolioPerformanceService>();

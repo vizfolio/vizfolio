@@ -4,14 +4,27 @@ using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Domain.Portfolios;
 
-namespace Vizfolio.Application.PortfolioImports.Parsers;
+namespace Vizfolio.Api.Tests.PortfolioImports.Fakes;
 
-public sealed class CsvFileParser : IPortfolioFileParser
+/// <summary>
+/// Test-only generic CSV ledger parser. Production no longer ships a generic CSV parser (it carries
+/// provider-specific parsers only), but the import service needs a metadata-less, single-account format
+/// to exercise its format-agnostic behaviour — a role QFX cannot play because it always carries account
+/// metadata. This double stands in for that generic path in unit and endpoint tests.
+/// </summary>
+public sealed class CsvLedgerTestParser : IPortfolioFileParser
 {
     private static readonly string[] RequiredHeaders =
         ["Date", "Type", "Ticker", "Quantity", "Price", "Amount", "Fees", "Currency", "Memo"];
 
     public string SourceSystem => "CSV";
+
+    public string DisplayName => "Generic CSV ledger (test)";
+
+    // Generic fallback: below any provider-specific parser.
+    public int Priority => 0;
+
+    public IReadOnlyCollection<string> FileExtensions { get; } = [".csv"];
 
     public async Task<bool> CanParseAsync(Stream stream, string fileName, CancellationToken cancellationToken)
     {
@@ -43,31 +56,19 @@ public sealed class CsvFileParser : IPortfolioFileParser
             if (string.IsNullOrWhiteSpace(row)) continue;
             var fields = ParseLine(row);
 
-            var tradeDate = ParseDate(Get(fields, idx, "Date"));
-            var type = ParseType(Get(fields, idx, "Type"));
-            var ticker = NullIfBlank(Get(fields, idx, "Ticker"));
-            var quantity = ParseNullableDecimal(Get(fields, idx, "Quantity"));
-            var price = ParseNullableDecimal(Get(fields, idx, "Price"));
-            var amount = ParseNullableDecimal(Get(fields, idx, "Amount")) ?? 0m;
-            var fees = ParseNullableDecimal(Get(fields, idx, "Fees"));
-            var currency = NullIfBlank(Get(fields, idx, "Currency"));
-            var memo = NullIfBlank(Get(fields, idx, "Memo"));
-            var externalId = NullIfBlank(Get(fields, idx, "ExternalId"));
-            var cusip = NullIfBlank(Get(fields, idx, "Cusip"));
-
             transactions.Add(new ParsedTransaction(
-                ExternalId: externalId,
-                Type: type,
-                TradeDate: tradeDate,
+                ExternalId: NullIfBlank(Get(fields, idx, "ExternalId")),
+                Type: ParseType(Get(fields, idx, "Type")),
+                TradeDate: ParseDate(Get(fields, idx, "Date")),
                 SettlementDate: null,
-                Ticker: ticker,
-                Cusip: cusip,
-                Quantity: quantity,
-                Price: price,
-                Amount: amount,
-                Fees: fees,
-                CurrencyCode: currency,
-                Memo: memo));
+                Ticker: NullIfBlank(Get(fields, idx, "Ticker")),
+                Cusip: NullIfBlank(Get(fields, idx, "Cusip")),
+                Quantity: ParseNullableDecimal(Get(fields, idx, "Quantity")),
+                Price: ParseNullableDecimal(Get(fields, idx, "Price")),
+                Amount: ParseNullableDecimal(Get(fields, idx, "Amount")) ?? 0m,
+                Fees: ParseNullableDecimal(Get(fields, idx, "Fees")),
+                CurrencyCode: NullIfBlank(Get(fields, idx, "Currency")),
+                Memo: NullIfBlank(Get(fields, idx, "Memo"))));
         }
 
         var statement = new ParsedAccountStatement(

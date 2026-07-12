@@ -1,0 +1,24 @@
+<div
+  class="dropzone"
+  [class.dragging]="dragging()"
+  [class.disabled]="disabled()"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave()"
+  (drop)="onDrop($event)"
+>
+  <svg class="icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="currentColor">
+    <path d="M12 3l4 4h-3v6h-2V7H8l4-4Zm-7 12h2v4h10v-4h2v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-4Z" />
+  </svg>
+  <p class="label">{{ label() }}</p>
+  <button type="button" class="choose-btn" [disabled]="disabled()" (click)="openPicker()">
+    Choose file
+  </button>
+  <input
+    #fileInput
+    type="file"
+    class="visually-hidden"
+    [accept]="accept()"
+    [disabled]="disabled()"
+    (change)="onInputChange($event)"
+  />
+</div>

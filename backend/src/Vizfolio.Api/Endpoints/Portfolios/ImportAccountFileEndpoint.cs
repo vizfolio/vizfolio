@@ -12,6 +12,9 @@ public sealed class ImportAccountFileRequest
     public Guid PortfolioId { get; set; }
     public Guid AccountId { get; set; }
     public IFormFile File { get; set; } = default!;
+
+    /// <summary>Optional parser override (e.g. "QFX"). Omit/blank to auto-detect the format.</summary>
+    public string? SourceSystem { get; set; }
 }
 
 public sealed class ImportAccountFileEndpoint : Endpoint<ImportAccountFileRequest, PortfolioImportResult>
@@ -42,9 +45,10 @@ public sealed class ImportAccountFileEndpoint : Endpoint<ImportAccountFileReques
             .Produces<PortfolioImportResult>(StatusCodes.Status422UnprocessableEntity));
         Summary(s =>
         {
-            s.Summary = "Upload a broker file (QFX, CSV, ...) to ingest its transactions into the account ledger.";
+            s.Summary = "Upload a broker file (QFX, Vanguard report, ...) to ingest its transactions into the account ledger.";
             s.Description =
-                "Each registered parser is offered the file in registration order; the first one that recognises the format processes it. " +
+                "The format is auto-detected: each registered parser is offered the file from highest priority to lowest, and the first that recognises it processes the file. " +
+                "Pass an optional `sourceSystem` form field (e.g. `QFX`) to force a specific parser and skip detection; an unknown value returns 415. " +
                 "Transactions are deduplicated by `(account, source, externalId)`, so re-uploading the same file is a no-op. " +
                 "Re-running this is also safe: importing the same file twice yields `Inserted: 0, Skipped: N`. " +
                 "Returns 415 if no parser claims the file, 404 if the portfolio or account is missing, 413 if the upload exceeds the size cap, " +
@@ -80,11 +84,12 @@ public sealed class ImportAccountFileEndpoint : Endpoint<ImportAccountFileReques
         }
 
         await using var stream = req.File.OpenReadStream();
-        var result = await _importer.ImportToAccountAsync(req.AccountId, stream, req.File.FileName, ct);
+        var result = await _importer.ImportToAccountAsync(req.AccountId, stream, req.File.FileName, ct, req.SourceSystem);
 
         var status = result.Status switch
         {
             PortfolioImportStatus.UnsupportedFormat => StatusCodes.Status415UnsupportedMediaType,
+            PortfolioImportStatus.UnknownParser => StatusCodes.Status415UnsupportedMediaType,
             PortfolioImportStatus.AccountNotFound => StatusCodes.Status404NotFound,
             PortfolioImportStatus.FileHasAccountInfo => StatusCodes.Status422UnprocessableEntity,
             _ => StatusCodes.Status200OK,

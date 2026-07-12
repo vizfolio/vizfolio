@@ -8,11 +8,13 @@ public interface IPortfolioImportService
         Guid accountId,
         Stream fileStream,
         string fileName,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? requestedSourceSystem = null);
 
     Task<PortfolioImportResult> ImportToPortfolioAsync(
         Guid portfolioId,
         Stream fileStream,
         string fileName,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? requestedSourceSystem = null);
 }
