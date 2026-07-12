@@ -68,7 +68,9 @@ This deliberately *does not* try to derive a balance by summing transaction amou
 
 ### Completeness
 
-`isComplete = true` iff every "relevant" holding had a snapshot at-or-before the date. A holding is **relevant** if it either (a) has a snapshot with `AsOf ≤ to`, or (b) has a transaction in `[from, to]`. Holdings that never existed in-window don't inflate the missing count.
+`isComplete = true` iff every "relevant" holding had a **valued** snapshot at-or-before the date — a snapshot whose `AsOf ≤ date` **and** whose `MarketValue` is non-null (a quantity-only snapshot contributes nothing to a market-value balance, so it counts as *missing*). A holding is **relevant** if it either (a) has a snapshot with `AsOf ≤ to`, or (b) has a transaction in `[from, to]`. Holdings that never existed in-window don't inflate the missing count.
+
+This "valued snapshot" test is the canonical completeness rule. The history-coverage gap (`hasHistoryGap`) and the opening-balance screen's per-holding ✓/✗ status derive from the same rule, so all three surfaces agree — see [account-maintenance.md](./account-maintenance.md#history-coverage-and-opening-balance). The opening-balance endpoint derives `MarketValue = units × unitPrice` when only a unit price is supplied, so a price-only entry still produces a *valued* snapshot.
 
 `snapshotAsOf` is the latest contributing snapshot's date (null when no snapshot contributed). `holdingsCovered` and `holdingsMissingSnapshot` let the caller diagnose *why* a balance is incomplete without exposing per-holding detail.
 

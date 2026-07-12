@@ -61,6 +61,28 @@ public sealed class AccountHistoryServiceTests
     }
 
     [Fact]
+    public async Task GetCoverageAsync_still_flags_gap_when_only_snapshot_has_no_market_value()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingAsync(ctx, accountId);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 15));
+        // A quantity-only opening balance (no market value) yields no usable balance, so the
+        // gap must stay open — consistent with the performance starting balance.
+        await SeedSnapshotAsync(
+            ctx, holding, new DateOnly(2025, 6, 14),
+            source: AccountHoldingSnapshotSource.OpeningBalance, marketValue: null);
+
+        var service = new AccountHistoryService(ctx.Db);
+        var result = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.HasHistoryGap.ShouldBeTrue();
+        result.EarliestSnapshotDate.ShouldBeNull(); // no *valued* snapshot exists
+        result.OpeningBalanceSnapshotCount.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task GetCoverageAsync_reports_no_gap_when_snapshot_is_at_or_before_first_transaction()
     {
         await using var ctx = await TestDbContext.CreateAsync();
@@ -200,6 +222,56 @@ public sealed class AccountHistoryServiceTests
             .ToListAsync();
         snapshots.Count.ShouldBe(1);
         snapshots.Single().MarketValue.ShouldBe(5000m);
+    }
+
+    [Fact]
+    public async Task SetOpeningBalanceAsync_derives_market_value_from_units_and_unit_price()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+
+        var service = new AccountHistoryService(ctx.Db);
+        var result = await service.SetOpeningBalanceAsync(
+            portfolioId,
+            accountId,
+            new OpeningBalanceCommand(
+                new DateOnly(2025, 1, 1),
+                "USD",
+                new[]
+                {
+                    // Units + unit price, no explicit market value.
+                    new OpeningBalanceHolding("VOO", Units: 10m, MarketValue: null, UnitPrice: 500m, CostBasis: null, CurrencyCode: null, Cusip: null),
+                }),
+            CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Holdings.Single().MarketValue.ShouldBe(5000m);
+
+        var snapshot = await ctx.Db.AccountHoldingSnapshots.SingleAsync();
+        snapshot.MarketValue.ShouldBe(5000m); // 10 units × 500
+    }
+
+    [Fact]
+    public async Task SetOpeningBalanceAsync_leaves_market_value_null_when_neither_value_nor_price_given()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+
+        var service = new AccountHistoryService(ctx.Db);
+        await service.SetOpeningBalanceAsync(
+            portfolioId,
+            accountId,
+            new OpeningBalanceCommand(
+                new DateOnly(2025, 1, 1),
+                "USD",
+                new[]
+                {
+                    new OpeningBalanceHolding("VOO", Units: 10m, MarketValue: null, UnitPrice: null, CostBasis: null, CurrencyCode: null, Cusip: null),
+                }),
+            CancellationToken.None);
+
+        var snapshot = await ctx.Db.AccountHoldingSnapshots.SingleAsync();
+        snapshot.MarketValue.ShouldBeNull(); // stays incomplete — no way to value it
     }
 
     [Fact]
