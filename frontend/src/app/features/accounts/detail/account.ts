@@ -7,7 +7,9 @@ import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { AccountSummary } from '../../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../../core/portfolio/active-portfolio.service';
 import { AccountHistory } from './account-history';
+import { AccountHoldings } from './account-holdings';
 import { AccountImport } from './account-import';
+import { AccountLedger } from './account-ledger';
 import { AccountPerformance } from './account-performance';
 import { OpeningBalanceForm } from './opening-balance-form';
 
@@ -38,15 +40,14 @@ type LoadStatus = 'loading' | 'ready' | 'error' | 'no-portfolio';
 /**
  * Account detail: a tabbed view over the account-scoped endpoints for the account identified
  * by the route `:accountId`, scoped to the currently-active portfolio.
- *
- * Holdings and Ledger are stubbed — the API does not yet expose read endpoints for an
- * account's positions or transactions.
  */
 @Component({
   selector: 'app-account',
   imports: [
     RouterLink,
     AccountPerformance,
+    AccountHoldings,
+    AccountLedger,
     AccountHistory,
     OpeningBalanceForm,
     AccountImport,

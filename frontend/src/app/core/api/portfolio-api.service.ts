@@ -15,7 +15,9 @@ import {
   OpeningBalanceResponse,
   SetOpeningBalanceRequest,
 } from './models/coverage.models';
+import { HoldingRow } from './models/holdings.models';
 import { ImportParser, PortfolioImportResult } from './models/imports.models';
+import { LedgerEntry } from './models/ledger.models';
 import {
   AccountSummary,
   PortfolioPerformance,
@@ -179,6 +181,43 @@ export class PortfolioApiService {
   ): Observable<PortfolioPerformance> {
     return this.http.get<PortfolioPerformance>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/performance`,
+      { params: dateRangeParams(from, to) },
+    );
+  }
+
+  // ---- Holdings & ledger ---------------------------------------------------
+
+  /**
+   * GET /api/portfolios/{portfolioId}/accounts/{accountId}/holdings
+   * `asOf` is an optional ISO date (`YYYY-MM-DD`); omit to value as of today (UTC).
+   */
+  getAccountHoldings(
+    portfolioId: string,
+    accountId: string,
+    asOf?: string,
+  ): Observable<HoldingRow[]> {
+    let params = new HttpParams();
+    if (asOf) {
+      params = params.set('asOf', asOf);
+    }
+    return this.http.get<HoldingRow[]>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/holdings`,
+      { params },
+    );
+  }
+
+  /**
+   * GET /api/portfolios/{portfolioId}/accounts/{accountId}/ledger
+   * `from`/`to` are optional ISO dates (`YYYY-MM-DD`); omit to use the account's full history.
+   */
+  getAccountLedger(
+    portfolioId: string,
+    accountId: string,
+    from?: string,
+    to?: string,
+  ): Observable<LedgerEntry[]> {
+    return this.http.get<LedgerEntry[]>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/ledger`,
       { params: dateRangeParams(from, to) },
     );
   }

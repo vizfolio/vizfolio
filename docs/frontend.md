@@ -66,6 +66,12 @@ Components reference **only** semantic tokens, so re-theming never touches compo
 
 `core/api/portfolio-api.service.ts` (`@Service`, MIT-clean) wraps `HttpClient` against the `/api` prefix and returns typed Observables; DTO interfaces in `core/api/models/` mirror `backend/src/Vizfolio.Api/Endpoints/Portfolios/PerformanceResponses.cs`. Feature components adapt those Observables to signals at the edge. When the DB has no portfolios (or the API is unreachable) the dashboard degrades to clearly-labelled sample data so the shell stays legible.
 
+## Account detail tabs
+
+`features/accounts/detail/account.ts` is a tabbed container over the account-scoped endpoints. Each tab is its own small component taking `portfolioId`/`accountId` inputs and following the same shape: a `status` signal + `toObservable(query) → switchMap(api) → subscribe` feeding a data signal.
+
+- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings values come from the latest snapshot (see the Performance API's "Holdings & ledger endpoints"); a holding with no snapshot is left unvalued and surfaced in a "not valued" note. The ledger reuses the `date-field` control for its optional trade-date filter.
+
 ## Dev loop
 
 The Nix flake (`flake.nix`) provides both toolchains. Enter it with `nix develop` (or `direnv allow` if you use direnv), then run the two processes side by side:

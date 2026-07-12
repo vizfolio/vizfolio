@@ -301,3 +301,16 @@ Nothing is built for this yet. Current behavior: any snapshot is accepted at fac
 New sibling metrics slot onto `PerformanceReturnsResult` or as top-level fields on `PortfolioPerformanceResult`. Route and existing metrics don't change. The mapping layer (`backend/src/Vizfolio.Api/Endpoints/Portfolios/PerformanceMapping.cs`) projects Application-layer records into API records; add a new mapping method there when the shape grows.
 
 The service currently issues one round-trip per data set (holdings, snapshots, active-in-range holdings, contribution rows, default-`from` resolution). Adding another metric that needs the same data should reuse the loaded lists rather than requerying.
+
+## Holdings & ledger endpoints
+
+Two account-scoped read endpoints back the **Holdings** and **Ledger** tabs of the account detail UI. They live alongside the performance endpoints and share its conventions (FastEndpoints, `AllowAnonymous`, account-in-portfolio scope → **404**).
+
+| Route | Verb | Handler |
+|---|---|---|
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/holdings` | GET | `GetAccountHoldingsEndpoint` |
+| `/api/portfolios/{portfolioId}/accounts/{accountId}/ledger` | GET | `GetAccountLedgerEndpoint` |
+
+**Holdings** (`HoldingResponse[]`, ordered by symbol) lists each `AccountHolding` valued from the latest `AccountHoldingSnapshot` with `AsOf <= asOf` — the same "Balance basis: snapshot market value" rule the performance balances use. Query param `asOf` (ISO date) defaults to today (UTC). When no snapshot exists on or before `asOf`, `hasSnapshot` is `false` and the valuation fields (`quantity`, `unitPrice`, `marketValue`, `costBasis`, `gainLoss`) are `null`. `gainLoss` is `marketValue - costBasis`, populated only when both are present.
+
+**Ledger** (`LedgerEntryResponse[]`, newest trade date first) lists the account's `AccountTransaction`s. Optional `from`/`to` filter on `TradeDate` (**400** on `from > to`, matching performance); omit for full history. `type` is the normalized `TransactionType`; `sourceType` preserves the broker's original label; `holdingName` carries the linked holding's name when the transaction is linked. The newest-first sort is applied in memory (SQLite can't `ORDER BY` the `DateTimeOffset` tiebreak — keep it provider-agnostic).

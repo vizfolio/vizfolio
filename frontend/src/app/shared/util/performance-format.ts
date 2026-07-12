@@ -13,6 +13,29 @@ export function formatCurrency(value: number, currencyCode: string): string {
   }
 }
 
+/** Formats a monetary value with cents (525.5 -> "$525.50"); em dash when null. */
+export function formatMoney(value: number | null, currencyCode: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currencyCode || 'USD',
+    }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${currencyCode}`;
+  }
+}
+
+/** Formats a share/unit quantity (up to 4 dp, no trailing zeros); em dash when null. */
+export function formatQuantity(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '—';
+  }
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(value);
+}
+
 /** Formats a decimal rate (0.075 -> "+7.5%"); returns an em dash when null. */
 export function formatPercent(rate: number | null): string {
   if (rate === null || rate === undefined || Number.isNaN(rate)) {

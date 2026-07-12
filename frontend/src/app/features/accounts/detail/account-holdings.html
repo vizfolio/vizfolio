@@ -1,0 +1,31 @@
+<div class="holdings">
+  @switch (status()) {
+    @case ('loading') {
+      <p class="loading" role="status">Loading holdings…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Couldn't load holdings for this account.</p>
+    }
+    @default {
+      <header class="holdings-header">
+        <div class="total">
+          <span class="total-label">Total value</span>
+          <span class="total-value">{{ totalLabel() }}</span>
+        </div>
+        @if (missingCount() > 0) {
+          <p class="missing" role="status">
+            {{ missingCount() }} holding(s) have no snapshot yet and aren't valued. Add an
+            opening balance to include them.
+          </p>
+        }
+      </header>
+
+      <app-data-table
+        [columns]="columns"
+        [rows]="holdings()"
+        caption="Account holdings"
+        emptyMessage="No holdings for this account yet."
+      />
+    }
+  }
+</div>
