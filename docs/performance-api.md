@@ -206,10 +206,47 @@ happy path sends no override (0 extra clicks); the dropdown defaults to *Auto-de
 **Discovery.** `GET /api/imports/parsers` returns `[{ sourceSystem, displayName, fileExtensions }]`
 (priority order) so the UI can build the dropdown and the file-picker `accept` list.
 
-**Dedup is per source system.** Transactions dedup on `(account, sourceSystem, externalId)`. So the
-same holding imported from both the QFX export and the Vanguard report (which overlap on the recent
-~18 months) will **not** cross-dedup — an open item to resolve when the Vanguard row parser lands
-(`ParseAsync` is currently a stub; detection is live).
+**Dedup is content-based and cross-source.** Because formats overlap (the Vanguard report and the QFX
+export share the recent ~18 months) and carry no common transaction id, dedup keys on a
+**`TransactionFingerprint`** (`.../PortfolioImports/Services/TransactionFingerprint.cs`): a hash of
+`account | tradeDate | symbol | signed quantity | signed amount`, rounded to absorb representation
+noise. It deliberately **excludes** the source system and the (normalized) `TransactionType` — the type
+is the field most likely to diverge across sources and would defeat the match; the **sign** of amount and
+quantity is what separates a Buy from a Sell instead.
+
+On import, `ImportStatementAsync` loads the account's existing rows across **all** sources and builds a
+fingerprint **multiset** (counts). Each incoming row is skipped if an unmatched existing fingerprint
+remains (decrementing the count) — so a trade already imported from QFX is not re-imported from the
+Vanguard report, while N genuine same-day duplicates are preserved. `ExternalId` stays the unique/index
+key: QFX uses `FITID`; id-less formats synthesize `"{fingerprint}-{rowOrdinal}"` (keeps genuine
+duplicates storable and same-file re-uploads idempotent).
+
+Residual edges (accepted): a Deposit vs an inbound Transfer of the identical amount on the same day can't
+be told apart without an id; QFX records in-kind `<TRANSFER>` with `Amount = 0` while Vanguard transfers
+carry a real amount, so those specific rows won't cross-dedup (rare in the overlap).
+
+**`SourceType` — preserving the raw label.** `AccountTransaction.SourceType` (nullable) stores the
+broker's verbatim type next to the normalized `TransactionType`, so nothing is lost when a messy label is
+mapped. The Vanguard parser maps its types as follows (raw kept in `SourceType`):
+
+| Raw Vanguard `Type` | `TransactionType` |
+|---|---|
+| `Buy`, `Buy (exchange)` | `Buy` |
+| `Sell`, `Sell (exchange)` | `Sell` |
+| `Dividend` | `Dividend` |
+| `Capital gain (ST\|LT)` | `CapitalGain` |
+| `Reinvestment` | `Reinvest` |
+| `Interest` | `Interest` |
+| `Fee` | `Fee` |
+| `Funds Received`, `Contribution` | `Deposit` (external in; `Contribution` = IRA contribution) |
+| `Transfer (incoming)` | `Transfer` (money in) |
+| `TRANSFER TO …` | `Transfer` (money out) |
+| `Sweep`, `Sweep in`, `Sweep out` | `Other` |
+
+The Vanguard `Amount` reflects settlement-fund mechanics, so the parser sets the **sign of the external
+cash types from the label**, not the reported amount: `Funds Received`/`Transfer (incoming)` → `+|amount|`,
+`TRANSFER TO …` → `−|amount|`. Sweeps → `Other` keeps internal money-market cash a no-op for
+`Contributions` (which only sum `{Deposit, Withdrawal, Transfer}`).
 
 ### Adding a provider parser
 
