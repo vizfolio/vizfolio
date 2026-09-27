@@ -8,5 +8,6 @@ public enum PriceSource
 {
     Stooq,
     Eodhd,
-    AlphaVantage
+    AlphaVantage,
+    Tiingo
 }

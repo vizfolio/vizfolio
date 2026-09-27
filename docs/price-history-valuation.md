@@ -9,8 +9,9 @@
 > - Roll-forward + resolver: `HoldingQuantityCalculator`, `HoldingValuationResolver`, wired into
 >   `PortfolioPerformanceService.BuildResolverAsync` / `ComputeBalance`.
 > - Pluggable fetch: `IPriceHistorySource` (keyless `StooqPriceHistorySource` default, optional
->   `EodhdPriceHistorySource` / `AlphaVantagePriceHistorySource`), `PriceHistoryImporter`,
->   `PriceHistoryRefreshHostedService`, and `POST /admin/imports/price-history`.
+>   `TiingoPriceHistorySource` (recommended) / `EodhdPriceHistorySource` /
+>   `AlphaVantagePriceHistorySource`), `PriceHistoryImporter`, `PriceHistoryRefreshHostedService`, and
+>   `POST /admin/imports/price-history`. See "Price providers" below.
 > - Model: per-user-instance fetch into the local DB for personal use — **not** a redistributed public
 >   dataset (exchange price data licensing forbids that; unlike public-domain EDGAR data).
 >
@@ -146,6 +147,32 @@ invariant. With no snapshot yet, the roll-forward starts from zero at inception.
 - No filtered/partial unique index (not provider-portable); one row per series per date is enforced in
   `PriceHistoryImporter`'s in-memory upsert. EF Core, provider-agnostic (per `CLAUDE.md` rule 5).
 
+### Price providers
+
+The selector (`PriceHistorySourceSelector`) uses the highest-priority source whose `Supports` is true;
+API-key sources are disabled until their key is set.
+
+| Provider | Priority | Key | Basis | Splits | Mutual funds | Notes |
+|---|---|---|---|---|---|---|
+| **Tiingo** (recommended) | 30 | free sign-up | raw `close` (fund `close` = NAV) | `splitFactor` on the same rows | yes | Free tier: 50 req/hour, 1,000/day, 500 symbols/month, 30+ yrs history; "internal use only" |
+| Alpha Vantage | 20 | yes | raw (`TIME_SERIES_DAILY`) | — | check provider | Free tier is small; check its current limits before backfilling years |
+| EODHD | 10 | yes | raw `close` | separate splits call | check provider | Free tier is limited; check its current history/call limits |
+| Stooq | 0 | none | ⚠️ split/dividend **adjusted** | — | — | Often gated by an anti-bot page; best-effort only |
+
+**Tiingo** (`TiingoPriceHistorySource`) makes one request per symbol for the whole range
+(`GET {BaseUrl}/tiingo/daily/{ticker}/prices?startDate=&endDate=`), sends the key in the
+`Authorization: Token …` header (never the URL), maps a `splitFactor ≠ 1` row to a split on that day,
+writes share-class tickers with a hyphen (`BRK.B` → `BRK-B`), and treats a 404 (unknown ticker) as an
+empty series. Its limiter is **hourly** (`PriceHistory:Providers:Tiingo:RequestsPerHour`, default 50),
+so an import with more symbols than that waits for the next hour rather than failing.
+
+Configure the key outside the repo, e.g. an environment variable
+`PriceHistory__Providers__Tiingo__ApiKey=<key>` (don't commit it to `appsettings*.json`). Stored prices
+are never overwritten (the importer only fills missing dates), so switching providers doesn't replace
+rows already fetched — clear the `PriceHistory` / `CorporateAction` rows for a series (or the dev DB)
+to re-fetch it from the new source. Licensing: data is fetched per user into their own local DB for
+personal use and is never redistributed via the repo — see §"Model" above.
+
 ## 5. Gotchas to carry forward
 
 The expensive-to-rediscover bits — read these before implementing:
@@ -167,7 +194,8 @@ The expensive-to-rediscover bits — read these before implementing:
   **Decisions taken (both explicit in the shipped code):**
   1. **Price series basis = raw (as-traded)** to match the ledger. `PriceHistory.Close` is the raw
      close; `Adjusted` is always `false`. API-key providers are queried for unadjusted closes
-     (EODHD `close`, not `adjusted_close`; Alpha Vantage `TIME_SERIES_DAILY`). ⚠️ The keyless Stooq
+     (Tiingo `close`, not `adjClose`; EODHD `close`, not `adjusted_close`; Alpha Vantage
+     `TIME_SERIES_DAILY`). ⚠️ The keyless Stooq
      daily feed is split/dividend *adjusted* — it's a best-effort default; configure an API-key
      provider for a clean raw series and split events. ⚠️ Stooq also gates automated requests with a
      200-OK HTML JavaScript proof-of-work challenge (common from server/datacenter IPs);
@@ -272,7 +300,7 @@ holdings must resolve to $0-and-complete at the 2011 `from`, so `startingBalance
 **Remaining follow-ups (not blocking):** funds are still valued from `FundSnapshot` NAV, not
 `PriceHistory` — a `Kind=Fund` holding falls through to a `Symbol` series only if it carries a ticker;
 and the keyless Stooq feed is split/dividend-adjusted and bot-gated (see §5), so a raw series + split
-events want an API-key provider.
+events want an API-key provider (Tiingo recommended).
 
 ## 9. Ledger drift vs. the broker snapshot (FIXED)
 

@@ -24,6 +24,8 @@ public sealed class PriceProviders
     {
         BaseUrl = "https://www.alphavantage.co/query",
     };
+
+    public TiingoProviderOptions Tiingo { get; set; } = new();
 }
 
 /// <summary>Keyless default provider. No API key — works out of the box.</summary>
@@ -44,6 +46,19 @@ public sealed class ApiKeyProviderOptions
     public string BaseUrl { get; set; } = string.Empty;
 
     public int RequestsPerSecond { get; set; } = 5;
+}
+
+/// <summary>
+/// Tiingo (api.tiingo.com). Blank <see cref="ApiKey"/> disables it. The free tier is metered per hour
+/// (50 requests/hour, 1,000/day, 500 unique symbols/month), so the limiter is hourly.
+/// </summary>
+public sealed class TiingoProviderOptions
+{
+    public string ApiKey { get; set; } = string.Empty;
+
+    public string BaseUrl { get; set; } = "https://api.tiingo.com";
+
+    public int RequestsPerHour { get; set; } = 50;
 }
 
 public sealed class PriceSchedule

@@ -16,7 +16,7 @@ public static class DependencyInjection
         services.AddOptions<PriceHistoryOptions>()
             .Bind(configuration.GetSection(PriceHistoryOptions.SectionName));
 
-        // Keyless default provider. API-key providers (EODHD, Alpha Vantage) register alongside it and
+        // Keyless default provider. API-key providers (Tiingo, EODHD, Alpha Vantage) register alongside it and
         // the selector prefers them when their key is configured (higher Priority).
         services.AddHttpClient<StooqPriceHistorySource>(ConfigureClient)
             .AddStandardResilienceHandler(ConfigureResilience);
@@ -29,6 +29,10 @@ public static class DependencyInjection
         services.AddHttpClient<AlphaVantagePriceHistorySource>(ConfigureClient)
             .AddStandardResilienceHandler(ConfigureResilience);
         services.AddTransient<IPriceHistorySource>(sp => sp.GetRequiredService<AlphaVantagePriceHistorySource>());
+
+        services.AddHttpClient<TiingoPriceHistorySource>(ConfigureClient)
+            .AddStandardResilienceHandler(ConfigureResilience);
+        services.AddTransient<IPriceHistorySource>(sp => sp.GetRequiredService<TiingoPriceHistorySource>());
 
         services.AddHostedService<PriceHistoryRefreshHostedService>();
 
