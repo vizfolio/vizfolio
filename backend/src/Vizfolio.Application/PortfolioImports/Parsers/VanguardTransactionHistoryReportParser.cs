@@ -157,15 +157,19 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         // is preserved in SourceType so the IRA-specific meaning isn't lost.
         if (t is "funds received" or "contribution")
             return (TransactionType.Deposit, Math.Abs(reportedAmount));
-        if (t is "transfer (incoming)")
+        // Transfers between accounts, and IRA (e.g. Traditional → Roth) conversions, move money/shares
+        // across the account boundary, so they are signed Transfers that count toward contributions.
+        if (t is "transfer (incoming)" or "conversion (incoming)" || t.StartsWith("transfer from", StringComparison.Ordinal))
             return (TransactionType.Transfer, Math.Abs(reportedAmount));
-        if (t.StartsWith("transfer to", StringComparison.Ordinal))
+        if (t is "conversion (outgoing)" || t.StartsWith("transfer to", StringComparison.Ordinal))
             return (TransactionType.Transfer, -Math.Abs(reportedAmount));
 
         var type = t switch
         {
-            "buy" or "buy (exchange)" => TransactionType.Buy,
-            "sell" or "sell (exchange)" => TransactionType.Sell,
+            // A share-class conversion (e.g. Investor → Admiral) swaps one fund for another inside the
+            // account — an exchange, like "Buy/Sell (exchange)": it moves shares, not contributions.
+            "buy" or "buy (exchange)" or "share conversion (incoming)" => TransactionType.Buy,
+            "sell" or "sell (exchange)" or "share conversion (outgoing)" => TransactionType.Sell,
             "dividend" => TransactionType.Dividend,
             "reinvestment" => TransactionType.Reinvest,
             "interest" => TransactionType.Interest,

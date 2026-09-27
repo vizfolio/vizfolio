@@ -64,8 +64,9 @@ Both endpoints return **404** if the portfolio or account doesn't exist (an acco
 
 Both `startingBalance.value` and `endingBalance.value` are computed the same way: **for each holding in scope, resolve a market value at the date, then sum**. Resolution (in `HoldingValuationResolver`, fed by `PortfolioPerformanceService.BuildResolverAsync`) applies this fallback order per holding per date — see [price-history-valuation.md](./price-history-valuation.md):
 
-1. **PriceHistory** — if the holding is held (ledger quantity ≠ 0 from `HoldingQuantityCalculator`) and a raw close exists for its series on/before the date, use `quantity × close`. Prices and ledger quantities are both on the **raw / as-traded** basis, and `TransactionType.Split` adjusts the roll-forward from the authoritative `CorporateAction` factor.
-2. **Broker snapshot** — otherwise, the latest `AccountHoldingSnapshot.MarketValue` whose `AsOf ≤ date` (the broker's ground truth).
+0. **Fresh broker snapshot** — the latest valued `AccountHoldingSnapshot` with `AsOf ≤ date` is used as-is when no share-affecting trade follows it and no price is newer than it. This keeps Performance consistent with the Holdings tab.
+1. **PriceHistory** — if the holding is held (positive quantity from `HoldingQuantityCalculator`) and a raw close exists for its series on/before the date, use `quantity × close`. The quantity is **anchored on the latest snapshot**: `snapshot.Quantity + Σ share-affecting rows after snapshot.AsOf` (snapshots are end-of-day positions), so gaps in early imported history can't drift the position. Prices and ledger quantities are both on the **raw / as-traded** basis, and `TransactionType.Split` adjusts the roll-forward from the authoritative `CorporateAction` factor. A negative quantity (inconsistent ledger) is never priced.
+2. **Broker snapshot** — otherwise, the latest `AccountHoldingSnapshot.MarketValue` whose `AsOf ≤ date` (the broker's ground truth). If shares changed since it, the current quantity is revalued at the snapshot's per-share price, and a position sold to zero is `$0`.
 3. **Not held → $0, complete** — a holding not held at the date (no ledger position and no broker position) has a true $0 value and counts as complete, not missing.
 4. **Missing** — held but neither priced nor snapshotted → the holding is missing and the balance is incomplete (honest null downstream).
 
@@ -139,6 +140,8 @@ R = (EMV − BMV − Σ Cᵢ) / (BMV + Σ (wᵢ · Cᵢ))
 - `wᵢ = (T − dayFromStart) / T` — fraction of the period remaining after the flow.
 
 Widely used by retail brokerages as a TWRR proxy. Formally a money-weighted approximation, so the `method` field says `ModifiedDietz` — consumers who need GIPS-grade TWRR can tell it apart from the strict chained calculator.
+
+**Known limitation — long periods with large flows.** Applied as one period over many years, the denominator's weighting treats a large withdrawal as absent for the rest of the window, shrinking the "average invested capital" and inflating the rate. E.g. an account mostly withdrawn years before `to` (then only brief in-and-out round trips) can report a markedly higher rate than a brokerage's chained time-weighted figure, even with identical contributions and ending balance. The fix is a chained TWR that values the account at every external cash-flow date (from PriceHistory) — not yet built; it also depends on a raw price series (see [price-history-valuation.md §5](./price-history-valuation.md#5-gotchas-to-carry-forward)).
 
 Reasons `rate` may be `null`:
 - `IncompleteStartingBalance` / `IncompleteEndingBalance` — see the completeness section.
@@ -255,14 +258,27 @@ mapped. The Vanguard parser maps its types as follows (raw kept in `SourceType`)
 | `Interest` | `Interest` |
 | `Fee` | `Fee` |
 | `Funds Received`, `Contribution` | `Deposit` (external in; `Contribution` = IRA contribution) |
-| `Transfer (incoming)` | `Transfer` (money in) |
-| `TRANSFER TO …` | `Transfer` (money out) |
+| `Transfer (incoming)`, `TRANSFER FROM …` | `Transfer` (money/shares in) |
+| `TRANSFER TO …` | `Transfer` (money/shares out) |
+| `Conversion (incoming)` / `Conversion (outgoing)` | `Transfer` in / out (IRA conversion, e.g. Traditional → Roth) |
+| `Share Conversion (incoming)` / `Share Conversion (outgoing)` | `Buy` / `Sell` (share-class exchange, e.g. Investor → Admiral) |
 | `Sweep`, `Sweep in`, `Sweep out` | `Other` |
 
 The Vanguard `Amount` reflects settlement-fund mechanics, so the parser sets the **sign of the external
-cash types from the label**, not the reported amount: `Funds Received`/`Transfer (incoming)` → `+|amount|`,
-`TRANSFER TO …` → `−|amount|`. Sweeps → `Other` keeps internal money-market cash a no-op for
-`Contributions` (which only sum `{Deposit, Withdrawal, Transfer}`).
+cash types from the label**, not the reported amount: incoming transfers/conversions → `+|amount|`,
+`TRANSFER TO …`/`Conversion (outgoing)` → `−|amount|`. A share-class conversion swaps one fund for
+another *inside* the account, so it moves shares but is not a contribution. Sweeps → `Other` keeps
+internal money-market cash a no-op for `Contributions` (which only sum `{Deposit, Withdrawal, Transfer}`).
+Any unrecognised label also maps to `Other` — which moves neither shares nor contributions — so an
+unexpected balance or contribution usually means a new label needs mapping here.
+
+Older Vanguard reports (pre-2018) record a reinvested distribution as a single `Dividend` /
+`Capital gain` row **carrying the shares bought**; the quantity roll-forward counts those shares (newer
+reports use a separate `Reinvestment` row). Sold units are reported negative; the roll-forward treats
+any `Sell` as reducing the position regardless of sign.
+
+Re-importing a file does **not** reclassify rows already stored (dedup skips them by fingerprint), so
+after a mapping change the affected account's transactions must be cleared and re-imported.
 
 ### Adding a provider parser
 

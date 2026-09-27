@@ -525,6 +525,114 @@ public sealed class PortfolioPerformanceServiceTests
         result.EndingBalance.IsComplete.ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task Ledger_missing_early_history_does_not_override_a_zero_broker_snapshot()
+    {
+        // Regression: a closed fund whose ledger lacks its original purchase. Rolling the ledger from zero
+        // gives −10 shares (more transferred out than recorded in) and priced that to a negative balance.
+        // The broker snapshot says 0 shares / $0, which must win.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VBMFX");
+
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2016, 1, 4), TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2018, 6, 1), TransactionType.Transfer, amount: -1100m, quantity: -110m);
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2018, 6, 30), marketValue: 0m);
+        await SeedPriceAsync(ctx, "VBMFX", To, close: 10m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(0m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Quantity_rolls_forward_from_the_latest_broker_snapshot_not_from_zero()
+    {
+        // The ledger only covers trades after the snapshot (e.g. an 18-month QFX), so the broker's 100
+        // shares anchor the position and the later 10-share buy is added on top: 110 × $50.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ANCH");
+
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 1, 31), marketValue: 4000m, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 3, 3), TransactionType.Buy, amount: -450m, quantity: 10m);
+        await SeedPriceAsync(ctx, "ANCH", To, close: 50m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2025, 1, 31), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(5500m);
+    }
+
+    [Fact]
+    public async Task Broker_snapshot_newer_than_the_latest_price_is_used_as_is()
+    {
+        // Prices stop a month before the broker's statement and nothing traded since: the statement's
+        // market value is the freshest truth and matches what the Holdings view shows.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "STALE");
+
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 1), TransactionType.Buy, amount: -1000m, quantity: 10m);
+        await SeedPriceAsync(ctx, "STALE", To.AddDays(-30), close: 120m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1275m, quantity: 10m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 1), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(1275m);
+        result.EndingBalance.SnapshotAsOf.ShouldBe(To);
+    }
+
+    [Fact]
+    public async Task Unpriced_position_sold_to_zero_after_its_snapshot_is_worth_zero_not_the_stale_snapshot()
+    {
+        // Traditional IRA → Roth: an opening balance of 100 shares / $1,000 on the buy date, reinvested
+        // dividends, then everything converted out. No price history is loaded, so valuation falls back to
+        // the snapshot — which must not resurrect the old $1,000 once the shares are gone.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VBMFX");
+
+        var opening = new DateOnly(2016, 2, 1);
+        await SeedTransactionAsync(ctx, accountId, holding, opening, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedSnapshotAsync(ctx, holding, opening, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2016, 3, 31), TransactionType.Dividend, amount: 20m, quantity: 2m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2018, 11, 20), TransactionType.Transfer, amount: -1050m, quantity: -102m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.Value.ShouldBe(1000m); // the opening balance already includes the buy
+        result.EndingBalance.Value.ShouldBe(0m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Unpriced_position_that_changed_since_its_snapshot_is_revalued_at_the_snapshots_unit_price()
+    {
+        // 100 shares worth $4,000 ($40/share) at the snapshot, then 25 sold; with no price series the
+        // remaining 75 shares are carried at the last known $40.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "NOPX");
+
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 1, 31), marketValue: 4000m, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 2), TransactionType.Sell, amount: 1100m, quantity: -25m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2025, 1, 31), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(3000m);
+    }
+
     private static PortfolioPerformanceService NewService(TestDbContext ctx) =>
         new(ctx.Db,
             new ModifiedDietzTimeWeightedReturnCalculator(),
@@ -603,9 +711,12 @@ public sealed class PortfolioPerformanceServiceTests
         DateOnly asOf,
         decimal? marketValue,
         string? currency = "USD",
-        AccountHoldingSnapshotSource source = AccountHoldingSnapshotSource.BrokerPosition)
+        AccountHoldingSnapshotSource source = AccountHoldingSnapshotSource.BrokerPosition,
+        decimal? quantity = null)
     {
-        var snapshot = new AccountHoldingSnapshot(holdingId, asOf, quantity: 1m, source);
+        // A $0 snapshot means nothing is held; otherwise default to a nominal 1-unit position.
+        var units = quantity ?? (marketValue == 0m ? 0m : 1m);
+        var snapshot = new AccountHoldingSnapshot(holdingId, asOf, units, source);
         snapshot.SetValuation(costBasis: null, marketValue, unitPrice: null, currency);
         ctx.Db.AccountHoldingSnapshots.Add(snapshot);
         await ctx.Db.SaveChangesAsync();

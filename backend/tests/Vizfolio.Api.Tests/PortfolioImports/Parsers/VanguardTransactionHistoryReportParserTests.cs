@@ -31,6 +31,11 @@ public sealed class VanguardTransactionHistoryReportParserTests
         ["9/3/2014", "9/3/2014", null, "CASH", "Transfer (incoming)", "CASH", null, null, null, "$275.5000"],
         ["9/1/2014", null, "VMMXX", "Vanguard Cash Reserves Federal Money Market Fund", "TRANSFER TO 987654", null, "-275.1000", null, null, "$275.1000"],
         ["4/22/2025", "4/22/2025", null, "To: MY CREDIT UNION", "Contribution", "CASH", null, null, null, "$150.0000"],
+        ["6/15/2017", "6/15/2017", "VBMFX", "Vanguard Total Bond Market Index Fund Investor Shares", "TRANSFER FROM 111222333", null, "100.0000", null, null, "$1,000.0000"],
+        ["3/10/2018", "3/10/2018", "VBMFX", "Vanguard Total Bond Market Index Fund Investor Shares", "Share Conversion (outgoing)", null, "-120.0000", null, null, "-$1,300.0000"],
+        ["3/10/2018", "3/10/2018", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", "Share Conversion (incoming)", null, "120.0000", null, null, "$1,300.0000"],
+        ["11/20/2018", "11/20/2018", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", "Conversion (outgoing)", null, "-125.0000", null, null, "-$1,400.0000"],
+        ["1/7/2019", "1/7/2019", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", "Conversion (incoming)", null, "125.0000", null, null, "$1,400.0000"],
     ];
 
     [Fact]
@@ -165,6 +170,50 @@ public sealed class VanguardTransactionHistoryReportParserTests
         contribution.Type.ShouldBe(TransactionType.Deposit); // counts toward contributions
         contribution.SourceType.ShouldBe("Contribution");    // IRA meaning preserved verbatim
         contribution.Amount.ShouldBe(150m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_a_transfer_from_another_account_to_an_incoming_transfer()
+    {
+        var incoming = (await ParseSampleAsync())[13];
+
+        incoming.Type.ShouldBe(TransactionType.Transfer);
+        incoming.SourceType.ShouldBe("TRANSFER FROM 111222333");
+        incoming.Quantity.ShouldBe(100m);
+        incoming.Amount.ShouldBe(1000m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_a_share_class_conversion_to_an_exchange_that_moves_shares_but_not_contributions()
+    {
+        var txs = await ParseSampleAsync();
+
+        var outgoing = txs[14];
+        outgoing.Type.ShouldBe(TransactionType.Sell);
+        outgoing.SourceType.ShouldBe("Share Conversion (outgoing)");
+        outgoing.Quantity.ShouldBe(-120m);
+
+        var incoming = txs[15];
+        incoming.Type.ShouldBe(TransactionType.Buy);
+        incoming.Ticker.ShouldBe("VBTLX");
+        incoming.Quantity.ShouldBe(120m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_ira_conversions_to_signed_transfers_across_the_account_boundary()
+    {
+        var txs = await ParseSampleAsync();
+
+        // e.g. Traditional IRA → Roth: money leaves this account.
+        var outgoing = txs[16];
+        outgoing.Type.ShouldBe(TransactionType.Transfer);
+        outgoing.SourceType.ShouldBe("Conversion (outgoing)");
+        outgoing.Amount.ShouldBe(-1400m);
+
+        // ...and arrives in the Roth.
+        var incoming = txs[17];
+        incoming.Type.ShouldBe(TransactionType.Transfer);
+        incoming.Amount.ShouldBe(1400m);
     }
 
     private static async Task<IReadOnlyList<ParsedTransaction>> ParseSampleAsync()

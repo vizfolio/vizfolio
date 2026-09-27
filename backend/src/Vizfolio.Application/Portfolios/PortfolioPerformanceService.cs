@@ -25,6 +25,13 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         TransactionType.Split,
     };
 
+    // Income rows that carry a quantity were reinvested at source (older broker report format).
+    private static readonly TransactionType[] ReinvestableIncomeTypes =
+    {
+        TransactionType.Dividend,
+        TransactionType.CapitalGain,
+    };
+
     private readonly IAppDbContext _db;
     private readonly ITimeWeightedReturnCalculator _twrCalculator;
     private readonly IMoneyWeightedReturnCalculator _mwrCalculator;
@@ -285,7 +292,8 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             .Where(t => t.AccountHoldingId != null
                         && holdingIds.Contains(t.AccountHoldingId!.Value)
                         && t.TradeDate <= to
-                        && ShareAffectingTypes.Contains(t.Type))
+                        && (ShareAffectingTypes.Contains(t.Type)
+                            || (ReinvestableIncomeTypes.Contains(t.Type) && t.Quantity != null)))
             .Select(t => new { HoldingId = t.AccountHoldingId!.Value, t.TradeDate, t.Type, t.Quantity })
             .ToListAsync(cancellationToken);
         var ledgerByHolding = ledgerRows

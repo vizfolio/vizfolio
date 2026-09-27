@@ -115,10 +115,14 @@ practice and makes windowed returns work reliably for all dates, not just snapsh
 "take the latest snapshot's `MarketValue`" to a **resolved valuation** with this fallback order,
 per holding per date:
 
-1. **PriceHistory** — `quantity(from ledger) × price(from PriceHistory)`. Preferred whenever a
-   price exists for that security on/near that date.
+0. **Fresh broker snapshot** — a valued snapshot with no share-affecting trade after it and no
+   price newer than it is used as-is (it *is* the latest truth, and keeps Performance in step
+   with the Holdings view). See §9.
+1. **PriceHistory** — `quantity(snapshot-anchored ledger) × price(from PriceHistory)`. Preferred
+   whenever a price exists for that security on/before that date and the quantity is positive.
 2. **Broker snapshot `MarketValue`** — the broker's ground truth; keep as fallback and for
-   reconciliation.
+   reconciliation. If shares changed since the snapshot, the current quantity is revalued at the
+   snapshot's per-share price (so a position sold to zero is `$0`, not its stale value — §9).
 3. **Incomplete** — no price and no usable snapshot → the holding is *missing* and the balance
    is `IsComplete = false`, so the calculators return `null` with a reason. **Never invent a
    value.**
@@ -127,8 +131,9 @@ Everything downstream is untouched: `PerformanceComputationContext`, the return 
 `StartingIsComplete` / `EndingIsComplete` / `Reason` plumbing all stay exactly as they are — they
 already behave correctly once fed an honest balance.
 
-**Quantity source.** Ledger roll-forward from account inception, consistent with the
-reconciliation invariant. (Snapshots also carry quantity and can cross-check it.)
+**Quantity source.** Ledger roll-forward **anchored on the latest broker snapshot** at/before the
+date: `snapshot.Quantity + Σ share-affecting rows in (snapshot.AsOf, date]` — the reconciliation
+invariant. With no snapshot yet, the roll-forward starts from zero at inception. See §9.
 
 **Schema as shipped** (`backend/src/Vizfolio.Domain/Pricing/`):
 
@@ -173,6 +178,12 @@ The expensive-to-rediscover bits — read these before implementing:
      multiplies the running quantity by the split factor **only** when a matching `CorporateAction`
      exists for the `Split` row's date; otherwise it's a logged no-op (never silently corrupts).
      This also avoids double-counting when a broker already reports post-split `UNITS` on later trades.
+- **Quantity sign & income rows in the roll-forward.** Brokers disagree on the sign of sold units
+  (OFX `UNITS` and the Vanguard report are *negative* for sells), so a `Sell` always subtracts
+  `|quantity|`. `Buy`/`Reinvest`/`Transfer` add their signed quantity. A `Dividend`/`CapitalGain`
+  row that **carries a quantity** is a reinvestment recorded on the income row itself (older
+  Vanguard reports, pre-2018) and adds those shares; a cash distribution (null quantity) has no
+  share effect.
 - **Currency.** The price's currency must reconcile with the reporting-currency resolution the
   service already does (`ResolveReportingCurrency`, `PortfolioPerformanceService.cs:258-271`).
   Multi-currency conversion is still out of scope; don't mix currencies into one sum.
@@ -246,8 +257,9 @@ holdings must resolve to $0-and-complete at the 2011 `from`, so `startingBalance
 2. Valuation resolver: `HoldingValuationResolver` — `quantity(ledger) × price(PriceHistory)` with the
    §4 fallback order; built by `PortfolioPerformanceService.BuildResolverAsync` (batch-loads ledger,
    prices, splits, snapshots once — no per-holding round-trips).
-3. `ComputeBalance` consumes the resolver: `NotHeld` → $0-complete (§7); held+price → valued;
-   held+snapshot → `MarketValue`; held+neither → incomplete (honest null).
+3. `ComputeBalance` consumes the resolver: fresh snapshot → `MarketValue` (§9); `NotHeld` →
+   $0-complete (§7); held+price → valued; held+snapshot → `MarketValue` (revalued at its per-share
+   price if shares changed since, §9); held+neither → incomplete (honest null).
 4. Prices are filtered to the reporting currency (a null price currency, e.g. from the keyless source,
    is treated as matching); multi-currency conversion remains out of scope.
 5. Tests in `backend/tests/Vizfolio.Api.Tests/`: valuation scenarios (a)–(e) in
@@ -259,5 +271,48 @@ holdings must resolve to $0-and-complete at the 2011 `from`, so `startingBalance
 
 **Remaining follow-ups (not blocking):** funds are still valued from `FundSnapshot` NAV, not
 `PriceHistory` — a `Kind=Fund` holding falls through to a `Symbol` series only if it carries a ticker;
-and the keyless Stooq feed is split-adjusted (see §5), so a raw series + split events want an API-key
-provider.
+and the keyless Stooq feed is split/dividend-adjusted and bot-gated (see §5), so a raw series + split
+events want an API-key provider.
+
+## 9. Ledger drift vs. the broker snapshot (FIXED)
+
+**Symptom.** An account's **Holdings** tab (snapshot-valued) was correct, but its **Performance**
+tab showed a wrong — even negative — ending balance, nonsensical contributions and a wild TWR.
+Typical trigger: a closed-out account (e.g. an IRA whose money was converted elsewhere) whose Holdings are all `$0`.
+
+**Root causes (all in the quantity roll-forward that feeds §4 step 1):**
+
+1. **Sell sign.** `Sell` did `quantity -= Quantity`, but importers store sold units as negative, so
+   every sell *added* shares.
+2. **Roll-forward ignored the broker.** Quantity was rolled from zero over the whole ledger, so any
+   gap in imported history (e.g. unrecognised reinvestments) drifted permanently — even negative —
+   and `quantity × price` then **overrode** a broker snapshot saying 0 shares / `$0`.
+3. **Stale snapshot fallback.** With no price, the latest snapshot's `MarketValue` was used even
+   when later trades had changed (or zeroed) the position.
+4. **Unmapped Vanguard labels** landed as `Other` and so moved neither shares nor contributions
+   (see [performance-api.md → Vanguard mapping](./performance-api.md#import-pipeline--parser-plugins)).
+5. **Reinvested income rows** (a `Dividend` carrying shares) were ignored by the roll-forward.
+
+**Fix (in `HoldingQuantityCalculator` / `HoldingValuationResolver`).**
+
+- A sell always reduces the position; income rows with a quantity add shares (§5).
+- **Snapshot anchoring:** `quantity(date) = snapshot.Quantity + Σ rows in (snapshot.AsOf, date]`
+  using the latest snapshot at/before the date (`RollForward`). A snapshot is an **end-of-day**
+  position, so rows *on* its date are already included. A value-only snapshot (quantity 0 but a
+  positive market value) carries no usable quantity, so the full ledger is rolled from zero.
+- **Fresh snapshot wins:** no share activity since it and no newer price → its `MarketValue` as-is.
+- **Negative quantity is not priced** — it signals an inconsistent ledger and falls through to
+  the snapshot.
+- **Stale snapshot revaluation:** without a price, if shares changed since the snapshot, value
+  `quantity × (snapshot.MarketValue / snapshot.Quantity)`; a position at 0 shares is `NotHeld` (`$0`).
+
+**Opening balance semantics.** Because snapshots are end-of-day, an opening balance dated the day
+*before* the first transaction (the UI's suggested date) should hold the pre-activity positions
+(usually 0). If the first transaction is a purchase with **no funding row** in the import (common in
+old mutual-fund-only reports), the money appears from nowhere; instead date the opening balance on
+the purchase date and enter the purchased position — the anchor then already includes the buy.
+
+**Tests.** `PortfolioPerformanceServiceTests` (ledger missing early history vs. a `$0` snapshot;
+anchored roll-forward; snapshot newer than the latest price; unpriced position sold to zero;
+revaluation at the snapshot's unit price) and `HoldingQuantityCalculatorTests` (sell sign, reinvested
+income rows, anchored roll-forward, cash-only income isn't share activity).
