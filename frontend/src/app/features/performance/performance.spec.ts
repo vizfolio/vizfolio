@@ -20,6 +20,7 @@ const PERF: PortfolioPerformance = {
     moneyWeighted: { rate: null, method: 'XIRR', basis: 'Annualized', reason: 'NoSignChange' },
   },
   currencyCode: 'USD',
+  series: { interval: 'Monthly', points: [] },
 };
 
 class MockApi {
@@ -57,6 +58,7 @@ describe('Performance page', () => {
     expect(cmp.status()).toBe('ready');
     expect(cmp.portfolioName()).toBe('Retirement');
     expect((fixture.nativeElement as HTMLElement).querySelector('app-performance-summary')).toBeTruthy();
+    expect((fixture.nativeElement as HTMLElement).querySelector('app-returns-chart')).toBeTruthy();
   });
 
   it('refetches when the date range changes', () => {

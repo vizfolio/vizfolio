@@ -21,6 +21,7 @@ const PERF: PortfolioPerformance = {
     moneyWeighted: { rate: 0.12, method: 'XIRR', basis: 'Annualized', reason: null },
   },
   currencyCode: 'USD',
+  series: { interval: 'Monthly', points: [] },
 };
 
 function summary(): AccountSummary {

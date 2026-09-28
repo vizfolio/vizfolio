@@ -60,6 +60,34 @@ export interface PerformanceReturns {
 }
 
 /** GET /api/portfolios/{id}/performance (and account-scoped variant). */
+/** Spacing of the value-over-period series, chosen by the API from the period's length. */
+export type PerformanceSeriesInterval = 'Weekly' | 'Monthly' | 'Quarterly';
+
+/**
+ * One chart point: the balance at the close of `date` (null when a holding couldn't be valued —
+ * drawn as a gap), the deposits / withdrawals (negative) since the previous point, the cumulative
+ * time-weighted return from the period's start (decimal rate; the last point equals the headline
+ * TWR) and the cumulative investment gain (value − starting balance − net contributions to date).
+ * Return and gain are null where they can't be computed.
+ */
+export interface PerformanceSeriesPoint {
+  date: string;
+  value: number | null;
+  deposits: number;
+  withdrawals: number;
+  cumulativeReturn: number | null;
+  investmentGain: number | null;
+}
+
+/**
+ * Value / returns over the period. The first point is the opening (starting balance, the day before `from`);
+ * the last is `to` (ending balance).
+ */
+export interface PerformanceSeries {
+  interval: PerformanceSeriesInterval;
+  points: PerformanceSeriesPoint[];
+}
+
 export interface PortfolioPerformance {
   from: string;
   to: string;
@@ -68,4 +96,5 @@ export interface PortfolioPerformance {
   contributions: PerformanceContributions;
   returns: PerformanceReturns;
   currencyCode: string;
+  series: PerformanceSeries;
 }

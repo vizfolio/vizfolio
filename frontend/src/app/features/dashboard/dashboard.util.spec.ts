@@ -1,6 +1,7 @@
 import {
   SAMPLE_PERFORMANCE,
-  buildSyntheticSeries,
+  buildReturnSeries,
+  buildValueSeries,
   formatCurrency,
   formatPercent,
   trendOf,
@@ -40,21 +41,89 @@ describe('dashboard.util', () => {
     });
   });
 
-  describe('buildSyntheticSeries', () => {
-    it('produces aligned label/value/deposit/withdrawal arrays that span the period', () => {
-      const series = buildSyntheticSeries(SAMPLE_PERFORMANCE);
+  describe('buildValueSeries', () => {
+    it('maps the API series onto aligned arrays that open and close at the reported balances', () => {
+      const series = buildValueSeries(SAMPLE_PERFORMANCE);
 
-      expect(series.labels.length).toBeGreaterThan(1);
+      expect(series.labels.length).toBe(SAMPLE_PERFORMANCE.series.points.length);
       expect(series.value.length).toBe(series.labels.length);
       expect(series.deposits.length).toBe(series.labels.length);
       expect(series.withdrawals.length).toBe(series.labels.length);
 
-      // The curve starts and ends at the reported balances.
       expect(series.value.at(0)).toBe(SAMPLE_PERFORMANCE.startingBalance.value);
       expect(series.value.at(-1)).toBe(SAMPLE_PERFORMANCE.endingBalance.value);
+      expect(series.labels[0]).toBe('Jun 25');
+      expect(series.note).toBe('Month-end values');
+    });
 
-      // Withdrawals are charted as positive magnitudes.
+    it('charts withdrawals as positive magnitudes whose totals match the contributions', () => {
+      const series = buildValueSeries(SAMPLE_PERFORMANCE);
+      const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+
       expect(series.withdrawals.every((w) => w >= 0)).toBe(true);
+      expect(sum(series.deposits)).toBe(SAMPLE_PERFORMANCE.contributions.deposits);
+      expect(sum(series.withdrawals)).toBe(Math.abs(SAMPLE_PERFORMANCE.contributions.withdrawals));
+    });
+
+    it('leaves a gap where a point could not be valued', () => {
+      const perf = {
+        ...SAMPLE_PERFORMANCE,
+        series: {
+          interval: 'Monthly' as const,
+          points: [
+            { date: '2025-01-31', value: 100, deposits: 0, withdrawals: 0, cumulativeReturn: null, investmentGain: null },
+            { date: '2025-02-28', value: null, deposits: 0, withdrawals: 0, cumulativeReturn: null, investmentGain: null },
+          ],
+        },
+      };
+
+      expect(buildValueSeries(perf).value).toEqual([100, null]);
+    });
+
+    it('labels points to suit the spacing', () => {
+      const labelsFor = (interval: 'Weekly' | 'Quarterly') =>
+        buildValueSeries({
+          ...SAMPLE_PERFORMANCE,
+          series: { interval, points: [{ date: '2025-08-31', value: 1, deposits: 0, withdrawals: 0, cumulativeReturn: null, investmentGain: null }] },
+        }).labels[0];
+
+      expect(labelsFor('Weekly')).toBe('Aug 31');
+      expect(labelsFor('Quarterly')).toBe('Q3 25');
+    });
+  });
+
+  describe('buildReturnSeries', () => {
+    it('opens at zero and ends at the headline time-weighted return and period investment gain', () => {
+      const series = buildReturnSeries(SAMPLE_PERFORMANCE);
+      const p = SAMPLE_PERFORMANCE;
+
+      expect(series.labels.length).toBe(p.series.points.length);
+      expect(series.returnPct.length).toBe(series.labels.length);
+      expect(series.gain.length).toBe(series.labels.length);
+      expect(series.returnPct[0]).toBe(0);
+      expect(series.gain[0]).toBe(0);
+      expect(series.returnPct.at(-1)).toBe(11.4);
+      expect(series.gain.at(-1)).toBe(
+        p.endingBalance.value - p.startingBalance.value - p.contributions.net,
+      );
+      expect(series.note).toBe('Month-end values');
+    });
+
+    it('leaves gaps where the return or gain could not be computed', () => {
+      const perf = {
+        ...SAMPLE_PERFORMANCE,
+        series: {
+          interval: 'Monthly' as const,
+          points: [
+            { date: '2025-01-31', value: 100, deposits: 0, withdrawals: 0, cumulativeReturn: 0.01234, investmentGain: 1.4 },
+            { date: '2025-02-28', value: null, deposits: 0, withdrawals: 0, cumulativeReturn: null, investmentGain: null },
+          ],
+        },
+      };
+
+      const series = buildReturnSeries(perf);
+      expect(series.returnPct).toEqual([1.23, null]);
+      expect(series.gain).toEqual([1, null]);
     });
   });
 });

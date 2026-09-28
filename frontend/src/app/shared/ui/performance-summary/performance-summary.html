@@ -80,15 +80,17 @@
 
   <div class="chart-card">
     <div class="chart-head">
-      <h3>Value over period</h3>
-      <span class="chart-note">Illustrative — real time series coming soon</span>
+      <h3>Value over time</h3>
+      <span class="chart-note">{{ chartNote() }}</span>
     </div>
     <div class="chart-body">
       <app-perf-chart
         [labels]="chartLabels()"
         [datasets]="chartDatasets()"
-        ariaLabel="Value with deposits and withdrawals over the period"
+        ariaLabel="Value with deposits and withdrawals over time"
       />
     </div>
   </div>
+
+  <app-returns-chart [performance]="p" />
 </div>

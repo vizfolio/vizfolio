@@ -49,8 +49,8 @@
 
       <div class="chart-card">
         <div class="chart-head">
-          <h2>Performance</h2>
-          <span class="chart-note">Illustrative — real time series coming soon</span>
+          <h2>Value over time</h2>
+          <span class="chart-note">{{ chartNote() }}</span>
         </div>
         <div class="chart-body">
           <app-perf-chart
@@ -60,6 +60,10 @@
           />
         </div>
       </div>
+
+      @if (displayPerformance(); as p) {
+        <app-returns-chart [performance]="p" [headingLevel]="2" />
+      }
     }
   }
 </section>

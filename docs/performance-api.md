@@ -62,9 +62,45 @@ Both endpoints return **404** if the portfolio or account doesn't exist (an acco
       "reason": "IncompleteStartingBalance"
     }
   },
-  "currencyCode": "USD"
+  "currencyCode": "USD",
+  "series": {
+    "interval": "Monthly",
+    "points": [
+      { "date": "2025-05-31", "value": 0,       "deposits": 0,       "withdrawals": 0, "cumulativeReturn": 0,       "investmentGain": 0 },
+      { "date": "2025-06-30", "value": 7410.25, "deposits": 7500.00, "withdrawals": 0, "cumulativeReturn": -0.0137, "investmentGain": -89.75 },
+      // … one point per month end …
+      { "date": "2026-06-01", "value": 6255.00, "deposits": 0,       "withdrawals": 0, "cumulativeReturn": null,    "investmentGain": null }
+    ]
+  }
 }
 ```
+
+## Value / returns-over-time series
+
+`series` backs the "Value over time" and "Investment returns over time" charts. `PerformanceSeriesBuilder`
+produces:
+
+- **An opening point** at the close of the day before `from` — the starting balance — then **one point per
+  interval end**, the last clamped to `to` (the ending balance).
+- **Interval** chosen from the period's length: `Weekly` up to 92 days, `Monthly` up to 10 years,
+  `Quarterly` beyond — so even a 15-year history is ~60 points.
+- **`value`** from the same resolver as the balances (`ComputeBalance`: PriceHistory, snapshot fallback,
+  not-held `$0`), so the chart always agrees with the headline numbers. `null` when any relevant holding
+  is missing a valuation at that date — drawn as a gap, never guessed.
+- **`deposits` / `withdrawals`** (withdrawals negative): the contribution cash flows in
+  `(previous point, point]`, so across all points they sum to `contributions`.
+- **`cumulativeReturn`** (decimal rate): the return from `from` to the point. The service runs the
+  **configured `ITimeWeightedReturnCalculator`** over `[from, point]` — the headline context `with` `To`,
+  the ending balance, cash flows ≤ point and intermediate balances < point — so the last point always equals
+  `returns.timeWeighted.rate`, whichever strategy is registered. The builder takes this as a delegate and
+  stays calculator-agnostic. `null` where the calculator returns no rate (e.g. `PeriodTooShort`,
+  `ZeroDenominator`), which the chart draws as a gap.
+- **`investmentGain`**: `value − starting balance − net contributions to date`, i.e. the change in value
+  not explained by deposits/withdrawals. The last point equals `ending − starting − contributions.net`.
+- Both are `0` at the opening point, and `null` when the point or the opening couldn't be fully valued.
+
+Cost is one balance plus one return calculation per point over data already loaded for the response —
+no extra queries.
 
 ## Balance basis: snapshot market value
 

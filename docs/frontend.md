@@ -35,7 +35,7 @@ frontend/
         │   ├── api/      # PortfolioApiService + typed DTO models
         │   └── theme/    # ThemeService (light/dark, persisted)
         ├── layout/       # app chrome: shell, sidebar, topbar, theme-toggle, nav-items
-        ├── shared/ui/    # reusable presentational components (stat-card, perf-chart)
+        ├── shared/ui/    # reusable presentational components (stat-card, perf-chart, returns-chart)
         └── features/     # routed pages: dashboard, coming-soon (placeholders)
 ```
 
@@ -46,7 +46,7 @@ The UI is a **shell + features** structure so sections can be added without touc
 - **`layout/shell`** — CSS-grid frame: fixed top bar, left sidebar, scrollable `<router-outlet>` main area. Owns the off-canvas sidebar state used on narrow (< 768px) screens.
 - **`layout/sidebar`** — primary nav rendered from the `NavItem[]` array in `layout/nav-items.ts`. **Add a nav link by adding one entry there.** Uses `routerLink` + `routerLinkActive`.
 - **`layout/topbar`** — brand, hamburger (narrow screens, emits `menuToggle`), theme toggle, and a disabled account-menu placeholder for when auth lands.
-- **`shared/ui`** — presentational, `input()`-driven components with no data dependencies: `stat-card` (label/value/trend/incomplete), `perf-chart`, and reusable form controls that wrap native inputs behind app design tokens (`date-field`, `select-field`, `file-upload`) so styling/behaviour live in one place and swap without touching call sites.
+- **`shared/ui`** — presentational, `input()`-driven components with no data dependencies: `stat-card` (label/value/trend/incomplete), `perf-chart`, `returns-chart`, and reusable form controls that wrap native inputs behind app design tokens (`date-field`, `select-field`, `file-upload`) so styling/behaviour live in one place and swap without touching call sites.
 - **`features/*`** — lazy-loaded routed pages. `dashboard` is the landing page; `coming-soon` is a shared placeholder whose heading is bound from route `data.title` via `withComponentInputBinding()`.
 
 ## Theming
@@ -60,7 +60,9 @@ Components reference **only** semantic tokens, so re-theming never touches compo
 
 ## Charts
 
-`shared/ui/perf-chart` is a thin wrapper around **Chart.js** (`chart.js`, MIT-licensed) — the only place Chart.js is imported, so the library is swappable from one file. It takes `labels` + typed `PerfDataset[]` inputs, resolves series colors from the semantic theme tokens (so charts follow light/dark), and rebuilds when inputs or the theme change. Note: the performance API returns period *aggregates*, not a time series, so the dashboard chart currently renders a **synthetic** monthly curve (`features/dashboard/dashboard.util.ts`, marked `TODO(perf-timeseries)`) until a time-series endpoint exists.
+`shared/ui/perf-chart` is a thin wrapper around **Chart.js** (`chart.js`, MIT-licensed) — the only place Chart.js is imported, so the library is swappable from one file. It takes `labels` + typed `PerfDataset[]` inputs, resolves series colors from the semantic theme tokens (so charts follow light/dark), and rebuilds when inputs or the theme change. The "Value over time" charts (dashboard, portfolio Performance, account Performance) plot the performance response's `series` — real balances valued from price history, with each interval's deposits/withdrawals as bars — mapped onto chart arrays by `buildValueSeries` (`shared/util/performance-format.ts`), which also formats the axis labels to suit the API-chosen interval. A `null` value (a date where some holding couldn't be valued) is a gap in the line, so `PerfDataset.data` is `(number | null)[]`. `perf-chart` takes an optional `valueFormat` (`number` | `currency` | `percent`, plus `currencyCode`) that formats y-axis ticks and tooltips; `percent` expects values already in percent and emphasizes the zero line.
+
+`shared/ui/returns-chart` is the "Investment returns over time" card, shown under the value chart on the dashboard and in `performance-summary` (portfolio and account Performance). A `%` / currency toggle (`aria-pressed` buttons) switches between the series' `cumulativeReturn` (ends at the headline time-weighted return) and `investmentGain` (value − starting balance − net contributions), mapped by `buildReturnSeries`. `headingLevel` (2 or 3) fits the host page's outline. The dashboard's offline `SAMPLE_PERFORMANCE` carries a sample series, including consistent return/gain values.
 
 ## Data flow
 

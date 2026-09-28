@@ -32,6 +32,7 @@ const PERF: PortfolioPerformance = {
     moneyWeighted: { rate: 0.22, method: 'XIRR', basis: 'Annualized', reason: null },
   },
   currencyCode: 'USD',
+  series: { interval: 'Monthly', points: [] },
 };
 
 const PORTFOLIO: PortfolioSummary = {
@@ -84,6 +85,7 @@ describe('Dashboard', () => {
     expect(cmp.returnLabel()).toBe('+20.0%');
     expect(cmp.notice()).toBeNull();
     expect(cmp.chartDatasets().length).toBe(3);
+    expect(cmp.displayPerformance()).toBe(PERF); // feeds the returns-over-time chart
   });
 
   it('shows the first-run empty state when there are no portfolios', () => {

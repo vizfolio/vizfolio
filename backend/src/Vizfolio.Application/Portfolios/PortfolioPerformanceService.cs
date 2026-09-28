@@ -187,7 +187,24 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             TimeWeighted: _twrCalculator.Compute(context),
             MoneyWeighted: _mwrCalculator.Compute(context));
 
-        return new PortfolioPerformanceResult(from, to, starting, ending, contributions, returns, currency);
+        // Value / returns-over-time charts, valued by the same resolver so they always agree with the
+        // balances. Each point's cumulative return is the headline TWR strategy run over [from, point], so
+        // the last point equals Returns.TimeWeighted.
+        var series = PerformanceSeriesBuilder.Build(
+            from,
+            to,
+            date => ComputeBalance(relevantHoldings, resolver, date),
+            cashFlows,
+            (date, balance) => _twrCalculator.Compute(context with
+            {
+                To = date,
+                EndingBalance = balance.Value,
+                EndingIsComplete = balance.IsComplete,
+                CashFlows = cashFlows.Where(f => f.Date <= date).ToList(),
+                IntermediateBalances = intermediateBalances.Where(b => b.Date < date).ToList(),
+            }).Rate);
+
+        return new PortfolioPerformanceResult(from, to, starting, ending, contributions, returns, currency, series);
     }
 
     private async Task<DateOnly> ResolveDefaultFromAsync(
@@ -417,7 +434,8 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var noReturns = new PerformanceReturnsResult(
             TimeWeighted: new ReturnResult(null, "ModifiedDietz", "Period", "NoData"),
             MoneyWeighted: new ReturnResult(null, "XIRR", "Annualized", "NoData"));
-        return new PortfolioPerformanceResult(from, to, zero, zero, noContrib, noReturns, DefaultCurrencyCode);
+        return new PortfolioPerformanceResult(
+            from, to, zero, zero, noContrib, noReturns, DefaultCurrencyCode, PerformanceSeriesResult.Empty);
     }
 
     private sealed record SnapshotProjection(

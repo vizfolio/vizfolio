@@ -663,6 +663,66 @@ public sealed class PortfolioPerformanceServiceTests
         result.Returns.TimeWeighted.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m); // not ~ -45% or +110%
     }
 
+    [Fact]
+    public async Task Value_series_agrees_with_the_balances_and_carries_the_contributions()
+    {
+        // Priced holding bought with a deposit: the chart's first point is the starting balance, its last
+        // is the ending balance, and its flows add up to the period's net contributions.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "SERIES");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedPriceAsync(ctx, "SERIES", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "SERIES", new DateOnly(2025, 6, 30), close: 12m);
+        await SeedPriceAsync(ctx, "SERIES", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var points = result.Series.Points;
+        result.Series.Interval.ShouldBe(PerformanceSeriesInterval.Monthly);
+        points[0].Value.ShouldBe(result.StartingBalance.Value);
+        points[^1].Date.ShouldBe(To);
+        points[^1].Value.ShouldBe(result.EndingBalance.Value);
+        points.Single(p => p.Date == new DateOnly(2025, 6, 30)).Value.ShouldBe(1200m); // 100 × $12
+        points.Sum(p => p.Deposits + p.Withdrawals).ShouldBe(result.Contributions.Net);
+    }
+
+    [Fact]
+    public async Task Returns_series_ends_at_the_headline_return_and_the_period_investment_gain()
+    {
+        // The returns chart must agree with the headline cards: its last cumulative return is the
+        // time-weighted return, and its last gain is ending − starting − net contributions.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "RETSERIES");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedPriceAsync(ctx, "RETSERIES", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "RETSERIES", new DateOnly(2025, 6, 30), close: 12m);
+        await SeedPriceAsync(ctx, "RETSERIES", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var points = result.Series.Points;
+        result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        points[0].CumulativeReturn.ShouldBe(0m);
+        points[^1].CumulativeReturn.ShouldBe(result.Returns.TimeWeighted.Rate);
+        points[^1].InvestmentGain.ShouldBe(
+            result.EndingBalance.Value - result.StartingBalance.Value - result.Contributions.Net);
+        points.Single(p => p.Date == new DateOnly(2025, 6, 30)).InvestmentGain.ShouldBe(200m); // 1200 − 0 − 1000
+    }
+
     private static PortfolioPerformanceService NewService(TestDbContext ctx) =>
         new(ctx.Db,
             new ModifiedDietzTimeWeightedReturnCalculator(),

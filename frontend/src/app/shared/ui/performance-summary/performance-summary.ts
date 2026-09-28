@@ -2,23 +2,24 @@ import { Component, computed, input } from '@angular/core';
 
 import { PortfolioPerformance } from '../../../core/api/models/performance.models';
 import {
-  buildSyntheticSeries,
+  buildValueSeries,
   formatCurrency,
   formatPercent,
   trendOf,
 } from '../../util/performance-format';
 import { CompletenessBadge } from '../completeness-badge/completeness-badge';
 import { PerfChart, PerfDataset } from '../perf-chart/perf-chart';
+import { ReturnsChart } from '../returns-chart/returns-chart';
 import { StatCard } from '../stat-card/stat-card';
 
 /**
  * Presentational summary of a {@link PortfolioPerformance}: headline stat cards, a balances /
  * contributions / returns breakdown (with completeness badges and null-return reasons), and the
- * synthetic value chart. Shared by the dashboard-style views (portfolio and account).
+ * value- and returns-over-time charts. Shared by the dashboard-style views (portfolio and account).
  */
 @Component({
   selector: 'app-performance-summary',
-  imports: [StatCard, CompletenessBadge, PerfChart],
+  imports: [StatCard, CompletenessBadge, PerfChart, ReturnsChart],
   templateUrl: './performance-summary.html',
   styleUrl: './performance-summary.scss',
 })
@@ -48,12 +49,13 @@ export class PerformanceSummary {
     trendOf(this.performance().returns.moneyWeighted.rate),
   );
 
-  protected readonly chartLabels = computed(() =>
-    buildSyntheticSeries(this.performance()).labels,
-  );
+  private readonly series = computed(() => buildValueSeries(this.performance()));
+
+  protected readonly chartLabels = computed(() => this.series().labels);
+  protected readonly chartNote = computed(() => this.series().note);
 
   protected readonly chartDatasets = computed<PerfDataset[]>(() => {
-    const series = buildSyntheticSeries(this.performance());
+    const series = this.series();
     return [
       { label: 'Value', data: series.value, kind: 'line', colorVar: '--color-primary' },
       { label: 'Deposits', data: series.deposits, kind: 'bar', colorVar: '--color-accent' },

@@ -7,7 +7,8 @@ public sealed record PortfolioPerformanceResult(
     PerformanceBalanceResult EndingBalance,
     PerformanceContributionsResult Contributions,
     PerformanceReturnsResult Returns,
-    string CurrencyCode);
+    string CurrencyCode,
+    PerformanceSeriesResult Series);
 
 public sealed record PerformanceBalanceResult(
     decimal Value,

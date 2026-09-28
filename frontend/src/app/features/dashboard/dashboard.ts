@@ -8,10 +8,11 @@ import { PortfolioPerformance } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
 import { PerfChart, PerfDataset } from '../../shared/ui/perf-chart/perf-chart';
+import { ReturnsChart } from '../../shared/ui/returns-chart/returns-chart';
 import { StatCard } from '../../shared/ui/stat-card/stat-card';
 import {
   SAMPLE_PERFORMANCE,
-  buildSyntheticSeries,
+  buildValueSeries,
   formatCurrency,
   formatPercent,
   trendOf,
@@ -27,10 +28,10 @@ type DashboardStatus = 'loading' | 'ready' | 'empty' | 'error';
 
 type PerfFetchStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-/** Landing page: headline stats + performance chart for the active portfolio. */
+/** Landing page: headline stats + value and returns charts for the active portfolio. */
 @Component({
   selector: 'app-dashboard',
-  imports: [StatCard, PerfChart, EmptyState, RouterLink],
+  imports: [StatCard, PerfChart, ReturnsChart, EmptyState, RouterLink],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
@@ -69,7 +70,7 @@ export class Dashboard {
   });
 
   /** What the cards/chart render: real data when ready, sample data on error. */
-  private readonly displayPerformance = computed<PortfolioPerformance | null>(() => {
+  protected readonly displayPerformance = computed<PortfolioPerformance | null>(() => {
     switch (this.status()) {
       case 'ready':
         return this.performance();
@@ -122,17 +123,19 @@ export class Dashboard {
     trendOf(this.displayPerformance()?.returns.timeWeighted.rate ?? null),
   );
 
-  protected readonly chartLabels = computed(() => {
+  private readonly series = computed(() => {
     const p = this.displayPerformance();
-    return p ? buildSyntheticSeries(p).labels : [];
+    return p ? buildValueSeries(p) : null;
   });
 
+  protected readonly chartLabels = computed(() => this.series()?.labels ?? []);
+  protected readonly chartNote = computed(() => this.series()?.note ?? '');
+
   protected readonly chartDatasets = computed<PerfDataset[]>(() => {
-    const p = this.displayPerformance();
-    if (!p) {
+    const series = this.series();
+    if (!series) {
       return [];
     }
-    const series = buildSyntheticSeries(p);
     return [
       { label: 'Portfolio value', data: series.value, kind: 'line', colorVar: '--color-primary' },
       { label: 'Deposits', data: series.deposits, kind: 'bar', colorVar: '--color-accent' },
