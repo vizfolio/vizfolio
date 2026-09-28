@@ -536,10 +536,11 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         coverageAfter.EarliestSnapshotDate.ShouldBe(openingDate);
         coverageAfter.OpeningBalanceSnapshotCount.ShouldBe(2);
 
-        // Performance is now honest — starting balance is complete, returns should be populated.
+        // Performance is now honest — starting balance is complete, returns should be populated. The opening
+        // balance is the close of openingDate, i.e. the start of a period beginning the next day.
         var perfResponse = await _client.GetFromJsonAsync<PortfolioPerformanceResponse>(
             $"/api/portfolios/{portfolio.PortfolioId}/accounts/{accountId}/performance" +
-            $"?from={openingDate:yyyy-MM-dd}&to=2026-06-01");
+            $"?from={openingDate.AddDays(1):yyyy-MM-dd}&to=2026-06-01");
         perfResponse!.StartingBalance.IsComplete.ShouldBeTrue();
         perfResponse.StartingBalance.Value.ShouldBe(5900m); // 5000 + 900
         perfResponse.Returns.TimeWeighted.Rate.ShouldNotBeNull();

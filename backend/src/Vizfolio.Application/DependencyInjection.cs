@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
         services.AddScoped<IPortfolioPerformanceService, PortfolioPerformanceService>();
         services.AddScoped<IAccountHistoryService, AccountHistoryService>();
+        services.AddScoped<IImpliedContributionService, ImpliedContributionService>();
 
         // Return-metric strategies. Swap the TWRR line to
         // ChainedSubPeriodTimeWeightedReturnCalculator to opt into the strict GIPS-style

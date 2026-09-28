@@ -36,6 +36,8 @@ public sealed class VanguardTransactionHistoryReportParserTests
         ["3/10/2018", "3/10/2018", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", "Share Conversion (incoming)", null, "120.0000", null, null, "$1,300.0000"],
         ["11/20/2018", "11/20/2018", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", "Conversion (outgoing)", null, "-125.0000", null, null, "-$1,400.0000"],
         ["1/7/2019", "1/7/2019", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", "Conversion (incoming)", null, "125.0000", null, null, "$1,400.0000"],
+        ["6/15/2015", "6/15/2015", "VTSMX", "Vanguard Total Stock Market Index Fund Investor Shares", "Conversion", null, "-200.0000", null, null, "-$8,000.0000"],
+        ["6/15/2015", "6/15/2015", "VTSAX", "Vanguard Total Stock Market Index Fund Admiral Shares", "Conversion", null, "200.0000", null, null, "$8,000.0000"],
     ];
 
     [Fact]
@@ -214,6 +216,23 @@ public sealed class VanguardTransactionHistoryReportParserTests
         var incoming = txs[17];
         incoming.Type.ShouldBe(TransactionType.Transfer);
         incoming.Amount.ShouldBe(1400m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_an_undirected_conversion_by_its_quantity_sign_to_an_exchange()
+    {
+        // Older reports label an Investor → Admiral share-class conversion plain "Conversion".
+        var txs = await ParseSampleAsync();
+
+        var outgoing = txs[18];
+        outgoing.Type.ShouldBe(TransactionType.Sell);
+        outgoing.SourceType.ShouldBe("Conversion");
+        outgoing.Quantity.ShouldBe(-200m);
+
+        var incoming = txs[19];
+        incoming.Type.ShouldBe(TransactionType.Buy);
+        incoming.Ticker.ShouldBe("VTSAX");
+        incoming.Quantity.ShouldBe(200m);
     }
 
     private static async Task<IReadOnlyList<ParsedTransaction>> ParseSampleAsync()

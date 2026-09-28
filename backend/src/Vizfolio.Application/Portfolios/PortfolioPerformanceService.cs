@@ -154,7 +154,10 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             relevantHoldings, snapshotsByHolding, currency, to, cancellationToken);
 
         var ending = ComputeBalance(relevantHoldings, resolver, to);
-        var starting = ComputeBalance(relevantHoldings, resolver, from);
+        // The period opens at the *start* of `from` — the close of the previous day — because cash flows
+        // dated `from` are counted inside the period. Valuing at the close of `from` would count a
+        // first-day purchase twice: once in the starting balance and again as its contribution.
+        var starting = ComputeBalance(relevantHoldings, resolver, from.AddDays(-1));
 
         var contributions = SummarizeContributions(contributionRows.Select(r => new CashFlow(r.TradeDate, r.Amount)).ToList());
         var cashFlows = contributionRows

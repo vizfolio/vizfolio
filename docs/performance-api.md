@@ -14,6 +14,12 @@ Both accept two optional query parameters:
 - `from` — start of period (inclusive). ISO date, e.g. `2025-06-01`. If omitted, defaults to the earliest `AccountTransaction.TradeDate` in scope, falling back to the earliest snapshot `AsOf`, falling back to today.
 - `to` — end of period (inclusive). ISO date. If omitted, defaults to today (UTC).
 
+**Period boundaries.** `startingBalance` is valued at the **start of `from`** — the close of the day
+before — and `endingBalance` at the close of `to`; every cash flow dated in `[from, to]` is inside the
+period. So a purchase on `from` (and the contribution that funded it) is a flow, never also part of the
+starting balance. This lines up with opening balances, which are entered as of the day *before* the first
+transaction (the default `from`): that snapshot is exactly the starting balance.
+
 Both endpoints return **404** if the portfolio or account doesn't exist (an account under a different portfolio also 404s), and **400** if the caller supplies `from > to`.
 
 ## Response shape
@@ -108,6 +114,102 @@ The response exposes:
 - `deposits` — sum of positive contributions.
 - `withdrawals` — sum of negative contributions (kept negative).
 - `count` — number of contributing rows.
+
+### Implied contributions
+
+Older fund-company (pre-brokerage) accounts record a contribution *as a purchase*: the history shows
+the Buy but no deposit, so the money appears from nowhere and inflates the return. Vizfolio detects
+these and records them as ledger rows, so contributions and both returns account for the money.
+
+`ImpliedContributionCalculator` rolls the account's cash forward from zero, one day at a time by
+**settlement date** (trade date when a row has none) — cash moves at settlement, and the money funding a
+purchase is often recorded on a later date than the purchase's trade date (row order within a day
+doesn't matter), using each row's cash effect regardless of the broker's sign
+conventions: Deposit/Sell/cash income `+`; Withdrawal/Buy/Reinvest/Fee `−`; income carrying a quantity
+(reinvested at source) and in-kind transfers (ticker + quantity) `0`; cash transfers and other
+unrecognised activity as signed. The **settlement fund counts as cash**: it's recognised as any ticker
+on a "Sweep" row, and moving money into or out of it (buy/sell/reinvest/sweep) is `0` — only its income
+adds cash. That also stops a sweep recorded by two sources (a QFX *Buy* of the fund and a Vanguard
+report *Sweep in*, which dedup can't pair because only one carries a quantity) from being spent twice.
+**Reinvestments are funded by the income they reinvest**: the Vanguard report lists that income as
+its own row (Dividend `+`, Reinvestment `−`), but a QFX `REINVEST` folds it into the one row, so the
+part of a day's reinvestments not covered by that day's cash income is added back (per day, not per
+ticker — some report dividend rows have no ticker). A reinvestment on its own can never imply a
+contribution. A day that closes more than $1 below zero implies a contribution
+of the shortfall, and cash resets to zero. The response lists each implied contribution with the rows
+that caused it (and their cash effect), totals by year, and the ledger-implied `endingCash`.
+
+**Stored at import.** After every import, `PortfolioImportService` calls
+`ImpliedContributionService.SyncForAccountAsync` for each affected account. It recomputes from the
+account's *imported* rows and stores the result as `Deposit` rows with `SourceSystem = "VIZFOLIO"`,
+`SourceType = "Implied contribution"` and `ExternalId = "implied-{date}"` (at most one per day). Rows
+that are still implied are kept as-is; the rest are removed — so a later import that brings in the
+real deposit retires the implied one, and re-importing never duplicates them. Because they're ordinary
+deposits they need no special handling in contributions, TWR or XIRR, and they appear in the Ledger.
+
+- **Never used for dedup.** Import dedup ignores `VIZFOLIO` rows, so a real deposit with the same
+  date and amount as an implied one is imported (then the sync retires the implied row). The
+  calculator also ignores them, so derived rows never feed back in.
+- **Reported on the import result**: `AccountImportResult.ImpliedContributions` /
+  `ImpliedContributionsAmount` (account totals after the import); the UI shows a note beneath the
+  import summary.
+- **Opening balances.** Enter positions held *before* the first transaction (the suggested
+  day-before date, usually `$0`). Entering an unfunded first purchase as an opening balance on its
+  own date would now count that money twice — as starting balance and as an implied contribution.
+- **Dry run.** `GET /api/portfolios/{portfolioId}/accounts/{accountId}/implied-contributions` shows
+  what the calculator derives (with each day's rows and their cash effect, totals by year, and the
+  ledger-implied `endingCash`) without writing anything — useful for checking against a broker's
+  contribution history.
+
+#### Broker assumptions (read before adding a parser)
+
+The mechanism is broker-agnostic (it works on normalized `TransactionType`s), but it has only been
+validated against Vanguard (the transaction report plus QFX). Three rules encode Vanguard conventions:
+
+- **Settlement fund = any ticker on a row whose `SourceType` starts with "Sweep"**
+  (`ImpliedContributionCalculator.SettlementTickers`). This couples the calculator to one broker's raw
+  label. Brokers without sweep rows (e.g. a Fidelity core position, a Schwab bank sweep) simply don't
+  match, so their money-market fund is treated as an ordinary fund — still correct when both legs of
+  each move are in the file. The risky case is a *false* match: a broker using "Sweep…" on a row for a
+  fund that is really an investment would make that fund's purchases cash-neutral and hide unfunded
+  buys. **When adding a second broker, move this knowledge into the parser** (mark settlement-fund rows
+  explicitly — a dedicated `TransactionType` or a flag — or recognise money-market funds from the fund
+  reference data) and keep the calculator generic.
+- **`Other` rows count at their reported sign** — right for Vanguard sweeps; unknown elsewhere.
+- **Income rows carrying a quantity are reinvested at source** — a pre-2018 Vanguard convention.
+
+#### Known gaps and TODO
+
+The main false-positive risk is **cash held before the imported history starts** (e.g. an
+18-month QFX for an account that already held cash): purchases paid from it look unfunded. A false
+positive over-states contributions and *under*-states returns. Until the items below land, the only
+recourse is deleting the row, and the next import re-creates it.
+
+1. **Cash in opening balances, seeding the cash roll.**
+   - *Model:* reuse `AccountHoldingKind.Cash` — an opening balance can carry a cash row stored as an
+     `OpeningBalance` snapshot of a per-account cash holding (no new table; update
+     [er-diagram.md](./er-diagram.md) only if a field is added).
+   - *Calculator:* start the roll at that snapshot's value on its date instead of `$0`.
+   - *Valuation:* cash transactions aren't linked to a holding, so a cash snapshot carried forward by
+     `HoldingValuationResolver` would go stale. Value the cash holding from the cash roll instead
+     (snapshot + cash effects since it) — which also fixes the existing limitation that balances exclude
+     cash held outside a money-market fund.
+   - *UI:* a "Cash" row on the opening-balance form.
+2. **Parse the QFX cash balance (`<INVBAL><AVAILCASH>`).** Add a cash balance to
+   `ParsedAccountStatement`, have `QfxFileParser` read it, and store it as a `BrokerPosition` snapshot
+   of the cash holding at `<DTASOF>`. That anchors cash at the export date (the same way share
+   quantities are anchored) and gives a reconciliation check: a large gap between the ledger-implied
+   cash and `AVAILCASH` means the history is missing cash rows.
+3. **Per-account switch.** An `Account.InferContributions` flag (default `true`; EF migration, provider
+   agnostic), set through the account endpoint and a toggle on the account screen. When off,
+   `SyncForAccountAsync` removes the account's implied rows and adds none; the dry-run preview still
+   works so the user can compare.
+4. **Validate each new broker with real exports.** Add anonymized fixtures for the broker's formats,
+   run the dry-run preview on complete histories (expect no implied rows and `endingCash` ≈ the
+   broker's cash), and add parser + calculator tests for any new cash conventions — including the
+   settlement-fund point above.
+
+With 1 and 3 in place, leaving it on by default for other brokers is reasonable.
 
 ### Portfolio-scope internal transfers
 
@@ -228,10 +330,13 @@ happy path sends no override (0 extra clicks); the dropdown defaults to *Auto-de
 **Dedup is content-based and cross-source.** Because formats overlap (the Vanguard report and the QFX
 export share the recent ~18 months) and carry no common transaction id, dedup keys on a
 **`TransactionFingerprint`** (`.../PortfolioImports/Services/TransactionFingerprint.cs`): a hash of
-`account | tradeDate | symbol | signed quantity | signed amount`, rounded to absorb representation
+`account | tradeDate | symbol | signed quantity | amount`, rounded to absorb representation
 noise. It deliberately **excludes** the source system and the (normalized) `TransactionType` — the type
-is the field most likely to diverge across sources and would defeat the match; the **sign** of amount and
-quantity is what separates a Buy from a Sell instead.
+is the field most likely to diverge across sources and would defeat the match. Direction comes from the
+**quantity's sign** for share rows (buy/reinvest `+`, sell `−`), so their amount is compared by
+**magnitude** — brokers disagree on that sign (QFX reports a reinvestment's total as positive, the
+Vanguard report as negative, which otherwise imported every overlapping reinvestment twice). Cash-only
+rows (no quantity) keep the **signed** amount, since it's all that separates a deposit from a withdrawal.
 
 On import, `ImportStatementAsync` loads the account's existing rows across **all** sources and builds a
 fingerprint **multiset** (counts). Each incoming row is skipped if an unmatched existing fingerprint
@@ -262,6 +367,7 @@ mapped. The Vanguard parser maps its types as follows (raw kept in `SourceType`)
 | `TRANSFER TO …` | `Transfer` (money/shares out) |
 | `Conversion (incoming)` / `Conversion (outgoing)` | `Transfer` in / out (IRA conversion, e.g. Traditional → Roth) |
 | `Share Conversion (incoming)` / `Share Conversion (outgoing)` | `Buy` / `Sell` (share-class exchange, e.g. Investor → Admiral) |
+| `Conversion` (no direction — older reports) | `Buy` if quantity > 0, `Sell` if < 0 (share-class exchange); `Other` without a quantity |
 | `Sweep`, `Sweep in`, `Sweep out` | `Other` |
 
 The Vanguard `Amount` reflects settlement-fund mechanics, so the parser sets the **sign of the external

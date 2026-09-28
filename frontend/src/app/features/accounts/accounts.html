@@ -117,6 +117,9 @@
                 @if (account.created) {
                   <span class="new-badge">new</span>
                 }
+                @if (impliedNote(account); as note) {
+                  <p class="implied-note">{{ note }}</p>
+                }
               </li>
             }
           </ul>

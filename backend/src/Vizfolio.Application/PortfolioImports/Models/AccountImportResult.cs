@@ -9,4 +9,14 @@ public sealed record AccountImportResult(
     int Inserted,
     int Skipped,
     int Failed,
-    IReadOnlyList<PortfolioImportFailure> Failures);
+    IReadOnlyList<PortfolioImportFailure> Failures)
+{
+    /// <summary>
+    /// Contributions the account's history implies but never recorded (purchases with no deposit), stored as
+    /// labelled ledger rows after this import. Totals for the whole account, not just this file.
+    /// </summary>
+    public int ImpliedContributions { get; init; }
+
+    /// <summary>Sum of <see cref="ImpliedContributions"/>.</summary>
+    public decimal ImpliedContributionsAmount { get; init; }
+}

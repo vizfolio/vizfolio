@@ -6,6 +6,7 @@ import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { ImportParser, PortfolioImportResult } from '../../../core/api/models/imports.models';
 import { FileUpload } from '../../../shared/ui/file-upload/file-upload';
 import { SelectField } from '../../../shared/ui/select-field/select-field';
+import { impliedContributionsNote } from '../implied-contributions-note';
 import { parserAcceptAttr, parserFormatOptions } from '../import-format-options';
 
 /**
@@ -38,6 +39,7 @@ export class AccountImport {
   protected readonly sourceSystem = signal('');
   protected readonly formatOptions = computed(() => parserFormatOptions(this.parsers()));
   protected readonly acceptAttr = computed(() => parserAcceptAttr(this.parsers()));
+  protected readonly impliedNote = impliedContributionsNote;
 
   /** The single account result, if the import produced one. */
   protected readonly accountResult = computed(() => this.result()?.accounts[0] ?? null);

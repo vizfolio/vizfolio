@@ -113,7 +113,8 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
 
             var rawType = CellText(worksheet, rowNumber, typeCol);
             var reportedAmount = CellDecimal(worksheet, rowNumber, amountCol) ?? 0m;
-            var (type, amount) = NormalizeType(rawType, reportedAmount);
+            var quantity = CellDecimal(worksheet, rowNumber, quantityCol);
+            var (type, amount) = NormalizeType(rawType, reportedAmount, quantity);
 
             // Trade date is the economic date but is occasionally blank (e.g. distributions, transfers);
             // fall back to the always-present settlement date.
@@ -130,7 +131,7 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
                 SettlementDate: settlementDate,
                 Ticker: NullIfBlank(CellText(worksheet, rowNumber, symbolCol)),
                 Cusip: null,
-                Quantity: CellDecimal(worksheet, rowNumber, quantityCol),
+                Quantity: quantity,
                 Price: CellDecimal(worksheet, rowNumber, priceCol),
                 Amount: amount,
                 Fees: fees,
@@ -149,9 +150,20 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
     /// the reported sign (needed for the signed-amount dedup fingerprint). Sweeps map to Other so internal
     /// money-market cash never counts toward contributions.
     /// </summary>
-    private static (TransactionType Type, decimal Amount) NormalizeType(string rawType, decimal reportedAmount)
+    private static (TransactionType Type, decimal Amount) NormalizeType(
+        string rawType, decimal reportedAmount, decimal? quantity)
     {
         var t = rawType.Trim().ToLowerInvariant();
+
+        // Older reports label a share-class conversion (e.g. Investor → Admiral) plain "Conversion", with no
+        // direction; the quantity's sign gives it. Like "Share Conversion", it's an exchange inside the
+        // account: it moves shares, not contributions.
+        if (t is "conversion")
+        {
+            if (quantity < 0m) return (TransactionType.Sell, reportedAmount);
+            if (quantity > 0m) return (TransactionType.Buy, reportedAmount);
+            return (TransactionType.Other, reportedAmount);
+        }
 
         // External cash in. "Contribution" is an IRA contribution — economically a deposit; the raw label
         // is preserved in SourceType so the IRA-specific meaning isn't lost.

@@ -29,6 +29,8 @@ const RESULT: PortfolioImportResult = {
       skipped: 1,
       failed: 0,
       failures: [],
+      impliedContributions: 0,
+      impliedContributionsAmount: 0,
     },
   ],
   duration: 'PT0.1S',

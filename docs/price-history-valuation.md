@@ -339,6 +339,10 @@ Typical trigger: a closed-out account (e.g. an IRA whose money was converted els
 (usually 0). If the first transaction is a purchase with **no funding row** in the import (common in
 old mutual-fund-only reports), the money appears from nowhere; instead date the opening balance on
 the purchase date and enter the purchased position — the anchor then already includes the buy.
+**Superseded:** unfunded purchases are now recorded as implied contributions at import (see
+[performance-api.md → Implied contributions](./performance-api.md#implied-contributions)), so keep
+the suggested day-before `$0` opening balance; entering the purchase as an opening balance would
+count it twice.
 
 **Tests.** `PortfolioPerformanceServiceTests` (ledger missing early history vs. a `$0` snapshot;
 anchored roll-forward; snapshot newer than the latest price; unpriced position sold to zero;

@@ -107,6 +107,11 @@
   gap: var(--space-1);
 }
 
+.implied-note {
+  margin: var(--space-1) 0 0;
+  font-size: 0.85rem;
+}
+
 .new-badge {
   margin-left: var(--space-2);
   padding: 0.05rem var(--space-2);

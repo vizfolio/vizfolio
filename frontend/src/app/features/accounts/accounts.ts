@@ -9,6 +9,7 @@ import { ImportParser, PortfolioImportResult } from '../../core/api/models/impor
 import { AccountSummary } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
+import { impliedContributionsNote } from './implied-contributions-note';
 import { FileUpload } from '../../shared/ui/file-upload/file-upload';
 import { SelectField } from '../../shared/ui/select-field/select-field';
 import { parserAcceptAttr, parserFormatOptions } from './import-format-options';
@@ -47,6 +48,7 @@ export class Accounts {
 
   protected readonly activeId = this.activePortfolio.activeId;
   protected readonly activeName = computed(() => this.activePortfolio.active()?.name ?? null);
+  protected readonly impliedNote = impliedContributionsNote;
 
   protected readonly accounts = signal<AccountSummary[]>([]);
   protected readonly listStatus = signal<ListStatus>('idle');

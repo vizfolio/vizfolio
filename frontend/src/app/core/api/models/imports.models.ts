@@ -50,6 +50,12 @@ export interface AccountImportResult {
   skipped: number;
   failed: number;
   failures: PortfolioImportFailure[];
+  /**
+   * Contributions the account's history implies but never recorded (purchases with no deposit),
+   * stored as "Implied contribution" ledger rows. Totals for the whole account after this import.
+   */
+  impliedContributions: number;
+  impliedContributionsAmount: number;
 }
 
 /**

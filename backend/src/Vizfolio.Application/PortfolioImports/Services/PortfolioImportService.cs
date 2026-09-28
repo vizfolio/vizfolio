@@ -13,15 +13,18 @@ public sealed class PortfolioImportService : IPortfolioImportService
 {
     private readonly IAppDbContext _db;
     private readonly IEnumerable<IPortfolioFileParser> _parsers;
+    private readonly IImpliedContributionService _impliedContributions;
     private readonly ILogger<PortfolioImportService> _logger;
 
     public PortfolioImportService(
         IAppDbContext db,
         IEnumerable<IPortfolioFileParser> parsers,
+        IImpliedContributionService impliedContributions,
         ILogger<PortfolioImportService> logger)
     {
         _db = db;
         _parsers = parsers;
+        _impliedContributions = impliedContributions;
         _logger = logger;
     }
 
@@ -67,6 +70,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
         if (HasPendingChanges())
             await _db.SaveChangesAsync(cancellationToken);
+
+        accountResult = await WithImpliedContributionsAsync(accountResult, cancellationToken);
 
         stopwatch.Stop();
         return new PortfolioImportResult(
@@ -131,6 +136,9 @@ public sealed class PortfolioImportService : IPortfolioImportService
         if (HasPendingChanges())
             await _db.SaveChangesAsync(cancellationToken);
 
+        for (var i = 0; i < perAccountResults.Count; i++)
+            perAccountResults[i] = await WithImpliedContributionsAsync(perAccountResults[i], cancellationToken);
+
         stopwatch.Stop();
         _logger.LogInformation(
             "Imported {Inserted} transactions across {AccountCount} accounts in portfolio {PortfolioId} from {Source}",
@@ -156,7 +164,10 @@ public sealed class PortfolioImportService : IPortfolioImportService
         var existingRows = accountCreated
             ? []
             : await _db.AccountTransactions
-                .Where(t => t.AccountId == account.AccountId)
+                // Implied contributions are derived, not imported: a real deposit arriving later must never
+                // be skipped as a "duplicate" of one (the sync then retires the implied row).
+                .Where(t => t.AccountId == account.AccountId
+                            && t.SourceSystem != ImpliedContributionService.SourceSystem)
                 .Select(t => new { t.SourceSystem, t.ExternalId, t.TradeDate, t.Ticker, t.Quantity, t.Amount })
                 .ToListAsync(cancellationToken);
 
@@ -261,6 +272,21 @@ public sealed class PortfolioImportService : IPortfolioImportService
             Skipped: skipped,
             Failed: failures.Count,
             Failures: failures);
+    }
+
+    /// <summary>
+    /// Recomputes the account's implied contributions now that its imported rows are saved, and reports
+    /// them on the result (see <see cref="IImpliedContributionService.SyncForAccountAsync"/>).
+    /// </summary>
+    private async Task<AccountImportResult> WithImpliedContributionsAsync(
+        AccountImportResult result, CancellationToken cancellationToken)
+    {
+        var implied = await _impliedContributions.SyncForAccountAsync(result.AccountId, cancellationToken);
+        return result with
+        {
+            ImpliedContributions = implied.Count,
+            ImpliedContributionsAmount = implied.TotalAmount,
+        };
     }
 
     private async Task ImportPositionSnapshotsAsync(

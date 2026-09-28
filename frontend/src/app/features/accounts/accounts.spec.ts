@@ -46,6 +46,8 @@ const IMPORT_RESULT: PortfolioImportResult = {
       skipped: 0,
       failed: 0,
       failures: [],
+      impliedContributions: 0,
+      impliedContributionsAmount: 0,
     },
   ],
   duration: 'PT0.2S',
