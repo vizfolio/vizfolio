@@ -13,6 +13,7 @@ import {
 import {
   HistoryCoverageResponse,
   OpeningBalanceResponse,
+  OpeningPositionsResponse,
   SetOpeningBalanceRequest,
 } from './models/coverage.models';
 import { HoldingRow } from './models/holdings.models';
@@ -231,6 +232,16 @@ export class PortfolioApiService {
   ): Observable<HistoryCoverageResponse> {
     return this.http.get<HistoryCoverageResponse>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/history-coverage`,
+    );
+  }
+
+  /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/opening-positions */
+  getOpeningPositions(
+    portfolioId: string,
+    accountId: string,
+  ): Observable<OpeningPositionsResponse> {
+    return this.http.get<OpeningPositionsResponse>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/opening-positions`,
     );
   }
 

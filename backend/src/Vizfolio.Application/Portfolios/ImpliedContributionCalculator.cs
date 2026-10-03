@@ -51,13 +51,21 @@ public static class ImpliedContributionCalculator
     /// <summary>Shortfalls at or below this (rounding cents, interest timing) are ignored.</summary>
     public const decimal DefaultTolerance = 1m;
 
+    /// <param name="rows">The account's imported rows.</param>
+    /// <param name="tolerance">Shortfalls at or below this are ignored.</param>
+    /// <param name="openingCash">
+    /// Cash already in the account before its first row — non-zero only when the imported history is partial and
+    /// the broker's statements show cash held before it (see AccountStateEngine.OpeningCashSeed). Purchases paid
+    /// from it are not outside money.
+    /// </param>
     public static IReadOnlyList<ImpliedContribution> Find(
-        IEnumerable<CashLedgerRow> rows, decimal tolerance = DefaultTolerance)
-        => Roll(rows, tolerance).Contributions;
+        IEnumerable<CashLedgerRow> rows, decimal tolerance = DefaultTolerance, decimal openingCash = 0m)
+        => Roll(rows, tolerance, openingCash).Contributions;
 
     /// <summary>The cash the ledger implies is left in the account after all rows (with implied top-ups).</summary>
-    public static decimal EndingCash(IEnumerable<CashLedgerRow> rows, decimal tolerance = DefaultTolerance)
-        => Roll(rows, tolerance).Cash;
+    public static decimal EndingCash(
+        IEnumerable<CashLedgerRow> rows, decimal tolerance = DefaultTolerance, decimal openingCash = 0m)
+        => Roll(rows, tolerance, openingCash).Cash;
 
     /// <summary>
     /// Tickers the account treats as its settlement fund: any ticker seen on a "Sweep" row. This keys off
@@ -79,6 +87,13 @@ public static class ImpliedContributionCalculator
     {
         if (IsSettlementFund(row, settlementTickers))
         {
+            // An older fund-company account records new money as a purchase of the money-market fund itself,
+            // with a positive amount (that era's sign for every purchase) and no deposit row. That is money from
+            // outside, so it spends cash like any purchase and surfaces as an implied contribution. A sweep into
+            // the fund from cash is reported with a negative amount (or no quantity) and stays neutral.
+            if (row.Type == TransactionType.Buy && row.Amount > 0m && row.Quantity is > 0m)
+                return -row.Amount;
+
             // Cash ↔ settlement fund is cash ↔ cash; only its income adds to what the account can spend.
             return row.Type is TransactionType.Dividend or TransactionType.Interest or TransactionType.CapitalGain
                 ? row.Amount
@@ -138,7 +153,7 @@ public static class ImpliedContributionCalculator
         => !string.IsNullOrWhiteSpace(row.Ticker) && row.Quantity is { } q && q != 0m;
 
     private static (IReadOnlyList<ImpliedContribution> Contributions, decimal Cash) Roll(
-        IEnumerable<CashLedgerRow> rows, decimal tolerance)
+        IEnumerable<CashLedgerRow> rows, decimal tolerance, decimal openingCash)
     {
         ArgumentNullException.ThrowIfNull(rows);
 
@@ -146,7 +161,7 @@ public static class ImpliedContributionCalculator
         var settlementTickers = SettlementTickers(all);
 
         var contributions = new List<ImpliedContribution>();
-        var cash = 0m;
+        var cash = openingCash;
         foreach (var day in all.GroupBy(r => r.CashDate).OrderBy(g => g.Key))
         {
             var movements = day.Select(r => new CashMovement(r, CashEffect(r, settlementTickers))).ToList();

@@ -1,9 +1,9 @@
 <form class="opening" (submit)="$event.preventDefault(); submit()">
   <p class="intro">
-    Record positions held on a chosen date. Vizfolio creates opening-balance snapshots so
-    performance before your earliest imported statement is based on real values, not estimates.
-    A holding is complete once it has a market value — enter one directly, or a unit price and
-    we'll derive it from the units.
+    Vizfolio works out what the account held before its first imported transaction from your
+    broker's statements. Positions it found are filled in below; correct them if they're wrong, and
+    fill in any it couldn't work out. A holding is complete once it has a market value — enter one
+    directly, or a unit price and we'll derive it from the units. Use <code>$CASH</code> for cash.
   </p>
 
   <div class="top-fields">

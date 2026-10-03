@@ -274,4 +274,38 @@ public sealed class ImpliedContributionCalculatorTests
 
         ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem().Amount.ShouldBe(1000m);
     }
+
+    [Fact]
+    public void Money_bought_straight_into_the_money_market_fund_is_an_implied_contribution()
+    {
+        // An old fund-company account: each contribution is a positive-amount purchase of the money-market
+        // (settlement) fund, with no deposit row. Later a sweep moves the money out to buy an ETF. The money came
+        // from outside, so each purchase is implied — not invisible because the fund doubles as cash.
+        var rows = new[]
+        {
+            Row(Day1, TransactionType.Buy, 200m, quantity: 200m, ticker: "SETTLE"),
+            Row(Day2, TransactionType.Buy, 200m, quantity: 200m, ticker: "SETTLE"),
+            Row(Day3, TransactionType.Other, 400m, sourceType: "Sweep out"),
+            Row(Day3, TransactionType.Other, 400m, quantity: -400m, ticker: "SETTLE", sourceType: "Sweep"),
+            Row(Day3, TransactionType.Buy, -400m, quantity: 4m, ticker: "ETF"),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows);
+
+        implied.Select(c => (c.Date, c.Amount)).ShouldBe(new[] { (Day1, 200m), (Day2, 200m) });
+    }
+
+    [Fact]
+    public void A_sweep_into_the_money_market_fund_reported_as_a_purchase_stays_neutral()
+    {
+        // A QFX reports cash moving into the settlement fund as a Buy with a negative amount: it's cash ↔ cash.
+        var rows = new[]
+        {
+            Row(Day1, TransactionType.Deposit, 500m),
+            Row(Day2, TransactionType.Buy, -500m, quantity: 500m, ticker: "SETTLE"),
+            Row(Day2, TransactionType.Other, -500m, ticker: "SETTLE", sourceType: "Sweep in"),
+        };
+
+        ImpliedContributionCalculator.Find(rows).ShouldBeEmpty();
+    }
 }

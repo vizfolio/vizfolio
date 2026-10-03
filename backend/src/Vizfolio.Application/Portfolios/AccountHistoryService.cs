@@ -1,16 +1,22 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Domain.Portfolios;
 
 namespace Vizfolio.Application.Portfolios;
 
 public sealed class AccountHistoryService : IAccountHistoryService
 {
-    private readonly IAppDbContext _db;
+    /// <summary>Symbol that addresses an account's cash in an opening balance.</summary>
+    public const string CashSymbol = "$CASH";
 
-    public AccountHistoryService(IAppDbContext db)
+    private readonly IAppDbContext _db;
+    private readonly AccountValuationLoader _valuationLoader;
+
+    public AccountHistoryService(IAppDbContext db, AccountValuationLoader valuationLoader)
     {
         _db = db;
+        _valuationLoader = valuationLoader;
     }
 
     public async Task<HistoryCoverageResult?> GetCoverageAsync(
@@ -78,7 +84,16 @@ public sealed class AccountHistoryService : IAccountHistoryService
             }
         }
 
-        var hasGap = firstTx.HasValue && (earliestSnap is null || firstTx.Value < earliestSnap.Value);
+        // Starting positions are derived from the broker's statements (rolled back over the ledger), so a history
+        // that starts mid-life needs no manual opening balance. A gap remains only where that derivation fails:
+        // rolling a statement back gives a negative position, i.e. the ledger and the broker disagree.
+        var hasGap = false;
+        if (firstTx.HasValue)
+        {
+            var loaded = await _valuationLoader.LoadAsync(
+                [accountId], DateOnly.MaxValue, cancellationToken, includePrices: false);
+            hasGap = loaded.Engines[accountId].Openings.Any(o => o.Class == OpeningClass.Inconsistent);
+        }
         var suggested = firstTx.HasValue ? firstTx.Value.AddDays(-1) : (DateOnly?)null;
 
         return new HistoryCoverageResult(
@@ -172,6 +187,20 @@ public sealed class AccountHistoryService : IAccountHistoryService
         CancellationToken cancellationToken)
     {
         var normalized = symbol.Trim().ToUpperInvariant();
+
+        // The account's cash has one holding of its own, valued with (and anchoring) the settlement fund's cash.
+        if (normalized == CashSymbol)
+        {
+            var cash = await _db.AccountHoldings.FirstOrDefaultAsync(
+                h => h.AccountId == accountId && h.Kind == AccountHoldingKind.Cash, cancellationToken);
+            if (cash is not null) return cash;
+
+            cash = new AccountHolding(accountId, AccountHoldingKind.Cash);
+            cash.SetIdentifiers(CashSymbol, name: "Cash", isin: null, cusip: null);
+            cash.SetCurrency(currencyCode);
+            _db.AccountHoldings.Add(cash);
+            return cash;
+        }
 
         var existing = await _db.AccountHoldings
             .FirstOrDefaultAsync(

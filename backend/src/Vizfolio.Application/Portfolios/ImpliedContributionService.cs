@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Domain.Portfolios;
 
 namespace Vizfolio.Application.Portfolios;
@@ -43,8 +44,13 @@ public sealed class ImpliedContributionService : IImpliedContributionService
     public const string SourceType = "Implied contribution";
 
     private readonly IAppDbContext _db;
+    private readonly AccountValuationLoader _valuationLoader;
 
-    public ImpliedContributionService(IAppDbContext db) => _db = db;
+    public ImpliedContributionService(IAppDbContext db, AccountValuationLoader valuationLoader)
+    {
+        _db = db;
+        _valuationLoader = valuationLoader;
+    }
 
     public async Task<ImpliedContributionPreview?> PreviewForAccountAsync(
         Guid portfolioId, Guid accountId, CancellationToken cancellationToken)
@@ -55,9 +61,10 @@ public sealed class ImpliedContributionService : IImpliedContributionService
         if (!inScope) return null;
 
         var rows = await LoadImportedRowsAsync(accountId, cancellationToken);
+        var openingCash = await OpeningCashAsync(accountId, cancellationToken);
 
         const decimal tolerance = ImpliedContributionCalculator.DefaultTolerance;
-        var contributions = ImpliedContributionCalculator.Find(rows, tolerance);
+        var contributions = ImpliedContributionCalculator.Find(rows, tolerance, openingCash);
 
         var byYear = contributions
             .GroupBy(c => c.Date.Year)
@@ -69,7 +76,7 @@ public sealed class ImpliedContributionService : IImpliedContributionService
             accountId,
             tolerance,
             contributions.Sum(c => c.Amount),
-            ImpliedContributionCalculator.EndingCash(rows, tolerance),
+            ImpliedContributionCalculator.EndingCash(rows, tolerance, openingCash),
             byYear,
             contributions);
     }
@@ -78,7 +85,8 @@ public sealed class ImpliedContributionService : IImpliedContributionService
         Guid accountId, CancellationToken cancellationToken)
     {
         var rows = await LoadImportedRowsAsync(accountId, cancellationToken);
-        var desired = ImpliedContributionCalculator.Find(rows)
+        var openingCash = await OpeningCashAsync(accountId, cancellationToken);
+        var desired = ImpliedContributionCalculator.Find(rows, openingCash: openingCash)
             .ToDictionary(c => ExternalIdFor(c.Date), c => c);
 
         var existing = await _db.AccountTransactions
@@ -118,6 +126,17 @@ public sealed class ImpliedContributionService : IImpliedContributionService
             .Select(t => new CashLedgerRow(
                 t.TradeDate, t.Type, t.Amount, t.Quantity, t.Ticker, t.SourceType, t.SettlementDate))
             .ToListAsync(cancellationToken);
+
+    /// <summary>
+    /// Cash the account already held before its imported history, derived from the broker's statements over the
+    /// imported rows only (Vizfolio's own implied rows never feed back in). Zero for a complete history.
+    /// </summary>
+    private async Task<decimal> OpeningCashAsync(Guid accountId, CancellationToken cancellationToken)
+    {
+        var loaded = await _valuationLoader.LoadAsync(
+            [accountId], DateOnly.MaxValue, cancellationToken, includeImplied: false, includePrices: false);
+        return loaded.Engines.TryGetValue(accountId, out var engine) ? engine.OpeningCashSeed : 0m;
+    }
 
     // One implied contribution per trading day at most, so the date is a stable, unique key.
     private static string ExternalIdFor(DateOnly date) => $"implied-{date:yyyy-MM-dd}";

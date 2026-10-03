@@ -104,6 +104,17 @@ public sealed class AccountTransaction
         Memo = string.IsNullOrWhiteSpace(memo) ? null : memo.Trim();
     }
 
+    /// <summary>
+    /// Re-applies the import's normalized type when a parser now maps the broker's label differently (e.g. after
+    /// a mapping fix). Only the import pipeline calls this — never a user edit — so a re-import is enough to
+    /// correct rows already stored.
+    /// </summary>
+    public void Reclassify(TransactionType type, string? sourceType)
+    {
+        Type = type;
+        SetSourceType(sourceType);
+    }
+
     public void SetSourceType(string? sourceType)
     {
         SourceType = string.IsNullOrWhiteSpace(sourceType) ? null : sourceType.Trim();

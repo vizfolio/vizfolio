@@ -16,7 +16,8 @@ internal static class PerformanceMapping
             ToSeries(result.Series));
 
     private static PerformanceBalance ToBalance(PerformanceBalanceResult r) =>
-        new(r.Value, r.IsComplete, r.SnapshotAsOf, r.HoldingsCovered, r.HoldingsMissingSnapshot);
+        new(r.Value, r.IsComplete, r.SnapshotAsOf, r.HoldingsCovered, r.HoldingsMissingSnapshot,
+            r.Missing.Select(m => new PerformanceMissing(m.AccountId, m.HoldingId, m.Symbol, m.Cause)).ToList());
 
     private static PerformanceContributions ToContributions(PerformanceContributionsResult c) =>
         new(c.Net, c.Deposits, c.Withdrawals, c.Count);

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Application.Portfolios;
 using Vizfolio.Infrastructure.Extracts;
 using Vizfolio.Infrastructure.Persistence;
 using Vizfolio.Infrastructure.Pricing;
@@ -20,6 +21,10 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddExtracts(configuration);
         services.AddPricing(configuration);
+
+        // Valuation tunables from configuration (replaces AddApplication's defaults when the section exists).
+        var valuation = configuration.GetSection(ValuationOptions.SectionName).Get<ValuationOptions>();
+        if (valuation is not null) services.AddSingleton(valuation);
 
         return services;
     }

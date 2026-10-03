@@ -352,7 +352,18 @@ public sealed class QfxFileParser : IPortfolioFileParser
             SelectText(node, ".//SECID/UNIQUEIDTYPE"),
             securityList);
 
+        // TFERACTION gives the direction (IN/OUT); brokers don't reliably sign UNITS, so a transfer out must
+        // never add shares.
         var units = ParseDecimal(SelectText(node, "UNITS"));
+        var action = SelectText(node, "TFERACTION")?.ToUpperInvariant();
+        if (units is { } u)
+            units = action switch
+            {
+                "OUT" => -Math.Abs(u),
+                "IN" => Math.Abs(u),
+                _ => u,
+            };
+        var unitPrice = ParseDecimal(SelectText(node, "UNITPRICE"));
 
         return new ParsedTransaction(
             ExternalId: fitId,
@@ -362,7 +373,7 @@ public sealed class QfxFileParser : IPortfolioFileParser
             Ticker: mappedTicker,
             Cusip: mappedCusip,
             Quantity: units,
-            Price: null,
+            Price: unitPrice,
             Amount: 0m,
             Fees: null,
             CurrencyCode: null,

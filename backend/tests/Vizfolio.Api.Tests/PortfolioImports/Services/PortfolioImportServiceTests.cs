@@ -1,3 +1,4 @@
+using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Application.Portfolios;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -497,16 +498,44 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task ImportToPortfolioAsync_skips_position_with_unresolvable_ticker()
+    public async Task ImportToPortfolioAsync_keeps_positions_and_trades_for_tickers_reference_data_does_not_know()
     {
+        // Regression (F3): with no Security/Fund for VOO or AAPL, their rows used to stay unlinked and their
+        // positions were dropped, so both vanished from every balance. They now get unclassified holdings.
         await using var ctx = await TestDbContext.CreateAsync();
         var portfolio = await SeedPortfolioAsync(ctx);
-        // No Security row for VOO / AAPL — positions cannot resolve.
         var service = NewService(ctx);
 
         await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(QfxWithPositions), "unresolved.qfx", CancellationToken.None);
 
-        (await ctx.Db.AccountHoldingSnapshots.AsNoTracking().CountAsync()).ShouldBe(0);
+        var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
+        holdings.Select(h => h.Symbol).ShouldBe(new[] { "AAPL", "VOO" }, ignoreOrder: true);
+        holdings.ShouldAllBe(h => h.Kind == AccountHoldingKind.Other);
+        (await ctx.Db.AccountHoldingSnapshots.AsNoTracking().CountAsync()).ShouldBe(2);
+        var buy = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync(t => t.Ticker == "VOO");
+        buy.AccountHoldingId.ShouldBe(holdings.Single(h => h.Symbol == "VOO").AccountHoldingId);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_links_a_cusip_only_row_to_a_holding_keyed_by_cusip()
+    {
+        // A QFX row whose CUSIP isn't in the file's SECLIST has no ticker; it still moves shares, so it gets a
+        // holding (one per CUSIP) rather than being left out of valuation.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        ParsedTransaction CusipBuy(DateOnly date, decimal qty) =>
+            new(ExternalId: null, Type: TransactionType.Buy, TradeDate: date, SettlementDate: null,
+                Ticker: null, Cusip: "922908769", Quantity: qty, Price: null, Amount: -qty * 100m,
+                Fees: null, CurrencyCode: null, Memo: null);
+
+        await ServiceFor(ctx, new LedgerStubParser("SRC", [CusipBuy(new DateOnly(2025, 1, 6), 2m), CusipBuy(new DateOnly(2025, 2, 3), 3m)]))
+            .ImportToAccountAsync(account.AccountId, Stream("c"), "c.dat", CancellationToken.None, "SRC");
+
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.Cusip.ShouldBe("922908769");
+        holding.Kind.ShouldBe(AccountHoldingKind.Other);
+        (await ctx.Db.AccountTransactions.AsNoTracking().ToListAsync())
+            .ShouldAllBe(t => t.AccountHoldingId == holding.AccountHoldingId);
     }
 
     [Fact]
@@ -869,9 +898,76 @@ public sealed class PortfolioImportServiceTests
             .ShouldBe(new[] { ("A-1", 1, 1000m), ("B-2", 1, 250m) });
     }
 
+    [Fact]
+    public async Task Reimporting_the_same_file_after_a_mapping_fix_reclassifies_the_stored_rows()
+    {
+        // A label the parser used to map to Other ("Reinvestment (LT gain)") is now mapped to Reinvest.
+        // Re-uploading the file must correct the stored row in place — not skip it as a duplicate forever.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var before = LabelledReinvestment(TransactionType.Other);
+        var after = LabelledReinvestment(TransactionType.Reinvest);
+
+        await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [before]))
+            .ImportToAccountAsync(account.AccountId, Stream("v1"), "report.xlsx", CancellationToken.None, "VANGUARD");
+        var second = await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [after]))
+            .ImportToAccountAsync(account.AccountId, Stream("v1"), "report.xlsx", CancellationToken.None, "VANGUARD");
+
+        second.Accounts[0].Inserted.ShouldBe(0);
+        second.Accounts[0].Reclassified.ShouldBe(1);
+        var stored = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync(t => t.AccountId == account.AccountId);
+        stored.Type.ShouldBe(TransactionType.Reinvest);
+        stored.SourceType.ShouldBe("Reinvestment (LT gain)");
+    }
+
+    [Fact]
+    public async Task A_newer_export_of_the_same_source_also_reclassifies_rows_it_overlaps()
+    {
+        // A later report lists more rows, so the overlapping row sits at a different position (a different
+        // synthetic id): it's matched by its fingerprint instead, and still corrected.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var newer = Buy("VTSAX", new DateOnly(2025, 1, 6), quantity: 2m, amount: -280m);
+
+        await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [LabelledReinvestment(TransactionType.Other)]))
+            .ImportToAccountAsync(account.AccountId, Stream("v1"), "old.xlsx", CancellationToken.None, "VANGUARD");
+        var second = await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [newer, LabelledReinvestment(TransactionType.Reinvest)]))
+            .ImportToAccountAsync(account.AccountId, Stream("v2"), "new.xlsx", CancellationToken.None, "VANGUARD");
+
+        second.Accounts[0].Inserted.ShouldBe(1);
+        second.Accounts[0].Reclassified.ShouldBe(1);
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync(t => t.Type == TransactionType.Reinvest)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_matching_row_from_a_different_source_is_never_reclassified()
+    {
+        // Sources legitimately label the same event differently; one source's mapping must not overwrite
+        // another's row.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+
+        await ServiceFor(ctx, new LedgerStubParser("SRCA", [LabelledReinvestment(TransactionType.Other)]))
+            .ImportToAccountAsync(account.AccountId, Stream("a"), "a.dat", CancellationToken.None, "SRCA");
+        var second = await ServiceFor(ctx, new LedgerStubParser("SRCB", [LabelledReinvestment(TransactionType.Reinvest)]))
+            .ImportToAccountAsync(account.AccountId, Stream("b"), "b.dat", CancellationToken.None, "SRCB");
+
+        second.Accounts[0].Skipped.ShouldBe(1);
+        second.Accounts[0].Reclassified.ShouldBe(0);
+        (await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync()).Type.ShouldBe(TransactionType.Other);
+    }
+
+    private static ParsedTransaction LabelledReinvestment(TransactionType type) =>
+        new(ExternalId: null, Type: type, TradeDate: new DateOnly(2024, 12, 20), SettlementDate: new DateOnly(2024, 12, 20),
+            Ticker: "VBTLX", Cusip: null, Quantity: 2m, Price: 12.5m, Amount: -25m,
+            Fees: null, CurrencyCode: null, Memo: null, SourceType: "Reinvestment (LT gain)");
+
+    private static PortfolioImportService ServiceFor(TestDbContext ctx, params IPortfolioFileParser[] parsers)
+        => new(ctx.Db, parsers, NoImpliedContributions.Instance, NullLogger<PortfolioImportService>.Instance);
+
     private static PortfolioImportService ServiceWithImpliedContributions(
         TestDbContext ctx, params IPortfolioFileParser[] parsers)
-        => new(ctx.Db, parsers, new ImpliedContributionService(ctx.Db), NullLogger<PortfolioImportService>.Instance);
+        => new(ctx.Db, parsers, new ImpliedContributionService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions())), NullLogger<PortfolioImportService>.Instance);
 
     private static Task<List<AccountTransaction>> ImpliedRowsAsync(TestDbContext ctx, Guid accountId)
         => ctx.Db.AccountTransactions.AsNoTracking()

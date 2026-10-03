@@ -184,6 +184,8 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
             "sell" or "sell (exchange)" or "share conversion (outgoing)" => TransactionType.Sell,
             "dividend" => TransactionType.Dividend,
             "reinvestment" => TransactionType.Reinvest,
+            // Distribution reinvestments are labelled by kind, e.g. "Reinvestment (LT gain)" / "(ST gain)".
+            _ when t.StartsWith("reinvestment", StringComparison.Ordinal) => TransactionType.Reinvest,
             "interest" => TransactionType.Interest,
             "fee" => TransactionType.Fee,
             _ when t.StartsWith("capital gain", StringComparison.Ordinal) => TransactionType.CapitalGain,

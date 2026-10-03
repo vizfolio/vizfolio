@@ -362,15 +362,15 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         body.From.ShouldBe(new DateOnly(2025, 6, 1));
         body.To.ShouldBe(new DateOnly(2026, 6, 1));
         body.CurrencyCode.ShouldBe("USD");
-        body.EndingBalance.Value.ShouldBe(6255.00m); // 5255 (VOO) + 1000 (AAPL)
+        body.EndingBalance.Value.ShouldBe(8755.00m); // 5255 (VOO) + 1000 (AAPL) + 2500 cash (7500 deposited − 5000 VOO)
         body.EndingBalance.IsComplete.ShouldBeTrue();
         body.EndingBalance.SnapshotAsOf.ShouldBe(new DateOnly(2026, 6, 1));
-        body.EndingBalance.HoldingsCovered.ShouldBe(2);
+        body.EndingBalance.HoldingsCovered.ShouldBe(3); // VOO, AAPL and the account's cash
         body.EndingBalance.HoldingsMissingSnapshot.ShouldBe(0);
     }
 
     [Fact]
-    public async Task GET_portfolio_performance_before_account_existed_starts_at_zero_complete_and_returns_compute()
+    public async Task GET_portfolio_performance_before_the_imported_history_reports_positions_held_before_it_as_unknown()
     {
         await EnsurePerfSecuritiesAsync();
         var portfolio = await CreatePortfolioAsync();
@@ -384,21 +384,16 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
 
-        // The account's first activity is a deposit on 2025-10-01, so nothing was held at the 2025-06-01
-        // `from`: the starting balance is a legitimate $0 and complete (ledger roll-forward, no missing
-        // snapshot). Previously this reported incomplete — the §7 not-yet-held bug.
-        body!.StartingBalance.Value.ShouldBe(0m);
-        body.StartingBalance.IsComplete.ShouldBeTrue();
-        body.StartingBalance.SnapshotAsOf.ShouldBeNull();
-        body.StartingBalance.HoldingsMissingSnapshot.ShouldBe(0);
-
-        // With an honest $0 start and a known end, the windowed return now computes instead of exploding
-        // or returning null: $7500 deposited, now worth $6255 → a negative period return.
-        body.Returns.TimeWeighted.Rate.ShouldNotBeNull();
-        body.Returns.TimeWeighted.Rate!.Value.ShouldBeLessThan(0m);
-        body.Returns.TimeWeighted.Method.ShouldBe("ModifiedDietz");
-        body.Returns.MoneyWeighted.Rate.ShouldNotBeNull();
-        body.Returns.MoneyWeighted.Method.ShouldBe("XIRR");
+        // The account's first activity is a deposit on 2025-10-01, and the statement shows 5 AAPL that no imported
+        // trade bought: AAPL was held before the history starts, so at the 2025-06-01 `from` its value is unknown
+        // (not $0). VOO, bought in the history, wasn't held yet. The return is an honest null, with the reason.
+        body!.StartingBalance.IsComplete.ShouldBeFalse();
+        body.StartingBalance.HoldingsMissingSnapshot.ShouldBe(1);
+        var missing = body.StartingBalance.Missing.ShouldHaveSingleItem();
+        missing.Symbol.ShouldBe("AAPL");
+        missing.Cause.ShouldBe("BeforeHistory");
+        body.Returns.TimeWeighted.Rate.ShouldBeNull();
+        body.Returns.TimeWeighted.Reason.ShouldBe("IncompleteStartingBalance");
 
         // The QFX includes a $7500 ACH deposit wrapped in <INVBANKTRAN> — must surface as a Deposit contribution.
         body.Contributions.Net.ShouldBe(7500m);
@@ -423,7 +418,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<PortfolioPerformanceResponse>();
-        body!.EndingBalance.Value.ShouldBe(6255.00m);
+        body!.EndingBalance.Value.ShouldBe(8755.00m); // positions + the deposit's uninvested $2,500
     }
 
     [Fact]
@@ -465,7 +460,7 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     }
 
     [Fact]
-    public async Task GET_history_coverage_flags_gap_after_import_without_opening_balance()
+    public async Task GET_history_coverage_reports_no_gap_after_import_because_starting_positions_are_derived()
     {
         await EnsurePerfSecuritiesAsync();
         var portfolio = await CreatePortfolioAsync();
@@ -479,7 +474,9 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<HistoryCoverageResponse>();
         body.ShouldNotBeNull();
-        body.HasHistoryGap.ShouldBeTrue();
+        // The QFX covers only part of the account's life, but its statement (VOO 10, AAPL 5) rolled back over the
+        // imported trades gives the starting positions — no manual opening balance is needed.
+        body.HasHistoryGap.ShouldBeFalse();
         body.FirstTransactionDate.ShouldNotBeNull();
         body.EarliestSnapshotDate.ShouldBe(new DateOnly(2026, 6, 1));
         body.SuggestedOpeningDate.ShouldBe(body.FirstTransactionDate!.Value.AddDays(-1));

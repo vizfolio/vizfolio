@@ -12,7 +12,7 @@ namespace Vizfolio.Application.Pricing;
 /// <summary>
 /// Fetches daily close prices (and split events) for every held holding in the database and upserts them
 /// into <c>PriceHistory</c> / <c>CorporateAction</c>. Targets are derived from the ledger: one price series
-/// per distinct security/symbol, over <c>[earliest trade date, to]</c>, minus dates already stored. Prices
+/// per distinct security/symbol, from a week before its account's first trade to <c>to</c>, minus dates already stored. Prices
 /// are stored on the raw/as-traded basis to match the ledger — see docs/price-history-valuation.md §5.
 /// </summary>
 public sealed class PriceHistoryImporter : IPriceHistoryImporter
@@ -56,35 +56,34 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var from = options.From ?? target.EarliestTradeDate;
+                var from = options.From ?? target.EarliestNeeded;
                 if (from > to) { continue; }
 
-                // Only fetch the gap after what we already have (unless forced): start at the latest
-                // stored date so the most recent row is refreshed in case the provider corrected it.
-                var effectiveFrom = from;
-                if (!options.Force && target.LatestStored is { } latest && latest >= from)
-                    effectiveFrom = latest;
-                if (effectiveFrom > to) { continue; }
-
-                var request = new PriceSeriesRequest(target.QuerySymbol, target.Exchange, effectiveFrom, to);
-                var source = _selector.Select(request);
-                if (source is null)
+                // Fetch only what's missing (unless forced): the gap before the earliest stored close — e.g. older
+                // history imported later, or positions held before the imported history — and the tail from the
+                // latest stored close (refetched in case the provider corrected it).
+                foreach (var (rangeFrom, rangeTo) in MissingRanges(from, to, target, options.Force))
                 {
-                    failures.Add(new ImportFailure(target.QuerySymbol, "No price source supports this symbol."));
-                    continue;
-                }
+                    var request = new PriceSeriesRequest(target.QuerySymbol, target.Exchange, rangeFrom, rangeTo);
+                    var source = _selector.Select(request);
+                    if (source is null)
+                    {
+                        failures.Add(new ImportFailure(target.QuerySymbol, "No price source supports this symbol."));
+                        break;
+                    }
 
-                var result = await source.GetDailyClosesAsync(request, cancellationToken);
-                if (result is null)
-                {
-                    failures.Add(new ImportFailure(target.QuerySymbol, "Price source returned no series."));
-                    continue;
-                }
+                    var result = await source.GetDailyClosesAsync(request, cancellationToken);
+                    if (result is null)
+                    {
+                        failures.Add(new ImportFailure(target.QuerySymbol, "Price source returned no series."));
+                        break;
+                    }
 
-                var (added, seen) = await UpsertAsync(target, result, source.Source, cancellationToken);
-                considered += result.Prices.Count;
-                upserted += added;
-                skipped += seen;
+                    var (added, seen) = await UpsertAsync(target, result, source.Source, cancellationToken);
+                    considered += result.Prices.Count;
+                    upserted += added;
+                    skipped += seen;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -108,6 +107,21 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             Failures: failures,
             DataCleaning: Array.Empty<DataCleaningEntry>(),
             Duration: stopwatch.Elapsed);
+    }
+
+    /// <summary>The date ranges to fetch for a series given what's already stored.</summary>
+    internal static IEnumerable<(DateOnly From, DateOnly To)> MissingRanges(
+        DateOnly from, DateOnly to, PriceTarget target, bool force)
+    {
+        if (force || target.EarliestStored is not { } earliest || target.LatestStored is not { } latest)
+        {
+            yield return (from, to);
+            yield break;
+        }
+
+        if (from < earliest) yield return (from, earliest.AddDays(-1));
+        var tailFrom = latest > from ? latest : from;
+        if (tailFrom <= to) yield return (tailFrom, to);
     }
 
     private async Task<(int Added, int Skipped)> UpsertAsync(
@@ -180,7 +194,7 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
         var holdings = await _db.AccountHoldings
             .AsNoTracking()
             .Where(h => h.Symbol != null)
-            .Select(h => new { h.AccountHoldingId, h.Symbol, h.SecurityId })
+            .Select(h => new { h.AccountHoldingId, h.AccountId, h.Symbol, h.SecurityId })
             .ToListAsync(cancellationToken);
 
         var tickerFilter = options.Tickers is { Count: > 0 }
@@ -189,13 +203,13 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
                 .Select(t => t.Trim().ToUpperInvariant()))
             : null;
 
-        // Earliest trade date per holding drives how far back to fetch.
-        var earliestByHolding = await _db.AccountTransactions
+        // How far back to fetch: from a week before the holding's *account* first trades. Positions held before
+        // the imported history (derived openings) are valued from the account's start, not the holding's first row.
+        var earliestByAccount = await _db.AccountTransactions
             .AsNoTracking()
-            .Where(t => t.AccountHoldingId != null)
-            .GroupBy(t => t.AccountHoldingId!.Value)
-            .Select(g => new { HoldingId = g.Key, Earliest = g.Min(t => t.TradeDate) })
-            .ToDictionaryAsync(x => x.HoldingId, x => x.Earliest, cancellationToken);
+            .GroupBy(t => t.AccountId)
+            .Select(g => new { AccountId = g.Key, Earliest = g.Min(t => t.TradeDate) })
+            .ToDictionaryAsync(x => x.AccountId, x => x.Earliest, cancellationToken);
 
         var byKey = new Dictionary<PriceSeriesKey, PriceTarget>();
         foreach (var h in holdings)
@@ -207,31 +221,30 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
                 ? new PriceSeriesKey(PriceSeriesKind.Security, sid, null)
                 : new PriceSeriesKey(PriceSeriesKind.Symbol, null, symbol);
 
-            var earliest = earliestByHolding.TryGetValue(h.AccountHoldingId, out var e) ? e : to;
+            var earliest = earliestByAccount.TryGetValue(h.AccountId, out var e) ? e.AddDays(-LeadDays) : to;
 
             if (byKey.TryGetValue(key, out var existing))
             {
-                if (earliest < existing.EarliestTradeDate)
-                    byKey[key] = existing with { EarliestTradeDate = earliest };
+                if (earliest < existing.EarliestNeeded)
+                    byKey[key] = existing with { EarliestNeeded = earliest };
             }
             else
             {
                 byKey[key] = new PriceTarget(
-                    key.Kind, key.SecurityId, key.SymbolKey, symbol, Exchange: null, earliest, LatestStored: null);
+                    key.Kind, key.SecurityId, key.SymbolKey, symbol, Exchange: null, earliest, EarliestStored: null, LatestStored: null);
             }
         }
 
-        // Attach existing coverage so each series only fetches the missing tail.
+        // Attach existing coverage so each series only fetches what's missing at either end.
         foreach (var key in byKey.Keys.ToList())
         {
             var target = byKey[key];
-            var latest = await (target.Kind == PriceSeriesKind.Security
-                    ? _db.PriceHistories.Where(p => p.SecurityId == target.SecurityId)
-                    : _db.PriceHistories.Where(p => p.SymbolKey == target.SymbolKey))
-                .Select(p => (DateOnly?)p.AsOf)
-                .OrderByDescending(d => d)
-                .FirstOrDefaultAsync(cancellationToken);
-            byKey[key] = target with { LatestStored = latest };
+            var stored = target.Kind == PriceSeriesKind.Security
+                ? _db.PriceHistories.Where(p => p.SecurityId == target.SecurityId)
+                : _db.PriceHistories.Where(p => p.SymbolKey == target.SymbolKey);
+            var earliestStored = await stored.Select(p => (DateOnly?)p.AsOf).OrderBy(d => d).FirstOrDefaultAsync(cancellationToken);
+            var latestStored = await stored.Select(p => (DateOnly?)p.AsOf).OrderByDescending(d => d).FirstOrDefaultAsync(cancellationToken);
+            byKey[key] = target with { EarliestStored = earliestStored, LatestStored = latestStored };
         }
 
         return byKey.Values.ToList();
@@ -239,12 +252,16 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
 
     private readonly record struct PriceSeriesKey(PriceSeriesKind Kind, Guid? SecurityId, string? SymbolKey);
 
-    private sealed record PriceTarget(
+    /// <summary>Days of prices fetched before an account's first trade, so its opening day always has a close.</summary>
+    private const int LeadDays = 7;
+
+    internal sealed record PriceTarget(
         PriceSeriesKind Kind,
         Guid? SecurityId,
         string? SymbolKey,
         string QuerySymbol,
         string? Exchange,
-        DateOnly EarliestTradeDate,
+        DateOnly EarliestNeeded,
+        DateOnly? EarliestStored,
         DateOnly? LatestStored);
 }

@@ -36,6 +36,22 @@ export interface PerformanceBalance {
   snapshotAsOf: string | null;
   holdingsCovered: number;
   holdingsMissingSnapshot: number;
+  /** Up to 10 holdings that couldn't be valued (a null symbol is the account's cash) and why. */
+  missing?: PerformanceMissing[];
+}
+
+export type PerformanceMissingCause =
+  | 'NoPrice'
+  | 'StalePrice'
+  | 'NegativePosition'
+  | 'MaterialMismatch'
+  | 'BeforeHistory';
+
+export interface PerformanceMissing {
+  accountId: string;
+  accountHoldingId: string | null;
+  symbol: string | null;
+  cause: PerformanceMissingCause | string;
 }
 
 /** Cash flows in/out over the period. Sign convention: deposits +, withdrawals -. */

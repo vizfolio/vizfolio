@@ -40,11 +40,16 @@ public sealed class ChainedSubPeriodTimeWeightedReturnCalculator : ITimeWeighted
             if (subDays <= 0)
                 return new ReturnResult(null, MethodName, BasisName, "InvalidSubPeriod");
 
+            // The period opens at the start of `from` (the starting balance is the close of the day before), so
+            // the first sub-period also owns flows dated `from`; later sub-periods start at a boundary's close and
+            // own only the flows after it.
+            var firstFlowDate = i == 0 ? startPoint.Date : startPoint.Date.AddDays(1);
+
             decimal netFlow = 0m;
             decimal weightedFlow = 0m;
             foreach (var cf in ctx.CashFlows)
             {
-                if (cf.Date <= startPoint.Date || cf.Date > endPoint.Date) continue;
+                if (cf.Date < firstFlowDate || cf.Date > endPoint.Date) continue;
                 netFlow += cf.Amount;
                 var dayFromStart = cf.Date.DayNumber - startPoint.Date.DayNumber;
                 var weight = (decimal)(subDays - dayFromStart) / subDays;

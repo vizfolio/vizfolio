@@ -183,8 +183,10 @@ public sealed class LedgerRelinkerTests
     }
 
     [Fact]
-    public async Task RelinkAsync_leaves_transaction_unlinked_when_no_match_found()
+    public async Task RelinkAsync_links_an_unrecognised_ticker_to_an_unclassified_holding()
     {
+        // No reference data knows MYSTERY, but its shares still need valuing (e.g. by symbol price history),
+        // so the row is linked to an unclassified (Other) holding instead of being left out.
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
 
@@ -196,10 +198,38 @@ public sealed class LedgerRelinkerTests
         var relinker = new LedgerRelinker(ctx.Db, NullLogger<LedgerRelinker>.Instance);
         var linked = await relinker.RelinkAsync();
 
-        linked.ShouldBe(0);
-        var stored = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync();
-        stored.AccountHoldingId.ShouldBeNull();
-        (await ctx.Db.AccountHoldings.AsNoTracking().AnyAsync()).ShouldBeFalse();
+        linked.ShouldBe(1);
+        var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        holding.Kind.ShouldBe(AccountHoldingKind.Other);
+        holding.Symbol.ShouldBe("MYSTERY");
+        (await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync()).AccountHoldingId.ShouldBe(holding.AccountHoldingId);
+    }
+
+    [Fact]
+    public async Task RelinkAsync_promotes_an_unclassified_holding_once_reference_data_recognises_it()
+    {
+        // The holding (and its row and snapshot) predate the Security import. Once VOO is known, the same holding
+        // is promoted in place — keeping its id so the row and snapshot stay attached — not duplicated.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var holding = new AccountHolding(account.AccountId, AccountHoldingKind.Other);
+        holding.SetIdentifiers("VOO", name: null, isin: null, cusip: null);
+        ctx.Db.AccountHoldings.Add(holding);
+        var tx = NewTransaction(account.AccountId, "ext-1");
+        tx.SetSecurityReference("VOO", null);
+        tx.LinkToHolding(holding.AccountHoldingId);
+        ctx.Db.AccountTransactions.Add(tx);
+        var security = new Security("0000102909", DateTimeOffset.UtcNow);
+        security.SetTickers(new[] { "VOO" });
+        ctx.Db.Securities.Add(security);
+        await ctx.Db.SaveChangesAsync();
+
+        await new LedgerRelinker(ctx.Db, NullLogger<LedgerRelinker>.Instance).RelinkAsync();
+
+        var stored = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
+        stored.AccountHoldingId.ShouldBe(holding.AccountHoldingId);
+        stored.Kind.ShouldBe(AccountHoldingKind.Security);
+        stored.SecurityId.ShouldBe(security.SecurityId);
     }
 
     private static AccountTransaction NewTransaction(Guid accountId, string externalId) =>

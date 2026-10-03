@@ -1,14 +1,15 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { catchError, map, of, switchMap } from 'rxjs';
+import { catchError, of, switchMap } from 'rxjs';
 
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import {
   OpeningBalanceHoldingInput,
   OpeningBalanceResponse,
+  OpeningPosition,
+  OpeningPositionsResponse,
 } from '../../../core/api/models/coverage.models';
-import { HoldingRow as HoldingDto } from '../../../core/api/models/holdings.models';
 import { DateField } from '../../../shared/ui/date-field/date-field';
 
 /** One editable holding row. Numeric fields are strings here and parsed on submit. */
@@ -38,22 +39,37 @@ function blankRow(): HoldingRow {
   };
 }
 
+/** Symbol the backend reads as the account's cash in an opening balance. */
+export const CASH_SYMBOL = '$CASH';
+
 /**
- * Seeds a row from a known holding: identity fields (symbol/currency/CUSIP) plus any values
- * already recorded in the snapshot at the opening date, so the user sees existing balances and
- * can complete or correct them. Missing values stay blank for the user to supply.
+ * Seeds a row from a derived starting position. A position held before the imported history is prefilled with
+ * what the broker's statement implies (the user just confirms or corrects it); one that can't be derived because
+ * the ledger and the statement disagree is left blank for the user to supply.
  */
-function rowFromHolding(holding: HoldingDto): HoldingRow {
+function rowFromPosition(position: OpeningPosition, symbol: string): HoldingRow {
+  if (position.class !== 'PreHistory') {
+    return { ...blankRow(), symbol };
+  }
   return {
     ...blankRow(),
-    symbol: holding.symbol ?? '',
-    currencyCode: holding.currencyCode ?? '',
-    cusip: holding.cusip ?? '',
-    units: numberToField(holding.quantity),
-    marketValue: numberToField(holding.marketValue),
-    unitPrice: numberToField(holding.unitPrice),
-    costBasis: numberToField(holding.costBasis),
+    symbol,
+    units: numberToField(position.quantity),
+    marketValue: numberToField(position.marketValue),
+    unitPrice: numberToField(position.unitPrice),
   };
+}
+
+/** The positions worth showing: held before the history, or impossible to derive. */
+function rowsFrom(response: OpeningPositionsResponse): HoldingRow[] {
+  const needsShowing = (p: OpeningPosition) => p.class === 'PreHistory' || p.class === 'Inconsistent';
+  const rows = response.holdings
+    .filter((p) => p.symbol && needsShowing(p))
+    .map((p) => rowFromPosition(p, p.symbol ?? ''));
+  if (needsShowing(response.cash)) {
+    rows.push(rowFromPosition(response.cash, CASH_SYMBOL));
+  }
+  return rows;
 }
 
 function numberToField(value: number | null): string {
@@ -61,8 +77,9 @@ function numberToField(value: number | null): string {
 }
 
 /**
- * Opening-balance form: records user-supplied snapshots at a chosen date to close a
- * partial-history gap. Rows are dynamic; only rows with a symbol are submitted.
+ * Opening-balance form: corrects the account's starting positions when the ones Vizfolio derives
+ * from the broker's statements are wrong or can't be derived. Rows are dynamic; only rows with a
+ * symbol are submitted. The cash row uses the `$CASH` symbol.
  */
 @Component({
   selector: 'app-opening-balance-form',
@@ -87,37 +104,25 @@ export class OpeningBalanceForm {
   protected readonly result = signal<OpeningBalanceResponse | null>(null);
 
   constructor() {
-    // Seed the form from the account's history gap: the suggested opening date and a row per
-    // holding valued at that date (existing snapshot values included). A failed prefetch falls
-    // back to the blank form so the user can still enter balances by hand.
+    // Seed the form with the starting positions Vizfolio derived from the broker's statements: the day
+    // before the first transaction, the positions held before the imported history (prefilled), and any it
+    // couldn't derive (blank). A failed prefetch falls back to the blank form so balances can still be
+    // entered by hand.
     toObservable(this.accountId)
       .pipe(
         switchMap((accountId) => {
           this.prefilling.set(true);
-          return this.api.getHistoryCoverage(this.portfolioId(), accountId).pipe(
-            switchMap((coverage) => {
-              const date = coverage.suggestedOpeningDate;
-              if (!date) {
-                return of({ date: null as string | null, holdings: [] as HoldingDto[] });
-              }
-              return this.api
-                .getAccountHoldings(this.portfolioId(), accountId, date)
-                .pipe(map((holdings) => ({ date, holdings })));
-            }),
-            catchError(() =>
-              of({ date: null as string | null, holdings: [] as HoldingDto[] }),
-            ),
-          );
+          return this.api
+            .getOpeningPositions(this.portfolioId(), accountId)
+            .pipe(catchError(() => of<OpeningPositionsResponse | null>(null)));
         }),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(({ date, holdings }) => {
-        if (date) {
-          this.asOf.set(date);
+      .subscribe((response) => {
+        if (response?.asOf) {
+          this.asOf.set(response.asOf);
         }
-        // Show every holding valued at the opening date, with any existing snapshot values,
-        // so each row carries a complete/incomplete status the user can act on.
-        const prefilled = holdings.filter((h) => h.symbol).map(rowFromHolding);
+        const prefilled = response ? rowsFrom(response) : [];
         this.rows.set(prefilled.length > 0 ? prefilled : [blankRow()]);
         this.prefilling.set(false);
       });

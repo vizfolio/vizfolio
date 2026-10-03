@@ -89,7 +89,7 @@ public sealed class AccountHoldingsAndLedgerEndpointTests : IClassFixture<Vizfol
             $"/api/portfolios/{portfolioId}/accounts/{accountId}/holdings");
 
         holdings.ShouldNotBeNull();
-        holdings.Count.ShouldBe(2);
+        holdings.Count.ShouldBe(3); // VOO, AAPL, and the account's cash (listed last)
 
         var voo = holdings.Single(h => h.Symbol == "VOO");
         voo.HasSnapshot.ShouldBeTrue();
@@ -98,6 +98,9 @@ public sealed class AccountHoldingsAndLedgerEndpointTests : IClassFixture<Vizfol
         voo.MarketValue.ShouldBe(5255.00m);
         voo.CostBasis.ShouldBe(5000.00m);
         voo.GainLoss.ShouldBe(255.00m);
+        voo.Status.ShouldBe("Valued");
+        voo.ValuationSource.ShouldBe("Snapshot");
+        voo.PriceAsOf.ShouldBe(new DateOnly(2026, 6, 1));
 
         var aapl = holdings.Single(h => h.Symbol == "AAPL");
         aapl.HasSnapshot.ShouldBeTrue();
@@ -107,18 +110,77 @@ public sealed class AccountHoldingsAndLedgerEndpointTests : IClassFixture<Vizfol
     }
 
     [Fact]
-    public async Task GET_holdings_before_snapshot_date_reports_no_valuation()
+    public async Task GET_holdings_before_any_activity_reports_positions_not_yet_held()
     {
         var (portfolioId, accountId) = await ImportPositionsAsync();
 
-        // asOf precedes the 2026-06-01 broker snapshot, so nothing is valued yet.
+        // asOf precedes the history. VOO was bought within it → not held yet, a true $0. AAPL appears on the
+        // statement with no trade → held before the history began → unknown there, not $0. No cash yet.
         var holdings = await _client.GetFromJsonAsync<List<HoldingResponse>>(
             $"/api/portfolios/{portfolioId}/accounts/{accountId}/holdings?asOf=2025-01-01");
 
         holdings.ShouldNotBeNull();
-        holdings.ShouldNotBeEmpty();
         holdings.ShouldAllBe(h => !h.HasSnapshot);
-        holdings.ShouldAllBe(h => h.MarketValue == null && h.GainLoss == null);
+        var voo = holdings.Single(h => h.Symbol == "VOO");
+        voo.Status.ShouldBe("NotHeld");
+        voo.MarketValue.ShouldBe(0m);
+        var aapl = holdings.Single(h => h.Symbol == "AAPL");
+        aapl.Status.ShouldBe("Missing");
+        aapl.MarketValue.ShouldBeNull();
+        holdings.ShouldNotContain(h => h.Kind == "Cash"); // no settlement fund and no cash yet → no cash row
+    }
+
+    [Fact]
+    public async Task GET_holdings_reports_the_accounts_uninvested_cash_as_a_cash_row()
+    {
+        var (portfolioId, accountId) = await ImportPositionsAsync();
+
+        // $7,500 deposited, $5,000 spent on VOO: $2,500 is still in the account as cash.
+        var holdings = await _client.GetFromJsonAsync<List<HoldingResponse>>(
+            $"/api/portfolios/{portfolioId}/accounts/{accountId}/holdings?asOf=2026-06-01");
+
+        var cash = holdings!.Last();
+        cash.Kind.ShouldBe("Cash");
+        cash.Status.ShouldBe("Valued");
+        cash.ValuationSource.ShouldBe("Cash");
+        cash.MarketValue.ShouldBe(2500m);
+    }
+
+    [Fact]
+    public async Task GET_holdings_reports_a_held_position_without_a_price_or_snapshot_as_missing()
+    {
+        var (portfolioId, accountId) = await ImportPositionsAsync();
+
+        // Between the VOO buy (2025-10-15) and the broker statement (2026-06-01) there's no price for VOO:
+        // the 10 shares are known from the ledger, but their value isn't — so it's reported missing, not $0.
+        var holdings = await _client.GetFromJsonAsync<List<HoldingResponse>>(
+            $"/api/portfolios/{portfolioId}/accounts/{accountId}/holdings?asOf=2025-12-01");
+
+        var voo = holdings!.Single(h => h.Symbol == "VOO");
+        voo.Status.ShouldBe("Missing");
+        voo.Quantity.ShouldBe(10m);
+        voo.MarketValue.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GET_opening_positions_derives_what_was_held_before_the_history_from_the_statement()
+    {
+        var (portfolioId, accountId) = await ImportPositionsAsync();
+
+        var body = await _client.GetFromJsonAsync<OpeningPositionsResponse>(
+            $"/api/portfolios/{portfolioId}/accounts/{accountId}/opening-positions");
+
+        // First activity is the 2025-10-01 deposit, so the opening is 2025-09-30. AAPL (5 on the statement, never
+        // traded) was held before; VOO was bought within the history; no cash statement exists to check cash.
+        body!.AsOf.ShouldBe(new DateOnly(2025, 9, 30));
+        var aapl = body.Holdings.Single(h => h.Symbol == "AAPL");
+        aapl.Class.ShouldBe("PreHistory");
+        aapl.Quantity.ShouldBe(5m);
+        aapl.Verified.ShouldBeTrue();
+        var voo = body.Holdings.Single(h => h.Symbol == "VOO");
+        voo.Class.ShouldBe("None");
+        voo.Quantity.ShouldBe(0m);
+        body.Cash.Verified.ShouldBeFalse();
     }
 
     [Fact]

@@ -235,6 +235,26 @@ public sealed class VanguardTransactionHistoryReportParserTests
         incoming.Quantity.ShouldBe(200m);
     }
 
+    [Theory]
+    [InlineData("Reinvestment (LT gain)")]
+    [InlineData("Reinvestment (ST gain)")]
+    public async Task ParseAsync_maps_labelled_distribution_reinvestments_to_reinvest(string label)
+    {
+        // Regression (F8): these carry the shares bought with a capital-gain distribution. Mapped to Other they
+        // moved no shares, leaving the position short of the broker's statement.
+        var parser = new VanguardTransactionHistoryReportParser();
+        await using var stream = BuildReport(
+        [
+            ["12/20/2024", "12/20/2024", "VBTLX", "Vanguard Total Bond Market Index Fund Admiral Shares", label, "CASH", "2.0000", "$12.5000", null, "-$25.0000"],
+        ]);
+
+        var row = (await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None)).Statements[0].Transactions.Single();
+
+        row.Type.ShouldBe(TransactionType.Reinvest);
+        row.SourceType.ShouldBe(label);
+        row.Quantity.ShouldBe(2m);
+    }
+
     private static async Task<IReadOnlyList<ParsedTransaction>> ParseSampleAsync()
     {
         var parser = new VanguardTransactionHistoryReportParser();

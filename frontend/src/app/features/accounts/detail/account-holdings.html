@@ -14,8 +14,8 @@
         </div>
         @if (missingCount() > 0) {
           <p class="missing" role="status">
-            {{ missingCount() }} holding(s) have no snapshot yet and aren't valued. Add an
-            opening balance to include them.
+            {{ missingCount() }} holding(s) couldn't be valued: there's no recent price or
+            statement for them, so they're left out of the total.
           </p>
         }
       </header>

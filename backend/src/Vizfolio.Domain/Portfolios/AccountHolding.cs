@@ -66,6 +66,34 @@ public sealed class AccountHolding
             : currencyCode.Trim().ToUpperInvariant();
     }
 
+    /// <summary>
+    /// Promotes a holding created before its reference data was known (<see cref="AccountHoldingKind.Other"/>,
+    /// e.g. an unrecognised ticker or an opening balance) to a <see cref="AccountHoldingKind.Security"/>. The
+    /// holding keeps its id, so its transactions and snapshots stay attached.
+    /// </summary>
+    public void PromoteToSecurity(Guid securityId)
+    {
+        EnsurePromotable(securityId);
+        Kind = AccountHoldingKind.Security;
+        LinkToSecurity(securityId);
+    }
+
+    /// <summary>As <see cref="PromoteToSecurity"/>, for a holding now recognised as a fund share class.</summary>
+    public void PromoteToFund(Guid fundId)
+    {
+        EnsurePromotable(fundId);
+        Kind = AccountHoldingKind.Fund;
+        LinkToFund(fundId);
+    }
+
+    private void EnsurePromotable(Guid referenceId)
+    {
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference ID is required.", nameof(referenceId));
+        if (Kind != AccountHoldingKind.Other)
+            throw new InvalidOperationException($"Only an unclassified (Other) holding can be promoted; this one is {Kind}.");
+    }
+
     public void LinkToSecurity(Guid securityId)
     {
         if (Kind != AccountHoldingKind.Security)

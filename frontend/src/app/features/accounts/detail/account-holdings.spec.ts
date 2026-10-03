@@ -22,6 +22,9 @@ function holding(overrides: Partial<HoldingRow> = {}): HoldingRow {
     marketValue: 5255,
     costBasis: 5000,
     gainLoss: 255,
+    status: 'Valued',
+    valuationSource: 'Price',
+    priceAsOf: '2026-06-01',
     ...overrides,
   };
 }
@@ -54,15 +57,34 @@ describe('AccountHoldings', () => {
     expect(cmp.missingCount()).toBe(0);
   });
 
-  it('counts holdings that lack a snapshot', () => {
+  it('counts holdings that could not be valued', () => {
     const api = new MockApi();
     api.holdings = of([
       holding(),
-      holding({ accountHoldingId: 'h2', symbol: 'AAPL', hasSnapshot: false, marketValue: null }),
+      holding({
+        accountHoldingId: 'h2',
+        symbol: 'AAPL',
+        status: 'Missing',
+        valuationSource: null,
+        priceAsOf: null,
+        marketValue: null,
+      }),
     ]);
     const cmp = setup(api) as any;
     expect(cmp.missingCount()).toBe(1);
     expect(cmp.totalValue()).toBe(5255); // Unvalued holding contributes nothing.
+  });
+
+  it('does not count a position that was not held as missing', () => {
+    // Valued from price history without any snapshot, plus a closed position worth a true $0.
+    const api = new MockApi();
+    api.holdings = of([
+      holding({ hasSnapshot: false, snapshotAsOf: null, source: null }),
+      holding({ accountHoldingId: 'h2', symbol: 'VBMFX', status: 'NotHeld', quantity: 0, marketValue: 0 }),
+    ]);
+    const cmp = setup(api) as any;
+    expect(cmp.missingCount()).toBe(0);
+    expect(cmp.totalValue()).toBe(5255);
   });
 
   it('surfaces an error status when the API fails', () => {

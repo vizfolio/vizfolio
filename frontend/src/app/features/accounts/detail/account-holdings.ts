@@ -12,7 +12,7 @@ import {
 
 type Status = 'loading' | 'ready' | 'error';
 
-/** Holdings tab: an account's positions, each valued from its latest snapshot. */
+/** Holdings tab: an account's positions, valued by the same rules as its performance. */
 @Component({
   selector: 'app-account-holdings',
   imports: [DataTable],
@@ -42,7 +42,7 @@ export class AccountHoldings {
   );
 
   protected readonly missingCount = computed(
-    () => this.holdings().filter((h) => !h.hasSnapshot).length,
+    () => this.holdings().filter((h) => h.status === 'Missing').length,
   );
 
   protected readonly columns: DataColumn<HoldingRow>[] = [
@@ -79,10 +79,10 @@ export class AccountHoldings {
       format: (_v, row) => formatMoney(row.gainLoss, row.currencyCode ?? 'USD'),
     },
     {
-      key: 'snapshotAsOf',
-      header: 'As of',
+      key: 'priceAsOf',
+      header: 'Priced as of',
       align: 'end',
-      format: (_v, row) => row.snapshotAsOf ?? '—',
+      format: (_v, row) => row.priceAsOf ?? '—',
     },
   ];
 

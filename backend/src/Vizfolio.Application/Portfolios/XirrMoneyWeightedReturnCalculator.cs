@@ -1,6 +1,8 @@
 namespace Vizfolio.Application.Portfolios;
 
 // True IRR of the cash-flow stream: solves NPV(r) = 0 with per-day discounting.
+// Periods of a year or more report the annualized rate. Shorter periods report the rate compounded over the
+// period instead (basis "Period"): annualizing a few weeks' gain (3% in two weeks → ~115% a year) misleads.
 // Cash-flow signs are from the investor's perspective:
 //   - StartingBalance and each contribution deposit are outflows (negative).
 //   - Withdrawals and EndingBalance are inflows (positive).
@@ -9,7 +11,9 @@ namespace Vizfolio.Application.Portfolios;
 public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalculator
 {
     private const string MethodName = "XIRR";
-    private const string BasisName = "Annualized";
+    private const string AnnualizedBasis = "Annualized";
+    private const string PeriodBasis = "Period";
+    private const int DaysPerYear = 365;
     private const double LowerBound = -0.9999;
     private const double UpperBound = 100.0;
     private const double Tolerance = 1e-9;
@@ -17,10 +21,13 @@ public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalc
 
     public ReturnResult Compute(PerformanceComputationContext ctx)
     {
+        var periodDays = ctx.To.DayNumber - ctx.From.DayNumber;
+        var basisName = periodDays < DaysPerYear ? PeriodBasis : AnnualizedBasis;
+
         if (!ctx.StartingIsComplete)
-            return new ReturnResult(null, MethodName, BasisName, "IncompleteStartingBalance");
+            return new ReturnResult(null, MethodName, basisName, "IncompleteStartingBalance");
         if (!ctx.EndingIsComplete)
-            return new ReturnResult(null, MethodName, BasisName, "IncompleteEndingBalance");
+            return new ReturnResult(null, MethodName, basisName, "IncompleteEndingBalance");
 
         var flows = new List<CashFlow>(ctx.CashFlows.Count + 2)
         {
@@ -38,14 +45,21 @@ public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalc
             .ToList();
 
         if (consolidated.Count < 2)
-            return new ReturnResult(null, MethodName, BasisName, "InsufficientCashFlows");
+            return new ReturnResult(null, MethodName, basisName, "InsufficientCashFlows");
 
         var hasPositive = consolidated.Any(f => f.Amount > 0m);
         var hasNegative = consolidated.Any(f => f.Amount < 0m);
         if (!hasPositive || !hasNegative)
-            return new ReturnResult(null, MethodName, BasisName, "NoSignChange");
+            return new ReturnResult(null, MethodName, basisName, "NoSignChange");
 
         var t0 = consolidated[0].Date;
+
+        // Solve in the units the rate is reported in: per year for a year or more; for a shorter period, per the
+        // flows' own span — which is the period return directly, and keeps a short, large move from overflowing
+        // the solver's bounds once annualized.
+        var spanDays = consolidated[^1].Date.DayNumber - t0.DayNumber;
+        var unitDays = basisName == AnnualizedBasis ? DaysPerYear : Math.Max(spanDays, 1);
+        ReturnResult Solved(double rate) => new((decimal)rate, MethodName, basisName, null);
 
         double Npv(double r)
         {
@@ -53,8 +67,8 @@ public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalc
             double sum = 0;
             foreach (var cf in consolidated)
             {
-                var years = (cf.Date.DayNumber - t0.DayNumber) / 365.0;
-                sum += (double)cf.Amount / Math.Pow(1.0 + r, years);
+                var units = (cf.Date.DayNumber - t0.DayNumber) / (double)unitDays;
+                sum += (double)cf.Amount / Math.Pow(1.0 + r, units);
             }
             return sum;
         }
@@ -62,14 +76,14 @@ public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalc
         double lo = LowerBound, hi = UpperBound;
         double npvLo = Npv(lo), npvHi = Npv(hi);
         if (npvLo * npvHi > 0)
-            return new ReturnResult(null, MethodName, BasisName, "DidNotConverge");
+            return new ReturnResult(null, MethodName, basisName, "DidNotConverge");
 
         for (int i = 0; i < MaxIterations; i++)
         {
             var mid = (lo + hi) / 2.0;
             var npvMid = Npv(mid);
             if (Math.Abs(npvMid) < Tolerance || (hi - lo) < Tolerance)
-                return new ReturnResult((decimal)mid, MethodName, BasisName, null);
+                return Solved(mid);
 
             if (npvLo * npvMid < 0)
             {
@@ -83,6 +97,6 @@ public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalc
             }
         }
 
-        return new ReturnResult((decimal)((lo + hi) / 2.0), MethodName, BasisName, null);
+        return Solved((lo + hi) / 2.0);
     }
 }

@@ -22,6 +22,11 @@ internal sealed class FakePriceHistorySource : IPriceHistorySource
         PriceSeriesRequest request, CancellationToken cancellationToken = default)
     {
         Requests.Add(request);
-        return Task.FromResult<PriceSeriesResult?>(Handler?.Invoke(request) ?? PriceSeriesResult.Empty);
+        // Like a real provider, only return closes inside the requested range.
+        var result = Handler?.Invoke(request) ?? PriceSeriesResult.Empty;
+        return Task.FromResult<PriceSeriesResult?>(result with
+        {
+            Prices = result.Prices.Where(p => p.AsOf >= request.From && p.AsOf <= request.To).ToList(),
+        });
     }
 }

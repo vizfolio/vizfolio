@@ -150,4 +150,51 @@ public sealed class AccountHoldingTests
 
         Should.Throw<InvalidOperationException>(() => holding.LinkToFund(Guid.NewGuid()));
     }
+
+    [Fact]
+    public void PromoteToSecurity_turns_an_unclassified_holding_into_a_security_and_keeps_its_id()
+    {
+        var holding = new AccountHolding(Guid.NewGuid(), AccountHoldingKind.Other);
+        var id = holding.AccountHoldingId;
+        var securityId = Guid.NewGuid();
+
+        holding.PromoteToSecurity(securityId);
+
+        holding.AccountHoldingId.ShouldBe(id);
+        holding.Kind.ShouldBe(AccountHoldingKind.Security);
+        holding.SecurityId.ShouldBe(securityId);
+    }
+
+    [Fact]
+    public void PromoteToFund_turns_an_unclassified_holding_into_a_fund()
+    {
+        var holding = new AccountHolding(Guid.NewGuid(), AccountHoldingKind.Other);
+        var fundId = Guid.NewGuid();
+
+        holding.PromoteToFund(fundId);
+
+        holding.Kind.ShouldBe(AccountHoldingKind.Fund);
+        holding.FundId.ShouldBe(fundId);
+    }
+
+    [Theory]
+    [InlineData(AccountHoldingKind.Security)]
+    [InlineData(AccountHoldingKind.Fund)]
+    [InlineData(AccountHoldingKind.Cash)]
+    public void Promotion_is_only_allowed_from_an_unclassified_holding(AccountHoldingKind kind)
+    {
+        var holding = new AccountHolding(Guid.NewGuid(), kind);
+
+        Should.Throw<InvalidOperationException>(() => holding.PromoteToSecurity(Guid.NewGuid()));
+        Should.Throw<InvalidOperationException>(() => holding.PromoteToFund(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public void Promotion_rejects_an_empty_reference_and_leaves_the_holding_unclassified()
+    {
+        var holding = new AccountHolding(Guid.NewGuid(), AccountHoldingKind.Other);
+
+        Should.Throw<ArgumentException>(() => holding.PromoteToSecurity(Guid.Empty));
+        holding.Kind.ShouldBe(AccountHoldingKind.Other);
+    }
 }

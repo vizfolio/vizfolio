@@ -2,6 +2,7 @@ using FastEndpoints;
 using Microsoft.AspNetCore.Http;
 using Vizfolio.Application.Extracts.Abstractions;
 using Vizfolio.Application.Extracts.Models;
+using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Infrastructure.Extracts.Hosted;
 
 namespace Vizfolio.Api.Endpoints.Admin.Imports;
@@ -15,17 +16,20 @@ public sealed class ImportAllEndpoint : Endpoint<ImportAllRequest, ImportAllResp
     private readonly ISecuritiesImporter _securities;
     private readonly IFundsImporter _funds;
     private readonly IHoldingRelinker _relinker;
+    private readonly ILedgerRelinker _ledgerRelinker;
     private readonly ImportRunGate _gate;
 
     public ImportAllEndpoint(
         ISecuritiesImporter securities,
         IFundsImporter funds,
         IHoldingRelinker relinker,
+        ILedgerRelinker ledgerRelinker,
         ImportRunGate gate)
     {
         _securities = securities;
         _funds = funds;
         _relinker = relinker;
+        _ledgerRelinker = ledgerRelinker;
         _gate = gate;
     }
 
@@ -68,6 +72,8 @@ public sealed class ImportAllEndpoint : Endpoint<ImportAllRequest, ImportAllResp
             var secResult = await _securities.ImportAsync(new SecuritiesImportOptions(Force: force), ct);
             var fundResult = await _funds.ImportAsync(new FundsImportOptions(Force: force), ct);
             var relinked = await _relinker.RelinkAsync(ct);
+            // New reference data may recognise tickers that account holdings were created without.
+            await _ledgerRelinker.RelinkAsync(ct);
             await Send.OkAsync(new ImportAllResponse(secResult, fundResult, relinked), ct);
         }
     }

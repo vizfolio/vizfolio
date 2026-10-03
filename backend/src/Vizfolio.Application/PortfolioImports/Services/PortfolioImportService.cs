@@ -14,17 +14,20 @@ public sealed class PortfolioImportService : IPortfolioImportService
     private readonly IAppDbContext _db;
     private readonly IEnumerable<IPortfolioFileParser> _parsers;
     private readonly IImpliedContributionService _impliedContributions;
+    private readonly ILedgerRelinker? _ledgerRelinker;
     private readonly ILogger<PortfolioImportService> _logger;
 
     public PortfolioImportService(
         IAppDbContext db,
         IEnumerable<IPortfolioFileParser> parsers,
         IImpliedContributionService impliedContributions,
-        ILogger<PortfolioImportService> logger)
+        ILogger<PortfolioImportService> logger,
+        ILedgerRelinker? ledgerRelinker = null)
     {
         _db = db;
         _parsers = parsers;
         _impliedContributions = impliedContributions;
+        _ledgerRelinker = ledgerRelinker;
         _logger = logger;
     }
 
@@ -70,6 +73,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
         if (HasPendingChanges())
             await _db.SaveChangesAsync(cancellationToken);
+        await RelinkLedgerAsync(cancellationToken);
 
         accountResult = await WithImpliedContributionsAsync(accountResult, cancellationToken);
 
@@ -135,6 +139,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
         if (HasPendingChanges())
             await _db.SaveChangesAsync(cancellationToken);
+        await RelinkLedgerAsync(cancellationToken);
 
         for (var i = 0; i < perAccountResults.Count; i++)
             perAccountResults[i] = await WithImpliedContributionsAsync(perAccountResults[i], cancellationToken);
@@ -168,7 +173,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 // be skipped as a "duplicate" of one (the sync then retires the implied row).
                 .Where(t => t.AccountId == account.AccountId
                             && t.SourceSystem != ImpliedContributionService.SourceSystem)
-                .Select(t => new { t.SourceSystem, t.ExternalId, t.TradeDate, t.Ticker, t.Quantity, t.Amount })
+                .Select(t => new ExistingRow(
+                    t.AccountTransactionId, t.SourceSystem, t.ExternalId, t.Type, t.TradeDate, t.Ticker, t.Quantity, t.Amount))
                 .ToListAsync(cancellationToken);
 
         // Exact (source, externalId) fast-path — keeps same-file re-imports idempotent.
@@ -183,6 +189,31 @@ public sealed class PortfolioImportService : IPortfolioImportService
         {
             var fp = TransactionFingerprint.Compute(account.AccountId, r.TradeDate, r.Ticker, r.Quantity, r.Amount);
             fingerprintCounts[fp] = fingerprintCounts.GetValueOrDefault(fp) + 1;
+        }
+
+        // Rows this same source stored earlier, so a re-import can correct their type when the parser now maps a
+        // label differently (e.g. after a mapping fix) instead of leaving them misclassified forever.
+        var sameSourceById = existingRows
+            .Where(r => string.Equals(r.SourceSystem, sourceSystem, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(r => r.ExternalId, StringComparer.Ordinal);
+        var sameSourceByFingerprint = sameSourceById.Values
+            .GroupBy(r => TransactionFingerprint.Compute(account.AccountId, r.TradeDate, r.Ticker, r.Quantity, r.Amount))
+            .ToDictionary(g => g.Key, g => new Queue<ExistingRow>(g), StringComparer.Ordinal);
+        var matchedSameSource = new HashSet<Guid>();
+        var reclassify = new Dictionary<Guid, ParsedTransaction>();
+
+        void NoteSameSourceMatch(ExistingRow? row, ParsedTransaction parsed)
+        {
+            if (row is null || !matchedSameSource.Add(row.Id)) return;
+            if (row.Type != parsed.Type) reclassify[row.Id] = parsed;
+        }
+
+        ExistingRow? NextSameSource(string fingerprint)
+        {
+            if (!sameSourceByFingerprint.TryGetValue(fingerprint, out var queue)) return null;
+            while (queue.TryDequeue(out var row))
+                if (!matchedSameSource.Contains(row.Id)) return row;
+            return null;
         }
 
         var tickerSet = statement.Transactions
@@ -215,6 +246,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 // Same-source exact duplicate (re-upload of the same file).
                 if (existingExternalIds.Contains(ExternalKey(sourceSystem, externalId)))
                 {
+                    NoteSameSourceMatch(sameSourceById.GetValueOrDefault(externalId), parsedTx);
                     skipped++;
                     continue;
                 }
@@ -223,6 +255,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 if (fingerprintCounts.TryGetValue(fingerprint, out var remaining) && remaining > 0)
                 {
                     fingerprintCounts[fingerprint] = remaining - 1;
+                    NoteSameSourceMatch(NextSameSource(fingerprint), parsedTx);
                     skipped++;
                     continue;
                 }
@@ -241,12 +274,11 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 entity.SetMemo(parsedTx.Memo);
                 entity.SetSourceType(parsedTx.SourceType);
 
-                if (!string.IsNullOrWhiteSpace(entity.Ticker))
-                {
-                    var holding = resolver.ResolveByTicker(entity.Ticker!, entity.Cusip, entity.CurrencyCode);
-                    if (holding is not null)
-                        entity.LinkToHolding(holding.AccountHoldingId);
-                }
+                // Every row naming a security is linked — to an unclassified holding when reference data doesn't
+                // know it yet — so its shares are always part of valuation rather than silently dropped.
+                var holding = resolver.ResolveOrCreate(entity.Ticker, entity.Cusip, entity.CurrencyCode);
+                if (holding is not null)
+                    entity.LinkToHolding(holding.AccountHoldingId);
 
                 _db.AccountTransactions.Add(entity);
                 existingExternalIds.Add(ExternalKey(sourceSystem, externalId));
@@ -262,6 +294,19 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
         await ImportPositionSnapshotsAsync(statement, resolver, validCurrencies, cancellationToken);
 
+        if (reclassify.Count > 0)
+        {
+            var ids = reclassify.Keys.ToList();
+            var rows = await _db.AccountTransactions
+                .Where(t => ids.Contains(t.AccountTransactionId))
+                .ToListAsync(cancellationToken);
+            foreach (var row in rows)
+            {
+                var parsed = reclassify[row.AccountTransactionId];
+                row.Reclassify(parsed.Type, parsed.SourceType);
+            }
+        }
+
         return new AccountImportResult(
             AccountId: account.AccountId,
             Created: accountCreated,
@@ -271,7 +316,20 @@ public sealed class PortfolioImportService : IPortfolioImportService
             Inserted: inserted,
             Skipped: skipped,
             Failed: failures.Count,
-            Failures: failures);
+            Failures: failures)
+        {
+            Reclassified = reclassify.Count,
+        };
+    }
+
+    /// <summary>
+    /// Links any rows still missing a holding (e.g. stored before every security row got one) and promotes
+    /// unclassified holdings reference data now recognises, so each import also heals older data.
+    /// </summary>
+    private async Task RelinkLedgerAsync(CancellationToken cancellationToken)
+    {
+        if (_ledgerRelinker is not null)
+            await _ledgerRelinker.RelinkAsync(cancellationToken);
     }
 
     /// <summary>
@@ -301,14 +359,11 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
         foreach (var pos in statement.Positions)
         {
-            if (string.IsNullOrWhiteSpace(pos.Ticker)) continue;
-
-            var ticker = pos.Ticker.Trim().ToUpperInvariant();
-            var holding = resolver.ResolveByTicker(ticker, pos.Cusip, pos.CurrencyCode);
+            var holding = resolver.ResolveOrCreate(pos.Ticker, pos.Cusip, pos.CurrencyCode);
             if (holding is null)
             {
-                _logger.LogDebug(
-                    "Skipping position snapshot for unresolved ticker {Ticker} on {AsOf}", ticker, pos.AsOf);
+                _logger.LogWarning(
+                    "Skipping position snapshot on {AsOf}: it identifies no security (no ticker or CUSIP).", pos.AsOf);
                 continue;
             }
 
@@ -400,6 +455,16 @@ public sealed class PortfolioImportService : IPortfolioImportService
         var normalized = raw.Trim().ToUpperInvariant();
         return validCodes.Contains(normalized) ? normalized : null;
     }
+
+    private sealed record ExistingRow(
+        Guid Id,
+        string SourceSystem,
+        string ExternalId,
+        TransactionType Type,
+        DateOnly TradeDate,
+        string? Ticker,
+        decimal? Quantity,
+        decimal Amount);
 
     private static string ExternalKey(string sourceSystem, string externalId) =>
         $"{sourceSystem.Trim().ToUpperInvariant()}|{externalId}";

@@ -5,6 +5,7 @@ using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
 using Vizfolio.Application.Portfolios;
+using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Application.Pricing;
 using Vizfolio.Application.Pricing.Abstractions;
 
@@ -24,6 +25,10 @@ public static class DependencyInjection
         services.AddScoped<IPortfolioFileParser, VanguardTransactionHistoryReportParser>();
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
+        // Valuation rules shared by performance and the Holdings view. Defaults here; the host may replace the
+        // options with configuration-bound values (see Program.cs, section "Valuation").
+        services.AddSingleton(new ValuationOptions());
+        services.AddScoped<AccountValuationLoader>();
         services.AddScoped<IPortfolioPerformanceService, PortfolioPerformanceService>();
         services.AddScoped<IAccountHistoryService, AccountHistoryService>();
         services.AddScoped<IImpliedContributionService, ImpliedContributionService>();

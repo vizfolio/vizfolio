@@ -10,12 +10,20 @@ public sealed record PortfolioPerformanceResponse(
     string CurrencyCode,
     PerformanceSeries Series);
 
+/// <summary>
+/// A balance at a date. <see cref="Missing"/> lists (up to 10) holdings that couldn't be valued — a null symbol is
+/// the account's cash — with the cause: <c>NoPrice</c>, <c>StalePrice</c>, <c>NegativePosition</c>,
+/// <c>MaterialMismatch</c> or <c>BeforeHistory</c>.
+/// </summary>
 public sealed record PerformanceBalance(
     decimal Value,
     bool IsComplete,
     DateOnly? SnapshotAsOf,
     int HoldingsCovered,
-    int HoldingsMissingSnapshot);
+    int HoldingsMissingSnapshot,
+    IReadOnlyList<PerformanceMissing> Missing);
+
+public sealed record PerformanceMissing(Guid AccountId, Guid? AccountHoldingId, string? Symbol, string Cause);
 
 public sealed record PerformanceContributions(
     decimal Net,

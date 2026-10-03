@@ -590,6 +590,49 @@ NEWFILEUID:NONE
         withdrawal.TradeDate.ShouldBe(new DateOnly(2026, 4, 20));
     }
 
+    [Theory]
+    [InlineData("OUT", "25", -25)]  // a transfer out with positive units must never add shares
+    [InlineData("OUT", "-25", -25)]
+    [InlineData("IN", "-25", 25)]
+    [InlineData("IN", "25", 25)]
+    public async Task ParseAsync_signs_in_kind_transfer_units_by_their_direction(string action, string units, decimal expected)
+    {
+        var qfx = $"""
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>fidelity.com</BROKERID><ACCTID>X1234</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20260101000000</DTSTART><DTEND>20260601120000</DTEND>
+        <TRANSFER>
+          <INVTRAN><FITID>ACAT-1</FITID><DTTRADE>20260210</DTTRADE></INVTRAN>
+          <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+          <SUBACCTSEC>CASH</SUBACCTSEC>
+          <UNITS>{units}</UNITS>
+          <TFERACTION>{action}</TFERACTION>
+          <POSTYPE>LONG</POSTYPE>
+          <UNITPRICE>480.00</UNITPRICE>
+        </TRANSFER>
+      </INVTRANLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+
+        var parsed = await parser.ParseAsync(StringStream(qfx), "acat.qfx", CancellationToken.None);
+
+        var transfer = parsed.Statements.Single().Transactions.Single();
+        transfer.Type.ShouldBe(TransactionType.Transfer);
+        transfer.Quantity.ShouldBe(expected);
+        transfer.Amount.ShouldBe(0m);       // OFX transfers carry no amount; valuation prices them on the day
+        transfer.Price.ShouldBe(480.00m);   // …falling back to the broker's unit price when there's no close
+    }
+
     private static MemoryStream StringStream(string content) =>
         new(Encoding.UTF8.GetBytes(content));
 }
