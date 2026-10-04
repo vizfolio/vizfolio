@@ -5,6 +5,7 @@ import {
   buildValueSeries,
   formatCurrency,
   formatPercent,
+  hasPendingPrices,
   trendOf,
 } from '../../util/performance-format';
 import { CompletenessBadge } from '../completeness-badge/completeness-badge';
@@ -25,6 +26,8 @@ import { StatCard } from '../stat-card/stat-card';
 })
 export class PerformanceSummary {
   readonly performance = input.required<PortfolioPerformance>();
+
+  protected readonly pendingPrices = hasPendingPrices;
 
   protected readonly currency = computed(() => this.performance().currencyCode || 'USD');
 

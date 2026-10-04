@@ -40,3 +40,9 @@
 .error {
   color: var(--color-negative);
 }
+
+.pending {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}

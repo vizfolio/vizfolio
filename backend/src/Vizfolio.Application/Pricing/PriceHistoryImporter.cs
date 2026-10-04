@@ -5,30 +5,43 @@ using Vizfolio.Application.Abstractions;
 using Vizfolio.Application.Extracts.Models;
 using Vizfolio.Application.Pricing.Abstractions;
 using Vizfolio.Application.Pricing.Models;
+using Vizfolio.Domain.Portfolios;
 using Vizfolio.Domain.Pricing;
 
 namespace Vizfolio.Application.Pricing;
 
 /// <summary>
-/// Fetches daily close prices (and split events) for every held holding in the database and upserts them
-/// into <c>PriceHistory</c> / <c>CorporateAction</c>. Targets are derived from the ledger: one price series
-/// per distinct security/symbol, from a week before its account's first trade to <c>to</c>, minus dates already stored. Prices
-/// are stored on the raw/as-traded basis to match the ledger — see docs/price-history-valuation.md §5.
+/// Fetches daily close prices (and split events) for held holdings and upserts them into <c>PriceHistory</c> /
+/// <c>CorporateAction</c>. Targets come from the ledger: one price series per distinct security/symbol, needed from a
+/// week before the first account holding it starts trading, through <c>to</c>. Only what's missing is fetched — the gap
+/// before the earliest stored close and the tail from the latest — on the raw/as-traded basis valuation needs (see
+/// docs/price-history-valuation.md §5).
+/// <para>
+/// Each request goes down the provider fallback chain (<see cref="IPriceHistorySourceSelector.SelectAll"/>) until one
+/// has raw closes; how it went is kept per series in <see cref="PriceSeriesStatus"/> (Ok, Empty = no data from any
+/// provider, Failed, NoSource, AdjustedOnly) so gaps are reported rather than silent.
+/// </para>
 /// </summary>
 public sealed class PriceHistoryImporter : IPriceHistoryImporter
 {
+    /// <summary>Days of prices fetched before an account's first trade, so its opening day always has a close.</summary>
+    private const int LeadDays = 7;
+
     private readonly IAppDbContext _db;
     private readonly IPriceHistorySourceSelector _selector;
+    private readonly IProviderKeyStore? _keys;
     private readonly ILogger<PriceHistoryImporter> _logger;
 
     public PriceHistoryImporter(
         IAppDbContext db,
         IPriceHistorySourceSelector selector,
-        ILogger<PriceHistoryImporter> logger)
+        ILogger<PriceHistoryImporter> logger,
+        IProviderKeyStore? keys = null)
     {
         _db = db;
         _selector = selector;
         _logger = logger;
+        _keys = keys;
     }
 
     public async Task<ImportResult> ImportAsync(
@@ -38,6 +51,7 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
 
         var stopwatch = Stopwatch.StartNew();
         var to = options.To ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        if (_keys is not null) await _keys.EnsureLoadedAsync(cancellationToken);
 
         var targets = await BuildTargetsAsync(options, to, cancellationToken);
         if (targets.Count == 0)
@@ -46,44 +60,16 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             return ImportResult.Empty(stopwatch.Elapsed);
         }
 
-        var considered = 0;
-        var upserted = 0;
-        var skipped = 0;
-        var failures = new List<ImportFailure>();
+        var statuses = await _db.PriceSeriesStatuses.ToListAsync(cancellationToken);
+        var totals = new RunTotals();
 
         foreach (var target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var status = StatusFor(target, statuses);
             try
             {
-                var from = options.From ?? target.EarliestNeeded;
-                if (from > to) { continue; }
-
-                // Fetch only what's missing (unless forced): the gap before the earliest stored close — e.g. older
-                // history imported later, or positions held before the imported history — and the tail from the
-                // latest stored close (refetched in case the provider corrected it).
-                foreach (var (rangeFrom, rangeTo) in MissingRanges(from, to, target, options.Force))
-                {
-                    var request = new PriceSeriesRequest(target.QuerySymbol, target.Exchange, rangeFrom, rangeTo);
-                    var source = _selector.Select(request);
-                    if (source is null)
-                    {
-                        failures.Add(new ImportFailure(target.QuerySymbol, "No price source supports this symbol."));
-                        break;
-                    }
-
-                    var result = await source.GetDailyClosesAsync(request, cancellationToken);
-                    if (result is null)
-                    {
-                        failures.Add(new ImportFailure(target.QuerySymbol, "Price source returned no series."));
-                        break;
-                    }
-
-                    var (added, seen) = await UpsertAsync(target, result, source.Source, cancellationToken);
-                    considered += result.Prices.Count;
-                    upserted += added;
-                    skipped += seen;
-                }
+                await ImportSeriesAsync(target, status, options, to, totals, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -92,7 +78,9 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to import prices for {Symbol}", target.QuerySymbol);
-                failures.Add(new ImportFailure(target.QuerySymbol, ex.Message));
+                status.RecordAttempt(PriceFetchOutcome.Failed, null, ex.Message, target.EarliestNeeded,
+                    target.EarliestStored, target.LatestStored);
+                totals.Failures.Add(new ImportFailure(target.QuerySymbol, ex.Message));
             }
         }
 
@@ -100,55 +88,223 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
 
         stopwatch.Stop();
         return new ImportResult(
-            Considered: considered,
-            Upserted: upserted,
-            Skipped: skipped,
-            Failed: failures.Count,
-            Failures: failures,
+            Considered: totals.Considered,
+            Upserted: totals.Upserted,
+            Skipped: totals.Skipped,
+            Failed: totals.Failures.Count,
+            Failures: totals.Failures,
             DataCleaning: Array.Empty<DataCleaningEntry>(),
             Duration: stopwatch.Elapsed);
     }
 
-    /// <summary>The date ranges to fetch for a series given what's already stored.</summary>
-    internal static IEnumerable<(DateOnly From, DateOnly To)> MissingRanges(
-        DateOnly from, DateOnly to, PriceTarget target, bool force)
+    private sealed class RunTotals
     {
+        public int Considered;
+        public int Upserted;
+        public int Skipped;
+        public List<ImportFailure> Failures { get; } = [];
+    }
+
+    /// <summary>Fetches the series' missing ranges and records how it went.</summary>
+    private async Task ImportSeriesAsync(
+        PriceTarget target, PriceSeriesStatus status, PriceHistoryImportOptions options, DateOnly to, RunTotals totals,
+        CancellationToken cancellationToken)
+    {
+        var from = options.From ?? target.EarliestNeeded;
+        var firstRaw = target.EarliestStored;
+        var lastRaw = target.LatestStored;
+        var outcomes = new List<FetchOutcome>();
+
+        foreach (var (rangeFrom, rangeTo) in MissingRanges(from, to, target, options.Force, status.NoDataBefore))
+        {
+            var request = new PriceSeriesRequest(target.QuerySymbol, target.Exchange, rangeFrom, rangeTo);
+            var fetch = await FetchWithFallbackAsync(request, cancellationToken);
+            outcomes.Add(fetch);
+            if (fetch.Kind == FetchKind.NoSource) break; // the same for every range
+
+            if (fetch.Result is { } result && fetch.Source is { } source)
+            {
+                var (added, seen, addedRaw) = await UpsertAsync(target, result, source, cancellationToken);
+                totals.Considered += result.Prices.Count;
+                totals.Upserted += added;
+                totals.Skipped += seen;
+                foreach (var date in addedRaw)
+                {
+                    if (firstRaw is null || date < firstRaw) firstRaw = date;
+                    if (lastRaw is null || date > lastRaw) lastRaw = date;
+                }
+            }
+
+            // Nobody has closes this far back: remember where the history starts so it isn't asked for again.
+            if (fetch.Kind == FetchKind.Empty && target.EarliestStored is { } earliest && rangeTo < earliest)
+                status.MarkNoDataBefore(earliest);
+        }
+
+        var (outcome, message) = Summarize(target, outcomes, firstRaw);
+        var lastSource = outcomes.LastOrDefault(o => o.Kind == FetchKind.Raw).Source ?? status.LastSource;
+        status.RecordAttempt(outcome, lastSource, message, target.EarliestNeeded, firstRaw, lastRaw);
+
+        if (outcome != PriceFetchOutcome.Ok)
+            totals.Failures.Add(new ImportFailure(target.QuerySymbol, message ?? outcome.ToString()));
+    }
+
+    /// <summary>
+    /// The series outcome: <c>Ok</c> once raw closes are stored and nothing failed (a range with no new data is fine —
+    /// e.g. today before the close, or history that starts later than needed); otherwise why there are none.
+    /// </summary>
+    private static (PriceFetchOutcome, string?) Summarize(PriceTarget target, List<FetchOutcome> outcomes, DateOnly? firstRaw)
+    {
+        if (outcomes.Any(o => o.Kind == FetchKind.NoSource))
+            return (PriceFetchOutcome.NoSource, outcomes.First(o => o.Kind == FetchKind.NoSource).Message);
+
+        var failed = outcomes.FirstOrDefault(o => o.Kind == FetchKind.Failed);
+        if (failed.Kind == FetchKind.Failed)
+            return (PriceFetchOutcome.Failed, failed.Message);
+
+        if (firstRaw is null)
+        {
+            if (outcomes.Any(o => o.Kind == FetchKind.Adjusted))
+                return (PriceFetchOutcome.AdjustedOnly,
+                    $"Only split/dividend-adjusted prices are available for {target.QuerySymbol}; they can't value as-traded shares.");
+            return (PriceFetchOutcome.Empty,
+                outcomes.FirstOrDefault(o => o.Kind == FetchKind.Empty).Message ?? $"No price data for {target.QuerySymbol}.");
+        }
+
+        return firstRaw > target.EarliestNeeded
+            ? (PriceFetchOutcome.Ok, $"Prices start {firstRaw:yyyy-MM-dd}; needed from {target.EarliestNeeded:yyyy-MM-dd}.")
+            : (PriceFetchOutcome.Ok, null);
+    }
+
+    private enum FetchKind
+    {
+        Raw,
+        Adjusted,
+        Empty,
+        Failed,
+        NoSource,
+    }
+
+    private readonly record struct FetchOutcome(
+        FetchKind Kind, PriceSeriesResult? Result, PriceSource? Source, string? Message);
+
+    /// <summary>
+    /// Asks each provider that supports the symbol, highest priority first, until one returns raw closes. Adjusted
+    /// closes are kept only if no provider has raw ones. All answering "no data" is Empty; any failure without data
+    /// is Failed (worth retrying).
+    /// </summary>
+    private async Task<FetchOutcome> FetchWithFallbackAsync(PriceSeriesRequest request, CancellationToken cancellationToken)
+    {
+        var sources = _selector.SelectAll(request);
+        if (sources.Count == 0)
+            return new FetchOutcome(FetchKind.NoSource, null, null,
+                "No price provider is set up for this symbol. Add an API key in Settings → Prices.");
+
+        var errors = new List<string>();
+        var empty = new List<string>();
+        FetchOutcome? adjusted = null;
+        foreach (var source in sources)
+        {
+            PriceSeriesResult? result;
+            try
+            {
+                result = await source.GetDailyClosesAsync(request, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "{Source} failed for {Symbol}; trying the next provider", source.Source, request.Symbol);
+                errors.Add($"{source.DisplayName}: {ex.Message}");
+                continue;
+            }
+
+            if (result is null || result.Prices.Count == 0)
+            {
+                empty.Add(source.DisplayName);
+                continue;
+            }
+
+            if (result.Adjusted)
+            {
+                adjusted ??= new FetchOutcome(FetchKind.Adjusted, result, source.Source, null);
+                continue;
+            }
+
+            return new FetchOutcome(FetchKind.Raw, result, source.Source, null);
+        }
+
+        if (adjusted is { } a) return a;
+        if (errors.Count > 0)
+            return new FetchOutcome(FetchKind.Failed, null, null, string.Join("; ", errors));
+        return new FetchOutcome(FetchKind.Empty, null, null,
+            $"No data from {string.Join(", ", empty)} for {request.Symbol} between {request.From:yyyy-MM-dd} and {request.To:yyyy-MM-dd}.");
+    }
+
+    /// <summary>
+    /// The date ranges to fetch for a series given its stored raw closes: the gap before the earliest (unless every
+    /// provider already said it has nothing older — <paramref name="noDataBefore"/>) and the tail from the latest
+    /// (refetched in case the provider corrected it). Everything when forced or nothing is stored.
+    /// </summary>
+    internal static IEnumerable<(DateOnly From, DateOnly To)> MissingRanges(
+        DateOnly from, DateOnly to, PriceTarget target, bool force, DateOnly? noDataBefore = null)
+    {
+        if (from > to) yield break;
         if (force || target.EarliestStored is not { } earliest || target.LatestStored is not { } latest)
         {
             yield return (from, to);
             yield break;
         }
 
-        if (from < earliest) yield return (from, earliest.AddDays(-1));
+        if (from < earliest && noDataBefore != earliest) yield return (from, earliest.AddDays(-1));
         var tailFrom = latest > from ? latest : from;
         if (tailFrom <= to) yield return (tailFrom, to);
     }
 
-    private async Task<(int Added, int Skipped)> UpsertAsync(
+    private PriceSeriesStatus StatusFor(PriceTarget target, List<PriceSeriesStatus> statuses)
+    {
+        var existing = statuses.FirstOrDefault(s => s.Kind == target.Kind
+                                                    && s.SecurityId == target.SecurityId
+                                                    && s.SymbolKey == target.SymbolKey);
+        if (existing is not null) return existing;
+
+        var created = target.Kind == PriceSeriesKind.Security
+            ? PriceSeriesStatus.ForSecurity(target.SecurityId!.Value, target.QuerySymbol)
+            : PriceSeriesStatus.ForSymbol(target.SymbolKey!, target.QuerySymbol);
+        statuses.Add(created);
+        _db.PriceSeriesStatuses.Add(created);
+        return created;
+    }
+
+    /// <summary>Adds the result's closes not already stored (raw and adjusted rows are kept apart) and its splits.</summary>
+    private async Task<(int Added, int Skipped, List<DateOnly> AddedRaw)> UpsertAsync(
         PriceTarget target,
         PriceSeriesResult result,
         PriceSource source,
         CancellationToken cancellationToken)
     {
-        var existingDates = await LoadExistingPriceDatesAsync(target, cancellationToken);
+        var existingDates = await LoadExistingPriceDatesAsync(target, result.Adjusted, cancellationToken);
         var added = 0;
         var skipped = 0;
+        var addedRaw = new List<DateOnly>();
 
         foreach (var point in result.Prices)
         {
             // Dedupe on the series key: there's no in-place update, so a stored date is left as-is.
-            // Force only widens the fetch window (see BuildTargetsAsync); it never re-inserts a row.
             if (existingDates.Contains(point.AsOf)) { skipped++; continue; }
 
             var row = target.Kind == PriceSeriesKind.Security
-                ? PriceHistory.ForSecurity(target.SecurityId!.Value, point.AsOf, point.Close, result.CurrencyCode, source)
-                : PriceHistory.ForSymbol(target.SymbolKey!, point.AsOf, point.Close, result.CurrencyCode, source);
+                ? PriceHistory.ForSecurity(target.SecurityId!.Value, point.AsOf, point.Close, result.CurrencyCode, source, result.Adjusted)
+                : PriceHistory.ForSymbol(target.SymbolKey!, point.AsOf, point.Close, result.CurrencyCode, source, result.Adjusted);
             _db.PriceHistories.Add(row);
             existingDates.Add(point.AsOf);
             added++;
+            if (!result.Adjusted) addedRaw.Add(point.AsOf);
         }
 
-        if (result.Splits.Count > 0)
+        // Split events only from an as-traded series: an adjusted series has already folded them in.
+        if (result.Splits.Count > 0 && !result.Adjusted)
         {
             var existingSplits = await LoadExistingSplitDatesAsync(target, cancellationToken);
             foreach (var split in result.Splits)
@@ -163,17 +319,18 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             }
         }
 
-        return (added, skipped);
+        return (added, skipped, addedRaw);
     }
 
-    private async Task<HashSet<DateOnly>> LoadExistingPriceDatesAsync(
-        PriceTarget target, CancellationToken cancellationToken)
-    {
-        var query = target.Kind == PriceSeriesKind.Security
+    private IQueryable<PriceHistory> StoredPrices(PriceTarget target)
+        => target.Kind == PriceSeriesKind.Security
             ? _db.PriceHistories.Where(p => p.SecurityId == target.SecurityId)
             : _db.PriceHistories.Where(p => p.SymbolKey == target.SymbolKey);
 
-        var dates = await query.Select(p => p.AsOf).ToListAsync(cancellationToken);
+    private async Task<HashSet<DateOnly>> LoadExistingPriceDatesAsync(
+        PriceTarget target, bool adjusted, CancellationToken cancellationToken)
+    {
+        var dates = await StoredPrices(target).Where(p => p.Adjusted == adjusted).Select(p => p.AsOf).ToListAsync(cancellationToken);
         return new HashSet<DateOnly>(dates);
     }
 
@@ -191,9 +348,10 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
     private async Task<List<PriceTarget>> BuildTargetsAsync(
         PriceHistoryImportOptions options, DateOnly to, CancellationToken cancellationToken)
     {
+        // The account's cash ($CASH) has no market price.
         var holdings = await _db.AccountHoldings
             .AsNoTracking()
-            .Where(h => h.Symbol != null)
+            .Where(h => h.Symbol != null && h.Kind != AccountHoldingKind.Cash)
             .Select(h => new { h.AccountHoldingId, h.AccountId, h.Symbol, h.SecurityId })
             .ToListAsync(cancellationToken);
 
@@ -202,6 +360,7 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
                 .Where(t => !string.IsNullOrWhiteSpace(t))
                 .Select(t => t.Trim().ToUpperInvariant()))
             : null;
+        var accountFilter = options.AccountIds is { Count: > 0 } ? options.AccountIds.ToHashSet() : null;
 
         // How far back to fetch: from a week before the holding's *account* first trades. Positions held before
         // the imported history (derived openings) are valued from the account's start, not the holding's first row.
@@ -212,6 +371,7 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             .ToDictionaryAsync(x => x.AccountId, x => x.Earliest, cancellationToken);
 
         var byKey = new Dictionary<PriceSeriesKey, PriceTarget>();
+        var wanted = new HashSet<PriceSeriesKey>();
         foreach (var h in holdings)
         {
             var symbol = h.Symbol!.Trim().ToUpperInvariant();
@@ -220,9 +380,10 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             var key = h.SecurityId is { } sid
                 ? new PriceSeriesKey(PriceSeriesKind.Security, sid, null)
                 : new PriceSeriesKey(PriceSeriesKind.Symbol, null, symbol);
+            if (accountFilter is null || accountFilter.Contains(h.AccountId)) wanted.Add(key);
 
+            // The window spans every account holding the series, even when only some were asked for.
             var earliest = earliestByAccount.TryGetValue(h.AccountId, out var e) ? e.AddDays(-LeadDays) : to;
-
             if (byKey.TryGetValue(key, out var existing))
             {
                 if (earliest < existing.EarliestNeeded)
@@ -235,25 +396,22 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             }
         }
 
-        // Attach existing coverage so each series only fetches what's missing at either end.
-        foreach (var key in byKey.Keys.ToList())
+        // Attach existing raw coverage so each series only fetches what's missing at either end. Adjusted rows don't
+        // count: they can't value anything, so a series that only has them still needs raw closes.
+        var targets = new List<PriceTarget>();
+        foreach (var key in wanted)
         {
             var target = byKey[key];
-            var stored = target.Kind == PriceSeriesKind.Security
-                ? _db.PriceHistories.Where(p => p.SecurityId == target.SecurityId)
-                : _db.PriceHistories.Where(p => p.SymbolKey == target.SymbolKey);
-            var earliestStored = await stored.Select(p => (DateOnly?)p.AsOf).OrderBy(d => d).FirstOrDefaultAsync(cancellationToken);
-            var latestStored = await stored.Select(p => (DateOnly?)p.AsOf).OrderByDescending(d => d).FirstOrDefaultAsync(cancellationToken);
-            byKey[key] = target with { EarliestStored = earliestStored, LatestStored = latestStored };
+            var raw = StoredPrices(target).Where(p => !p.Adjusted);
+            var earliestStored = await raw.Select(p => (DateOnly?)p.AsOf).OrderBy(d => d).FirstOrDefaultAsync(cancellationToken);
+            var latestStored = await raw.Select(p => (DateOnly?)p.AsOf).OrderByDescending(d => d).FirstOrDefaultAsync(cancellationToken);
+            targets.Add(target with { EarliestStored = earliestStored, LatestStored = latestStored });
         }
 
-        return byKey.Values.ToList();
+        return targets;
     }
 
     private readonly record struct PriceSeriesKey(PriceSeriesKind Kind, Guid? SecurityId, string? SymbolKey);
-
-    /// <summary>Days of prices fetched before an account's first trade, so its opening day always has a close.</summary>
-    private const int LeadDays = 7;
 
     internal sealed record PriceTarget(
         PriceSeriesKind Kind,

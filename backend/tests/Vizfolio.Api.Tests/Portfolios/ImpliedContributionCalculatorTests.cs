@@ -16,6 +16,45 @@ public sealed class ImpliedContributionCalculatorTests
         => new(date, type, amount, quantity, ticker, sourceType, settles);
 
     [Fact]
+    public void Return_of_capital_and_cash_in_lieu_of_fractional_shares_are_cash_the_account_can_spend()
+    {
+        var rows = new[]
+        {
+            Row(Day1, TransactionType.ReturnOfCapital, 60m, ticker: "FUNDX"),
+            Row(Day1, TransactionType.Split, 40m, quantity: 10m, ticker: "FUNDX"),
+            Row(Day2, TransactionType.Buy, -100m, quantity: 1m, ticker: "OTHER"),
+        };
+
+        ImpliedContributionCalculator.Find(rows).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_journal_between_sub_accounts_moves_no_cash()
+    {
+        var rows = new[]
+        {
+            Row(Day1, TransactionType.Journal, 500m),
+            Row(Day2, TransactionType.Buy, -500m, quantity: 5m, ticker: "FUNDX"),
+        };
+
+        ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem().Amount.ShouldBe(500m);
+    }
+
+    [Fact]
+    public void A_row_the_broker_marks_as_a_settlement_fund_movement_makes_its_ticker_cash_without_a_sweep_label()
+    {
+        var rows = new[]
+        {
+            Row(Day1, TransactionType.Deposit, 300m),
+            new CashLedgerRow(Day1, TransactionType.Buy, -300m, 300m, "CORE", null, IsSettlementFund: true),
+            Row(Day2, TransactionType.Buy, -300m, quantity: 3m, ticker: "FUNDX"),
+        };
+
+        ImpliedContributionCalculator.SettlementTickers(rows).ShouldBe(["CORE"]);
+        ImpliedContributionCalculator.Find(rows).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Fund_company_purchase_with_no_deposit_implies_a_contribution_of_its_cost()
     {
         // Older fund-company reports record the purchase as a *positive* amount and show no deposit:

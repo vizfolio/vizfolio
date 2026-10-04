@@ -16,8 +16,12 @@ public static class DependencyInjection
         services.AddOptions<PriceHistoryOptions>()
             .Bind(configuration.GetSection(PriceHistoryOptions.SectionName));
 
-        // Keyless default provider. API-key providers (Tiingo, EODHD, Alpha Vantage) register alongside it and
-        // the selector prefers them when their key is configured (higher Priority).
+        // API keys: configuration first, then the key saved from Settings (a singleton cache over AppSetting).
+        services.AddSingleton<ProviderKeyStore>();
+        services.AddSingleton<IProviderKeyStore>(sp => sp.GetRequiredService<ProviderKeyStore>());
+
+        // Providers, tried highest priority first (Tiingo, Alpha Vantage, EODHD), falling back down the chain when one
+        // fails or has no data. Keyless Stooq is last and off by default: its closes are adjusted.
         services.AddHttpClient<StooqPriceHistorySource>(ConfigureClient)
             .AddStandardResilienceHandler(ConfigureResilience);
         services.AddTransient<IPriceHistorySource>(sp => sp.GetRequiredService<StooqPriceHistorySource>());
@@ -34,6 +38,11 @@ public static class DependencyInjection
             .AddStandardResilienceHandler(ConfigureResilience);
         services.AddTransient<IPriceHistorySource>(sp => sp.GetRequiredService<TiingoPriceHistorySource>());
 
+        // Background fetching: imports, the schedule and Settings enqueue; one worker runs them.
+        services.AddSingleton<PriceRefreshQueue>();
+        services.AddSingleton<IPriceRefreshQueue>(sp => sp.GetRequiredService<PriceRefreshQueue>());
+        services.AddSingleton<IPriceRefreshStatus>(sp => sp.GetRequiredService<PriceRefreshQueue>());
+        services.AddHostedService<PriceRefreshWorker>();
         services.AddHostedService<PriceHistoryRefreshHostedService>();
 
         return services;

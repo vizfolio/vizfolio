@@ -48,9 +48,15 @@ const IMPORT_RESULT: PortfolioImportResult = {
       failures: [],
       impliedContributions: 0,
       impliedContributionsAmount: 0,
+      updated: 0,
+      snapshotsInserted: 0,
     },
   ],
   duration: 'PT0.2S',
+  importBatchId: 'b1',
+  importedAt: '2026-10-03T16:05:00Z',
+  warnings: [],
+  fileAccountNumbers: [],
 };
 
 const PARSERS: ImportParser[] = [
@@ -69,6 +75,9 @@ class MockApi {
 
   getPortfolios() {
     return this.portfolios;
+  }
+  getImports() {
+    return of({ imports: [], transactionsImportedBeforeHistory: 0 });
   }
   getImportParsers() {
     return of(PARSERS);

@@ -17,8 +17,13 @@ public sealed class AccountHoldingResolver
     private readonly Dictionary<string, AccountHolding> _unclassifiedBySymbol = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AccountHolding> _unclassifiedByCusip = new(StringComparer.Ordinal);
 
+    private readonly List<AccountHolding> _created = [];
+
     private Guid _accountId;
     private bool _primed;
+
+    /// <summary>Holdings this resolver created (not yet saved), e.g. so an import can record that it created them.</summary>
+    public IReadOnlyList<AccountHolding> Created => _created;
 
     public AccountHoldingResolver(IAppDbContext db, ILogger logger)
     {
@@ -134,6 +139,7 @@ public sealed class AccountHoldingResolver
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
+        _created.Add(holding);
         _holdingBySecurity[key] = holding;
         return holding;
     }
@@ -149,6 +155,7 @@ public sealed class AccountHoldingResolver
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
+        _created.Add(holding);
         _holdingByFund[key] = holding;
         return holding;
     }
@@ -187,6 +194,7 @@ public sealed class AccountHoldingResolver
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
+        _created.Add(holding);
         RegisterUnclassified(holding);
         _logger.LogInformation(
             "Created unclassified holding {Symbol} ({Cusip}) in account {AccountId}: no reference data matched it.",

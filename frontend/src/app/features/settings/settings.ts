@@ -9,7 +9,9 @@ import {
   ImportResult,
   RelinkLedgerResponse,
 } from '../../core/api/models/admin.models';
+import { ReprocessResult } from '../../core/api/models/imports.models';
 import { ThemeToggle } from '../../layout/theme-toggle/theme-toggle';
+import { PriceSettings } from './price-settings/price-settings';
 
 /** State of a one-shot admin action. */
 export interface ActionState<T> {
@@ -27,7 +29,7 @@ const IDLE: ActionState<never> = { status: 'idle' };
  */
 @Component({
   selector: 'app-settings',
-  imports: [ThemeToggle],
+  imports: [ThemeToggle, PriceSettings],
   templateUrl: './settings.html',
   styleUrl: './settings.scss',
 })
@@ -47,6 +49,7 @@ export class Settings {
   protected readonly funds = signal<ActionState<ImportResult>>(IDLE);
   protected readonly all = signal<ActionState<ImportAllResponse>>(IDLE);
   protected readonly relink = signal<ActionState<RelinkLedgerResponse>>(IDLE);
+  protected readonly reprocess = signal<ActionState<ReprocessResult>>(IDLE);
 
   protected onText(target: (v: string) => void, event: Event): void {
     target((event.target as HTMLInputElement).value);
@@ -80,6 +83,17 @@ export class Settings {
 
   protected runRelink(): void {
     this.run(this.relink, () => this.api.relinkLedger());
+  }
+
+  protected runReprocess(): void {
+    this.run(this.reprocess, () => this.api.reprocessImports());
+  }
+
+  /** Files a reprocess couldn't re-read, with why. */
+  protected skippedFiles(result: ReprocessResult): { fileName: string; reason: string }[] {
+    return result.perBatch
+      .filter((b) => b.skipped !== null)
+      .map((b) => ({ fileName: b.fileName, reason: b.skipped ?? '' }));
   }
 
   /** Runs an admin action, threading its lifecycle into the given state signal. */

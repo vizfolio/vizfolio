@@ -8,6 +8,8 @@ import { PortfolioPerformance } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { DateField } from '../../shared/ui/date-field/date-field';
 import { PerformanceSummary } from '../../shared/ui/performance-summary/performance-summary';
+import { pollWhilePending } from '../../shared/util/poll';
+import { performanceAwaitsPrices } from '../../shared/util/performance-format';
 
 type Status = 'loading' | 'ready' | 'error' | 'no-portfolio';
 
@@ -46,7 +48,10 @@ export class Performance {
             return of<PortfolioPerformance | null>(null);
           }
           this.status.set('loading');
-          return this.api.getPerformance(portfolioId, from || undefined, to || undefined).pipe(
+          return pollWhilePending(
+            () => this.api.getPerformance(portfolioId, from || undefined, to || undefined),
+            performanceAwaitsPrices,
+          ).pipe(
             catchError(() => {
               this.status.set('error');
               return of<PortfolioPerformance | null>(null);

@@ -35,6 +35,7 @@ public static class AccountCash
             return row.Type switch
             {
                 TransactionType.Dividend or TransactionType.Interest or TransactionType.CapitalGain => row.Amount,
+                TransactionType.ReturnOfCapital => Math.Abs(row.Amount),
                 TransactionType.Transfer => row.Amount,
                 TransactionType.Deposit => Math.Abs(row.Amount),
                 TransactionType.Withdrawal => -Math.Abs(row.Amount),
@@ -95,5 +96,5 @@ public static class AccountCash
         => r.Type is TransactionType.Dividend or TransactionType.Interest or TransactionType.CapitalGain && r.Quantity is null;
 
     internal static CashLedgerRow ToCashRow(LedgerRow r)
-        => new(r.TradeDate, r.Type, r.Amount, r.Quantity, r.Ticker, r.SourceType, r.SettlementDate);
+        => new(r.TradeDate, r.Type, r.Amount, r.Quantity, r.Ticker, r.SourceType, r.SettlementDate, r.IsSettlementFund);
 }

@@ -16,7 +16,11 @@ public sealed record LedgerRow(
     decimal? Quantity,
     decimal Amount,
     decimal? Price,
-    string? SourceType)
+    string? SourceType,
+    // The broker marks this row as a movement of the account's settlement fund (see SettlementFunds).
+    bool IsSettlementFund = false,
+    // A broker split's factor (new shares per old), when the broker reported a ratio.
+    decimal? SplitFactor = null)
 {
     /// <summary>A contribution Vizfolio derived itself (see ImpliedContributionService), not an imported row.</summary>
     public bool IsImplied => string.Equals(SourceSystem, ImpliedContributionService.SourceSystem, StringComparison.Ordinal);
@@ -48,7 +52,8 @@ public readonly record struct SplitAction(DateOnly ExDate, decimal Factor);
 
 /// <summary>
 /// A holding's valuation inputs. Anchors are ascending by date. <see cref="IsMoneyMarket"/> is true when the SEC
-/// N-MFP registry lists the ticker as a money market fund (see <see cref="SettlementFunds"/>).
+/// N-MFP registry lists the ticker as a money market fund, and <see cref="IsSettlementFund"/> when the broker marks it as
+/// the account's settlement fund (see <see cref="SettlementFunds"/>).
 /// </summary>
 public sealed record HoldingInput(
     Guid HoldingId,
@@ -57,7 +62,8 @@ public sealed record HoldingInput(
     PriceSeries Prices,
     IReadOnlyList<SplitAction> Splits,
     IReadOnlyList<PositionAnchor> AnchorsAscending,
-    bool IsMoneyMarket = false);
+    bool IsMoneyMarket = false,
+    bool IsSettlementFund = false);
 
 /// <summary>Everything the engine needs to value one account at any date.</summary>
 public sealed record AccountValuationInput(

@@ -122,3 +122,16 @@ export function buildReturnSeries(perf: PortfolioPerformance): ReturnSeries {
     note: INTERVAL_NOTE[series.interval],
   };
 }
+
+/**
+ * True when a value couldn't be computed only because prices are still downloading in the background (missing cause
+ * `PricesPending`) — the view says "updating" and refreshes rather than calling the value incomplete.
+ */
+export function hasPendingPrices(balance: { missing?: { cause: string }[] } | null | undefined): boolean {
+  return balance?.missing?.some((m) => m.cause === 'PricesPending') ?? false;
+}
+
+/** True when either end of a performance result is waiting on prices. */
+export function performanceAwaitsPrices(perf: PortfolioPerformance | null): boolean {
+  return perf !== null && (hasPendingPrices(perf.startingBalance) || hasPendingPrices(perf.endingBalance));
+}

@@ -4,8 +4,8 @@ namespace Vizfolio.Domain.Pricing;
 /// A single day's closing price for a shared price series (a <c>Security</c>, or a bare symbol when
 /// no Security is linked). Prices are stored on the <b>raw / as-traded basis</b> — the same basis as
 /// the ledger's quantities — so that <c>marketValue = quantity(from ledger) × Close</c> is correct
-/// across corporate actions. <see cref="Adjusted"/> is always <c>false</c> today; it documents the
-/// invariant and leaves room for a future split-adjusted series to coexist.
+/// across corporate actions. A source that only offers split/dividend-<see cref="Adjusted"/> closes (Stooq) is stored
+/// with the flag set, and valuation never uses those rows.
 /// </summary>
 public sealed class PriceHistory
 {
@@ -18,7 +18,8 @@ public sealed class PriceHistory
         DateOnly asOf,
         decimal close,
         string? currencyCode,
-        PriceSource source)
+        PriceSource source,
+        bool adjusted)
     {
         PriceHistoryId = Guid.NewGuid();
         Kind = kind;
@@ -28,7 +29,7 @@ public sealed class PriceHistory
         Close = close;
         CurrencyCode = NormalizeCurrency(currencyCode);
         Source = source;
-        Adjusted = false;
+        Adjusted = adjusted;
         FetchedAt = DateTimeOffset.UtcNow;
     }
 
@@ -50,30 +51,33 @@ public sealed class PriceHistory
 
     public PriceSource Source { get; private set; }
 
-    /// <summary>Always <c>false</c>: prices are stored on the raw/as-traded basis to match the ledger.</summary>
+    /// <summary>
+    /// True for split/dividend-adjusted closes. Valuation only uses raw (as-traded) closes, which match the ledger's
+    /// quantities; adjusted ones are kept for reference.
+    /// </summary>
     public bool Adjusted { get; private set; }
 
     public DateTimeOffset FetchedAt { get; private set; }
 
     public static PriceHistory ForSecurity(
-        Guid securityId, DateOnly asOf, decimal close, string? currencyCode, PriceSource source)
+        Guid securityId, DateOnly asOf, decimal close, string? currencyCode, PriceSource source, bool adjusted = false)
     {
         if (securityId == Guid.Empty)
             throw new ArgumentException("Security ID is required.", nameof(securityId));
 
         return new PriceHistory(
-            PriceSeriesKind.Security, securityId, null, asOf, close, currencyCode, source);
+            PriceSeriesKind.Security, securityId, null, asOf, close, currencyCode, source, adjusted);
     }
 
     public static PriceHistory ForSymbol(
-        string symbolKey, DateOnly asOf, decimal close, string? currencyCode, PriceSource source)
+        string symbolKey, DateOnly asOf, decimal close, string? currencyCode, PriceSource source, bool adjusted = false)
     {
         var normalized = NormalizeSymbol(symbolKey);
         if (normalized is null)
             throw new ArgumentException("Symbol key is required.", nameof(symbolKey));
 
         return new PriceHistory(
-            PriceSeriesKind.Symbol, null, normalized, asOf, close, currencyCode, source);
+            PriceSeriesKind.Symbol, null, normalized, asOf, close, currencyCode, source, adjusted);
     }
 
     internal static string? NormalizeSymbol(string? symbol) =>

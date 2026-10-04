@@ -21,15 +21,18 @@ public sealed class AlphaVantagePriceHistorySource : IPriceHistorySource, IDispo
     private readonly HttpClient _http;
     private readonly ApiKeyProviderOptions _options;
     private readonly ILogger<AlphaVantagePriceHistorySource> _logger;
+    private readonly IProviderKeyStore _keys;
     private readonly RateLimiter _limiter;
 
     public AlphaVantagePriceHistorySource(
         HttpClient http,
         IOptions<PriceHistoryOptions> options,
-        ILogger<AlphaVantagePriceHistorySource> logger)
+        ILogger<AlphaVantagePriceHistorySource> logger,
+        IProviderKeyStore keys)
     {
         _http = http;
         _options = options.Value.Providers.AlphaVantage;
+        _keys = keys;
         _logger = logger;
 
         var perSecond = Math.Max(1, _options.RequestsPerSecond);
@@ -46,17 +49,26 @@ public sealed class AlphaVantagePriceHistorySource : IPriceHistorySource, IDispo
 
     public PriceSource Source => PriceSource.AlphaVantage;
 
+    public string DisplayName => "Alpha Vantage";
+
+    public bool RequiresApiKey => true;
+
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(ApiKey);
+
+    // Configuration wins over a key saved from Settings (see IProviderKeyStore).
+    private string? ApiKey => _keys.GetApiKey(PriceSource.AlphaVantage);
+
     public int Priority => 20;
 
     public bool Supports(PriceSeriesRequest request)
-        => !string.IsNullOrWhiteSpace(_options.ApiKey) && !string.IsNullOrWhiteSpace(request.Symbol);
+        => IsAvailable && !string.IsNullOrWhiteSpace(request.Symbol);
 
     public async Task<PriceSeriesResult?> GetDailyClosesAsync(
         PriceSeriesRequest request, CancellationToken cancellationToken = default)
     {
         var symbol = request.Symbol.Trim().ToUpperInvariant();
         var url = $"{_options.BaseUrl.TrimEnd('/')}?function=TIME_SERIES_DAILY&symbol={Uri.EscapeDataString(symbol)}" +
-                  $"&outputsize=full&apikey={_options.ApiKey}";
+                  $"&outputsize=full&apikey={ApiKey}";
 
         using var lease = await AcquireAsync(cancellationToken);
         await using var stream = await _http.GetStreamAsync(url, cancellationToken);

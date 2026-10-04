@@ -72,7 +72,38 @@ Components reference **only** semantic tokens, so re-theming never touches compo
 
 `features/accounts/detail/account.ts` is a tabbed container over the account-scoped endpoints. Each tab is its own small component taking `portfolioId`/`accountId` inputs and following the same shape: a `status` signal + `toObservable(query) → switchMap(api) → subscribe` feeding a data signal.
 
-- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings values come from the latest snapshot (see the Performance API's "Holdings & ledger endpoints"); a holding with no snapshot is left unvalued and surfaced in a "not valued" note. The ledger reuses the `date-field` control for its optional trade-date filter.
+- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings are valued by the same engine as performance (see the Performance API's "Holdings & ledger endpoints"): each row has a `status` (`Valued` / `NotHeld` / `Missing`), a `valuationSource` and a "Priced as of" date; the account's cash (incl. its settlement fund) is the last row, `kind: "Cash"`. Missing rows are surfaced in a "couldn't be valued" note. The opening-balance form (`opening-balance-form.ts`) prefills from `getOpeningPositions` — positions held before the imported history are filled in to confirm, ones that can't be derived are blank, cash is a `$CASH` row. The ledger reuses the `date-field` control for its optional trade-date filter.
+
+## Imports: results, warnings and undo
+
+Both upload points — the Accounts page (portfolio-scoped: files that name their accounts) and an account's
+**Import** tab (account-scoped; a multi-account QFX imports only that account's statement) — show the same pieces
+from `features/accounts/`:
+
+- **Result**: per-account added / skipped / updated counts. A re-upload of the same file comes back
+  `AlreadyImported` and shows the earlier result with a note (`import-text.ts` → `alreadyImportedNote`). A 422 on
+  the Import tab is `AccountMismatch`; the message names the (masked) accounts the file is for.
+- **Warnings** (`import-warnings/`): what the parser didn't fully understand, collapsed in a native `<details>`
+  ("3 rows need a look") listing each message with its row count and examples.
+- **Import history** (`import-history/import-history-list.ts`): the portfolio's uploads newest first — on an account
+  page filtered to that account (`accountId` input) — with what each did, its warnings, and an **Undo** button. Undo
+  first loads the server's preview and shows it in an inline confirmation panel (focus moves to its heading; Undo /
+  Cancel), then undoes, reloads and emits `undone` so the parent can refresh. Undone imports stay listed, struck
+  through. The parent bumps `reloadKey` after each import so the list picks it up.
+- **Reprocess** lives on **Settings → Ledger** ("Reprocess imports", next to "Re-link ledger"): it re-reads every
+  stored import file with the current parsers and reports files added/updated, plus any it had to skip and why.
+
+## Prices: Settings and "Updating…"
+
+- **Settings → Prices** (`features/settings/price-settings/`) lists the price providers in the order they're tried
+  with their state (Active / Needs an API key / Off; Stooq flagged as adjusted-only), a password field to save or
+  remove an API key (hidden when the key comes from server configuration), the background refresh status with a
+  "Fetch prices now" button (it polls the status while a fetch runs), and the price series that need a look (no data,
+  failed, history starting late). With no provider set up it points to getting a free Tiingo key.
+- **Pending prices.** Right after an import, missing values whose prices are still downloading come back with cause
+  `PricesPending`. The completeness badge then reads "Updating…" (not "Estimate"), the Holdings tab says
+  "Prices updating…", and the dashboard, Performance page, account Performance tab and Holdings tab re-fetch every
+  5 s until the cause clears (`shared/util/poll.ts` → `pollWhilePending`, capped at 5 minutes).
 
 ## Dev loop
 

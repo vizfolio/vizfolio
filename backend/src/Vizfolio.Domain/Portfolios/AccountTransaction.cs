@@ -70,6 +70,33 @@ public sealed class AccountTransaction
 
     public DateTimeOffset ImportedAt { get; private set; }
 
+    /// <summary>The upload that inserted this row (null for rows imported before batches existed, and derived rows).</summary>
+    public Guid? ImportBatchId { get; private set; }
+
+    /// <summary>
+    /// A split's ratio as the broker reported it (new shares : old shares, e.g. 2 : 1), on <see cref="TransactionType.Split"/>
+    /// rows. Null when the broker gave none.
+    /// </summary>
+    public decimal? SplitNumerator { get; private set; }
+
+    public decimal? SplitDenominator { get; private set; }
+
+    /// <summary>
+    /// The broker (or its file format) marks this row as a movement of the account's settlement (core / sweep) fund,
+    /// which is the account's cash — see the broker profiles in docs/performance-api.md.
+    /// </summary>
+    public bool IsSettlementFund { get; private set; }
+
+    /// <summary>
+    /// The broker's sub-account for the row (OFX <c>SUBACCTSEC</c>/<c>SUBACCTFUND</c>, e.g. <c>CASH</c> or <c>MARGIN</c>;
+    /// <c>FROM→TO</c> for a journal between them). Metadata only: valuation is per account.
+    /// </summary>
+    public string? SubAccount { get; private set; }
+
+    /// <summary>The split's factor (numerator ÷ denominator), when the broker reported a usable ratio.</summary>
+    public decimal? SplitFactor =>
+        SplitNumerator is > 0m && SplitDenominator is > 0m ? SplitNumerator / SplitDenominator : null;
+
     public void SetSecurityReference(string? ticker, string? cusip)
     {
         Ticker = string.IsNullOrWhiteSpace(ticker) ? null : ticker.Trim().ToUpperInvariant();
@@ -105,14 +132,56 @@ public sealed class AccountTransaction
     }
 
     /// <summary>
-    /// Re-applies the import's normalized type when a parser now maps the broker's label differently (e.g. after
-    /// a mapping fix). Only the import pipeline calls this — never a user edit — so a re-import is enough to
-    /// correct rows already stored.
+    /// Re-applies the import's normalized fields when a parser now maps the broker's row differently (e.g. after a
+    /// mapping fix). Only the import pipeline calls this — never a user edit — so a re-import (or a reprocess of the
+    /// stored file) is enough to correct rows already stored.
     /// </summary>
-    public void Reclassify(TransactionType type, string? sourceType)
+    public void ApplyImportedFields(ImportedTransactionFields fields)
     {
-        Type = type;
-        SetSourceType(sourceType);
+        ArgumentNullException.ThrowIfNull(fields);
+        Type = fields.Type;
+        Amount = fields.Amount;
+        Quantity = fields.Quantity;
+        Price = fields.Price;
+        SettlementDate = fields.SettlementDate;
+        SetSourceType(fields.SourceType);
+        IsSettlementFund = fields.IsSettlementFund;
+    }
+
+    /// <summary>
+    /// Replaces a synthetic id (formats without row ids) with its stable form. Only the one-off stable-id migration
+    /// calls this; a row's id never changes otherwise.
+    /// </summary>
+    public void ReassignExternalId(string externalId)
+    {
+        if (string.IsNullOrWhiteSpace(externalId))
+            throw new ArgumentException("External ID is required.", nameof(externalId));
+
+        ExternalId = externalId.Trim();
+    }
+
+    public void TagImportBatch(Guid importBatchId)
+    {
+        if (importBatchId == Guid.Empty)
+            throw new ArgumentException("Import batch ID is required.", nameof(importBatchId));
+
+        ImportBatchId = importBatchId;
+    }
+
+    public void SetSplitRatio(decimal? numerator, decimal? denominator)
+    {
+        SplitNumerator = numerator;
+        SplitDenominator = denominator;
+    }
+
+    public void MarkSettlementFund(bool isSettlementFund = true)
+    {
+        IsSettlementFund = isSettlementFund;
+    }
+
+    public void SetSubAccount(string? subAccount)
+    {
+        SubAccount = string.IsNullOrWhiteSpace(subAccount) ? null : subAccount.Trim().ToUpperInvariant();
     }
 
     public void SetSourceType(string? sourceType)

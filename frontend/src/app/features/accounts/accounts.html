@@ -103,14 +103,21 @@
       }
       @if (importResult(); as result) {
         <div class="import-result" role="status">
-          <p class="import-summary">
-            Imported {{ result.accounts.length }} account(s).
-          </p>
+          @if (alreadyImportedNote(result); as note) {
+            <p class="import-summary">{{ note }}</p>
+          } @else {
+            <p class="import-summary">
+              Imported {{ result.accounts.length }} account(s).
+            </p>
+          }
           <ul class="import-accounts">
             @for (account of result.accounts; track account.accountId) {
               <li>
                 <strong>{{ account.accountNumber || account.accountId }}</strong>
                 — {{ account.inserted }} added, {{ account.skipped }} skipped
+                @if (account.updated > 0) {
+                  , {{ account.updated }} updated
+                }
                 @if (account.failed > 0) {
                   , {{ account.failed }} failed
                 }
@@ -123,8 +130,18 @@
               </li>
             }
           </ul>
+          <app-import-warnings [warnings]="result.warnings" />
+          <p class="implied-note">Wrong file? Undo it from the import history below.</p>
         </div>
       }
+    </div>
+
+    <div class="card">
+      <app-import-history-list
+        [portfolioId]="activeId()!"
+        [reloadKey]="historyKey()"
+        (undone)="reload()"
+      />
     </div>
 
     <!-- Accounts list -->

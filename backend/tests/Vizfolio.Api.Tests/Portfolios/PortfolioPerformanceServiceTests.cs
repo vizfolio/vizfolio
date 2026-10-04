@@ -540,13 +540,13 @@ public sealed class PortfolioPerformanceServiceTests
         // The broker snapshot says 0 shares / $0, which must win.
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
-        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VBMFX");
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXBMX");
 
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2016, 1, 4), TransactionType.Buy, amount: -1000m, quantity: 100m);
         await SeedCashAsync(ctx, accountId, new DateOnly(2016, 1, 4), TransactionType.Deposit, 1000m); // funds the purchase
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2018, 6, 1), TransactionType.Transfer, amount: -1100m, quantity: -110m);
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2018, 6, 30), marketValue: 0m);
-        await SeedPriceAsync(ctx, "VBMFX", To, close: 10m);
+        await SeedPriceAsync(ctx, "ZXBMX", To, close: 10m);
 
         var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
@@ -607,7 +607,7 @@ public sealed class PortfolioPerformanceServiceTests
         // the snapshot — which must not resurrect the old $1,000 once the shares are gone.
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
-        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VBMFX");
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXBMX");
 
         var opening = new DateOnly(2016, 2, 1);
         await SeedCashAsync(ctx, accountId, opening, TransactionType.Deposit, 1000m); // funds the purchase
@@ -767,12 +767,12 @@ public sealed class PortfolioPerformanceServiceTests
         // a stable $1.00 a share, so 2020 is valued (not $0, not missing).
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
-        await SeedMoneyMarketFundAsync(ctx, "VUSXX", seeksStablePrice: true, stablePrice: 1m);
-        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VUSXX");
+        await SeedMoneyMarketFundAsync(ctx, "ZXUXX", seeksStablePrice: true, stablePrice: 1m);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXUXX");
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2017, 2, 28), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
         await SeedCashAsync(ctx, accountId, new DateOnly(2017, 3, 1), TransactionType.Deposit, 50_000m);
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2017, 3, 1), TransactionType.Buy, amount: -50_000m, quantity: 50_000m);
-        await SeedPriceAsync(ctx, "VUSXX", new DateOnly(2021, 6, 1), close: 1m);
+        await SeedPriceAsync(ctx, "ZXUXX", new DateOnly(2021, 6, 1), close: 1m);
 
         var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(
@@ -926,6 +926,36 @@ public sealed class PortfolioPerformanceServiceTests
         missing.Symbol.ShouldBe("GONE");
         missing.Cause.ShouldBe("StalePrice");
         missing.AccountId.ShouldBe(accountId);
+    }
+
+    [Fact]
+    public async Task A_missing_price_while_prices_are_being_fetched_for_the_account_is_reported_as_pending()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "NEWX");
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 3), TransactionType.Deposit, 400m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 3), TransactionType.Buy, amount: -400m, quantity: 10m);
+
+        var pending = new PortfolioPerformanceService(
+            ctx.Db,
+            new AccountValuationLoader(ctx.Db, new ValuationOptions()),
+            new ModifiedDietzTimeWeightedReturnCalculator(),
+            new XirrMoneyWeightedReturnCalculator(),
+            new PendingFor(accountId));
+        var result = await pending.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+        var settled = await NewService(ctx).ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+
+        result!.EndingBalance.Missing.ShouldHaveSingleItem().Cause.ShouldBe(MissingCauseNames.PricesPending);
+        settled!.EndingBalance.Missing.ShouldHaveSingleItem().Cause.ShouldBe("NoPrice");
+    }
+
+    private sealed class PendingFor(Guid accountId) : Vizfolio.Application.Pricing.Abstractions.IPriceRefreshStatus
+    {
+        public bool IsPending(Guid id) => id == accountId;
+
+        public Vizfolio.Application.Pricing.Abstractions.PriceRefreshState Current =>
+            new(true, false, null, null, null, null, null, null);
     }
 
     [Fact]

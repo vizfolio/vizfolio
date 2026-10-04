@@ -68,10 +68,11 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
             var headerRow = FindHeaderRow(worksheet);
             if (headerRow is null) continue;
 
-            var transactions = ReadTransactions(worksheet, headerRow);
+            var warnings = new ImportWarningCollector();
+            var transactions = ReadTransactions(worksheet, headerRow, warnings);
             var statement = new ParsedAccountStatement(
                 InstitutionCode: null, AccountNumber: null, Transactions: transactions, Positions: [], AsOf: null);
-            return Task.FromResult(new ParsedPortfolioFile(SourceSystem, [statement]));
+            return Task.FromResult(new ParsedPortfolioFile(SourceSystem, [statement]) { Warnings = warnings.ToList() });
         }
 
         throw new InvalidDataException("Vanguard report: could not locate the transaction header row.");
@@ -88,7 +89,7 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         return null;
     }
 
-    private static List<ParsedTransaction> ReadTransactions(IXLWorksheet worksheet, IXLRow headerRow)
+    private static List<ParsedTransaction> ReadTransactions(IXLWorksheet worksheet, IXLRow headerRow, ImportWarningCollector warnings)
     {
         var columns = MapColumns(headerRow);
         var settlementCol = Col(columns, "settlement date");
@@ -114,13 +115,20 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
             var rawType = CellText(worksheet, rowNumber, typeCol);
             var reportedAmount = CellDecimal(worksheet, rowNumber, amountCol) ?? 0m;
             var quantity = CellDecimal(worksheet, rowNumber, quantityCol);
-            var (type, amount) = NormalizeType(rawType, reportedAmount, quantity);
+            var (type, amount, mapped) = NormalizeType(rawType, reportedAmount, quantity);
+            if (!mapped)
+                warnings.Add(ImportWarningCodes.UnmappedLabel,
+                    $"\"{rawType}\" isn't a Vanguard label Vizfolio knows; those rows were imported as Other (their cash is counted, any shares are applied).",
+                    $"row {rowNumber}");
 
             // Trade date is the economic date but is occasionally blank (e.g. distributions, transfers);
-            // fall back to the always-present settlement date.
+            // fall back to the always-present settlement date. A row with neither is skipped, not the file.
             var settlementDate = CellDate(worksheet, rowNumber, settlementCol);
-            var tradeDate = CellDate(worksheet, rowNumber, tradeCol) ?? settlementDate
-                ?? throw new InvalidDataException($"Row {rowNumber}: no trade or settlement date.");
+            if ((CellDate(worksheet, rowNumber, tradeCol) ?? settlementDate) is not { } tradeDate)
+            {
+                warnings.Add(ImportWarningCodes.RowFailed, "A row with no readable trade or settlement date was skipped.", $"row {rowNumber}");
+                continue;
+            }
 
             var fees = CellDecimal(worksheet, rowNumber, feesCol); // "Free"/blank -> null
 
@@ -137,20 +145,34 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
                 Fees: fees,
                 CurrencyCode: null,
                 Memo: NullIfBlank(CellText(worksheet, rowNumber, nameCol)),
-                SourceType: NullIfBlank(rawType)));
+                SourceType: NullIfBlank(rawType),
+                // "Sweep in/out" moves money between cash and the settlement fund — the fund is the account's cash.
+                IsSettlementFund: IsSweep(rawType)));
         }
 
         return transactions;
     }
 
+    private static bool IsSweep(string rawType)
+        => rawType.TrimStart().StartsWith("sweep", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
-    /// Maps Vanguard's raw type label to a <see cref="TransactionType"/> and fixes the amount sign.
+    /// Maps Vanguard's raw type label to a <see cref="TransactionType"/> and fixes the amount sign. <c>Mapped</c> is
+    /// false for a label this parser doesn't know (stored as Other, with an import warning).
     /// The reported amount reflects settlement-fund mechanics, so for external cash flows we set the sign
     /// from the label: money in is positive, an outgoing "TRANSFER TO" is negative. Everything else keeps
     /// the reported sign (needed for the signed-amount dedup fingerprint). Sweeps map to Other so internal
     /// money-market cash never counts toward contributions.
     /// </summary>
-    private static (TransactionType Type, decimal Amount) NormalizeType(
+    private static (TransactionType Type, decimal Amount, bool Mapped) NormalizeType(
+        string rawType, decimal reportedAmount, decimal? quantity)
+    {
+        var (type, amount) = NormalizeKnownType(rawType, reportedAmount, quantity);
+        var mapped = type != TransactionType.Other || IsSweep(rawType) || rawType.Trim().Equals("conversion", StringComparison.OrdinalIgnoreCase);
+        return (type, amount, mapped);
+    }
+
+    private static (TransactionType Type, decimal Amount) NormalizeKnownType(
         string rawType, decimal reportedAmount, decimal? quantity)
     {
         var t = rawType.Trim().ToLowerInvariant();

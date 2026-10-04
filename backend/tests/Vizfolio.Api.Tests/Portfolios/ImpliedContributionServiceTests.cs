@@ -62,12 +62,12 @@ public sealed class ImpliedContributionServiceTests
         var fund = new AccountHolding(account.AccountId, AccountHoldingKind.Other);
         fund.SetIdentifiers("FUNDX", name: null, isin: null, cusip: null);
         var settlement = new AccountHolding(account.AccountId, AccountHoldingKind.Other);
-        settlement.SetIdentifiers("VMFXX", name: null, isin: null, cusip: null);
+        settlement.SetIdentifiers("ZXMXX", name: null, isin: null, cusip: null);
         ctx.Db.AccountHoldings.AddRange(fund, settlement);
-        // VMFXX is a money market fund per the SEC registry; seen only on the statement, it's the account's cash.
-        var vmfxx = new Vizfolio.Domain.Funds.MoneyMarketFund("S000004462");
-        vmfxx.Update("Federal Money Market Fund", null, "Government", true, 1m, false, new DateOnly(2026, 5, 31), "0000000000-26-000001", ["VMFXX"]);
-        ctx.Db.MoneyMarketFunds.Add(vmfxx);
+        // ZXMXX is a money market fund per the SEC registry; seen only on the statement, it's the account's cash.
+        var settlementFund = new Vizfolio.Domain.Funds.MoneyMarketFund("S000077777");
+        settlementFund.Update("Example Money Market Fund", null, "Government", true, 1m, false, new DateOnly(2026, 5, 31), "0000000000-26-000001", ["ZXMXX"]);
+        ctx.Db.MoneyMarketFunds.Add(settlementFund);
         await ctx.Db.SaveChangesAsync();
 
         var buy = new AccountTransaction(account.AccountId, "QFX", "B1", TransactionType.Buy, new DateOnly(2025, 3, 3), -1000m);

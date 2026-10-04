@@ -9,11 +9,13 @@ namespace Vizfolio.Api.Endpoints.Portfolios;
 /// there's no recent price or snapshot to value it — <see cref="MarketValue"/> is null). <see cref="ValuationSource"/>
 /// says where a value came from (<c>Price</c>, <c>Snapshot</c> or <c>StableNav</c>) and <see cref="PriceAsOf"/> the
 /// date of that price or snapshot. <see cref="HasSnapshot"/>, <see cref="SnapshotAsOf"/> and <see cref="Source"/>
-/// describe the latest snapshot on or before <c>asOf</c>, whether or not it was used. <see cref="CostBasis"/> comes
+/// describe the latest snapshot on or before <c>asOf</c>, whether or not it was used. <see cref="MissingCause"/> says why
+/// a <c>Missing</c> row couldn't be valued (<c>NoPrice</c>, <c>StalePrice</c>, <c>PricesPending</c> while a price fetch
+/// for the account is queued or running, …). <see cref="CostBasis"/> comes
 /// from that snapshot and is only reported while the position still matches it (no shares bought or sold since).
 /// </para>
 /// <para>
-/// The account's cash — uninvested cash plus its settlement fund (e.g. VMFXX) — is one row with <see cref="Kind"/>
+/// The account's cash — uninvested cash plus its settlement fund (e.g. a broker's core money market fund) — is one row with <see cref="Kind"/>
 /// <c>Cash</c>, listed last; the settlement fund itself isn't listed separately.
 /// </para>
 /// </summary>
@@ -35,4 +37,5 @@ public sealed record HoldingResponse(
     decimal? GainLoss,
     string Status,
     string? ValuationSource,
-    DateOnly? PriceAsOf);
+    DateOnly? PriceAsOf,
+    string? MissingCause = null);

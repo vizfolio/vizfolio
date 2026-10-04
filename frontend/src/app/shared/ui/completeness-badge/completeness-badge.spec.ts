@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 
 import { CompletenessBadge } from './completeness-badge';
 
-function render(inputs: { complete: boolean; missing?: number; asOf?: string | null }) {
+function render(inputs: { complete: boolean; missing?: number; asOf?: string | null; pending?: boolean }) {
   const fixture = TestBed.createComponent(CompletenessBadge);
   fixture.componentRef.setInput('complete', inputs.complete);
   if (inputs.missing !== undefined) {
@@ -10,6 +10,9 @@ function render(inputs: { complete: boolean; missing?: number; asOf?: string | n
   }
   if (inputs.asOf !== undefined) {
     fixture.componentRef.setInput('asOf', inputs.asOf);
+  }
+  if (inputs.pending !== undefined) {
+    fixture.componentRef.setInput('pending', inputs.pending);
   }
   fixture.detectChanges();
   return fixture.nativeElement as HTMLElement;
@@ -37,5 +40,14 @@ describe('CompletenessBadge', () => {
     expect(el.querySelector('.badge')!.getAttribute('title')).toContain(
       '1 holding is missing',
     );
+  });
+
+  it('shows "Updating…" rather than "Estimate" while prices are still downloading', () => {
+    const el = render({ complete: false, missing: 2, pending: true });
+    const badge = el.querySelector('.badge')!;
+    expect(badge.textContent?.trim()).toBe('Updating…');
+    expect(badge.classList.contains('badge--estimate')).toBe(false);
+    expect(badge.classList.contains('badge--pending')).toBe(true);
+    expect(badge.getAttribute('title')).toContain('still downloading');
   });
 });

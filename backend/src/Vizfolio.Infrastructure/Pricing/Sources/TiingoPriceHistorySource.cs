@@ -26,15 +26,18 @@ public sealed class TiingoPriceHistorySource : IPriceHistorySource, IDisposable
     private readonly HttpClient _http;
     private readonly TiingoProviderOptions _options;
     private readonly ILogger<TiingoPriceHistorySource> _logger;
+    private readonly IProviderKeyStore _keys;
     private readonly RateLimiter _limiter;
 
     public TiingoPriceHistorySource(
         HttpClient http,
         IOptions<PriceHistoryOptions> options,
-        ILogger<TiingoPriceHistorySource> logger)
+        ILogger<TiingoPriceHistorySource> logger,
+        IProviderKeyStore keys)
     {
         _http = http;
         _options = options.Value.Providers.Tiingo;
+        _keys = keys;
         _logger = logger;
 
         var perHour = Math.Max(1, _options.RequestsPerHour);
@@ -51,11 +54,20 @@ public sealed class TiingoPriceHistorySource : IPriceHistorySource, IDisposable
 
     public PriceSource Source => PriceSource.Tiingo;
 
+    public string DisplayName => "Tiingo";
+
+    public bool RequiresApiKey => true;
+
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(ApiKey);
+
+    // Configuration wins over a key saved from Settings (see IProviderKeyStore).
+    private string? ApiKey => _keys.GetApiKey(PriceSource.Tiingo);
+
     // Highest priority: raw closes, splits and mutual-fund NAVs in a single call.
     public int Priority => 30;
 
     public bool Supports(PriceSeriesRequest request)
-        => !string.IsNullOrWhiteSpace(_options.ApiKey) && !string.IsNullOrWhiteSpace(request.Symbol);
+        => IsAvailable && !string.IsNullOrWhiteSpace(request.Symbol);
 
     public async Task<PriceSeriesResult?> GetDailyClosesAsync(
         PriceSeriesRequest request, CancellationToken cancellationToken = default)
@@ -66,7 +78,7 @@ public sealed class TiingoPriceHistorySource : IPriceHistorySource, IDisposable
 
         using var lease = await AcquireAsync(cancellationToken);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
-        httpRequest.Headers.TryAddWithoutValidation("Authorization", $"Token {_options.ApiKey}");
+        httpRequest.Headers.TryAddWithoutValidation("Authorization", $"Token {ApiKey}");
         using var response = await _http.SendAsync(httpRequest, cancellationToken);
 
         if (response.StatusCode == HttpStatusCode.NotFound)

@@ -41,6 +41,28 @@ public sealed class AccountHolding
 
     public DateTimeOffset CreatedAt { get; private set; }
 
+    /// <summary>
+    /// The account's settlement (core / sweep) fund, as its broker marks it: its shares are the account's cash.
+    /// Set by imports from broker knowledge (see docs/performance-api.md → "Broker profiles").
+    /// </summary>
+    public bool IsSettlementFund { get; private set; }
+
+    /// <summary>The upload that created this holding; undoing it may remove the holding if nothing else uses it.</summary>
+    public Guid? CreatedByImportBatchId { get; private set; }
+
+    public void MarkSettlementFund()
+    {
+        IsSettlementFund = true;
+    }
+
+    public void MarkCreatedByImport(Guid importBatchId)
+    {
+        if (importBatchId == Guid.Empty)
+            throw new ArgumentException("Import batch ID is required.", nameof(importBatchId));
+
+        CreatedByImportBatchId ??= importBatchId;
+    }
+
     public void SetIdentifiers(string? symbol, string? name, string? isin, string? cusip)
     {
         Symbol = string.IsNullOrWhiteSpace(symbol) ? null : symbol.Trim().ToUpperInvariant();

@@ -14,6 +14,8 @@ function result(impliedContributions: number, impliedContributionsAmount: number
     failures: [],
     impliedContributions,
     impliedContributionsAmount,
+    updated: 0,
+    snapshotsInserted: 0,
   };
 }
 

@@ -10,7 +10,8 @@ namespace Vizfolio.Application.Portfolios.Valuation;
 /// the earliest broker position rolled <i>back</i> to the day before the account's first transaction, so a partial
 /// history (e.g. an 18-month QFX) starts from the positions the account really held, with no manual opening
 /// balance. Provider splits apply at the start of their ex-date; a broker row reporting the same split is not
-/// applied twice. At each later anchor the rolled quantity is compared with the broker's and then reset to it.</para>
+/// applied twice, and a broker split the provider doesn't know applies its own ratio (or, with no ratio, its change
+/// in shares). At each later anchor the rolled quantity is compared with the broker's and then reset to it.</para>
 /// <para><b>Cash</b> is uninvested cash plus the settlement fund (<see cref="AccountCash"/>), anchored on the
 /// settlement fund's and any cash holding's snapshots the same way.</para>
 /// <para>A ledger/broker disagreement worth more than <see cref="ValuationOptions.MismatchMaterialityMin"/> or
@@ -117,26 +118,17 @@ public sealed class AccountStateEngine
 
     private void BuildShareTimeline(ShareComponent c)
     {
-        var splits = c.Holding.Splits.Where(s => s.Factor > 0m && s.Factor != 1m).OrderBy(s => s.ExDate).ToList();
-
-        // Broker split rows: the provider's split is authoritative, so a broker row for the same split is never
-        // applied on top. One with no provider split nearby can't be applied (no ratio) and is reported.
-        foreach (var row in c.Rows.Where(r => r.Type == TransactionType.Split))
-        {
-            if (!splits.Any(s => Math.Abs(s.ExDate.DayNumber - row.TradeDate.DayNumber) <= SplitMatchDays))
-                _findings.Add(new ReconciliationFinding(
-                    FindingCode.UnmatchedSplit, c.Holding.HoldingId, c.Holding.Symbol, row.TradeDate, null, null, null, false));
-        }
+        var (splits, handledSplitRows) = Splits(c);
 
         var anchors = c.Holding.AnchorsAscending
             .Where(a => !(a.Quantity == 0m && a.MarketValue is > 0m)) // value-only snapshot: no usable quantity
             .ToList();
 
         // Pass 1 with every row, to recognise broker rows that just record a split's extra shares.
-        var deltas = ShareDeltas(c.Rows, skip: null);
+        var deltas = ShareDeltas(c.Rows, skip: handledSplitRows);
         var provisional = Walk(deltas, splits, anchors, derived: null, recordMismatches: false);
         var skip = SplitShareRows(c.Rows, splits, provisional);
-        if (skip.Count > 0) deltas = ShareDeltas(c.Rows, skip);
+        if (skip.Count > 0) deltas = ShareDeltas(c.Rows, skip.Union(handledSplitRows).ToHashSet());
 
         c.Opening = DeriveOpening(c.Holding.HoldingId, c.Holding.Symbol, deltas, splits, anchors);
         var derived = OpeningDate is { } openingDate
@@ -150,7 +142,43 @@ public sealed class AccountStateEngine
         c.ValuedAnchors = c.Holding.AnchorsAscending.Where(a => a.MarketValue.HasValue).ToList();
     }
 
-    /// <summary>How each row moves the share count (sells always reduce; income/Other only with a quantity).</summary>
+    /// <summary>
+    /// The holding's splits (roadmap Appendix A.7). Provider splits are authoritative, so a broker split row within
+    /// <see cref="SplitMatchDays"/> of one is the same event and adds nothing. A broker split the provider doesn't know
+    /// applies its own ratio at the start of its date; one without a ratio falls back to its change in shares (its
+    /// quantity, via <see cref="ShareDeltas"/>). Either way it's reported as an unmatched split. Returns the split rows
+    /// whose quantity must not also be added.
+    /// </summary>
+    private (List<SplitAction> Splits, HashSet<Guid> HandledRows) Splits(ShareComponent c)
+    {
+        var provider = c.Holding.Splits.Where(s => s.Factor > 0m && s.Factor != 1m).ToList();
+        var splits = new List<SplitAction>(provider);
+        var handled = new HashSet<Guid>();
+
+        foreach (var row in c.Rows.Where(r => r.Type == TransactionType.Split))
+        {
+            if (provider.Any(s => Math.Abs(s.ExDate.DayNumber - row.TradeDate.DayNumber) <= SplitMatchDays))
+            {
+                handled.Add(row.TransactionId);
+                continue;
+            }
+
+            _findings.Add(new ReconciliationFinding(
+                FindingCode.UnmatchedSplit, c.Holding.HoldingId, c.Holding.Symbol, row.TradeDate, null, null, null, false));
+            if (row.SplitFactor is { } factor && factor > 0m && factor != 1m)
+            {
+                splits.Add(new SplitAction(row.TradeDate, factor));
+                handled.Add(row.TransactionId);
+            }
+        }
+
+        return (splits.OrderBy(s => s.ExDate).ToList(), handled);
+    }
+
+    /// <summary>
+    /// How each row moves the share count (sells always reduce; income/Other only with a quantity; a split row by its
+    /// change in shares unless its split is applied as a ratio).
+    /// </summary>
     private static List<(DateOnly Date, decimal Delta)> ShareDeltas(IEnumerable<LedgerRow> rows, HashSet<Guid>? skip)
     {
         var deltas = new List<(DateOnly, decimal)>();
@@ -161,6 +189,7 @@ public sealed class AccountStateEngine
             {
                 TransactionType.Buy or TransactionType.Reinvest or TransactionType.Transfer => row.Quantity ?? 0m,
                 TransactionType.Dividend or TransactionType.CapitalGain or TransactionType.Other => row.Quantity ?? 0m,
+                TransactionType.Split => row.Quantity ?? 0m,
                 // Brokers disagree on the sign of sold units; a sell always reduces the position.
                 TransactionType.Sell => -Math.Abs(row.Quantity ?? 0m),
                 _ => 0m,

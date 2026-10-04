@@ -100,7 +100,7 @@ public sealed class AccountStateEngineTests
     [Fact]
     public void A_sweep_reported_by_two_sources_moves_the_cash_only_once()
     {
-        // The QFX reports the sweep into the settlement fund as a Buy of VMFXX; the Vanguard report as a "Sweep in".
+        // The QFX reports the sweep into the settlement fund as a Buy of ZXMXX; the Vanguard report as a "Sweep in".
         // The settlement fund is cash, so neither changes the account's cash.
         var engine = Build(
             ledger:
@@ -109,7 +109,7 @@ public sealed class AccountStateEngineTests
                 Row(Jan2, TransactionType.Buy, -700m, Settlement, 700m, source: "QFX"),
                 Row(Jan2, TransactionType.Other, -700m, Settlement, sourceType: "Sweep in"),
             ],
-            holdings: [Holding(Settlement, "VMFXX")]);
+            holdings: [Holding(Settlement, "ZXMXX")]);
 
         engine.ValueAt(Dec31).Value.ShouldBe(700m);
     }
@@ -123,11 +123,11 @@ public sealed class AccountStateEngineTests
             ledger:
             [
                 Row(Jan2, TransactionType.Deposit, 12_000.00m),
-                Row(Jan2, TransactionType.Other, -12_000.00m, Settlement, sourceType: "Sweep in", ticker: "VMMXX"),
-                Row(Jun2, TransactionType.Transfer, -12_000.00m, Settlement, -12_000.00m, sourceType: "TRANSFER TO 1234", ticker: "VMMXX"),
+                Row(Jan2, TransactionType.Other, -12_000.00m, Settlement, sourceType: "Sweep in", ticker: "ZXCXX"),
+                Row(Jun2, TransactionType.Transfer, -12_000.00m, Settlement, -12_000.00m, sourceType: "TRANSFER TO 1234", ticker: "ZXCXX"),
                 Row(Jun2, TransactionType.Transfer, 12_000.40m, sourceType: "Transfer (incoming)"),
             ],
-            holdings: [Holding(Settlement, "VMMXX")]);
+            holdings: [Holding(Settlement, "ZXCXX")]);
 
         engine.ValueAt(Dec31).Value.ShouldBe(12_000.40m);
     }
@@ -140,10 +140,10 @@ public sealed class AccountStateEngineTests
         var engine = Build(
             ledger:
             [
-                Row(Jan2, TransactionType.Buy, 200m, Settlement, 200m, sourceType: "Buy", ticker: "VMMXX"),
+                Row(Jan2, TransactionType.Buy, 200m, Settlement, 200m, sourceType: "Buy", ticker: "ZXCXX"),
                 Row(Jan2, TransactionType.Deposit, 200m, source: ImpliedContributionService.SourceSystem),
             ],
-            holdings: [Holding(Settlement, "VMMXX", stablePrice: 1m)]);
+            holdings: [Holding(Settlement, "ZXCXX", stablePrice: 1m)]);
 
         engine.ValueAt(Dec31).Value.ShouldBe(200m);
     }
@@ -165,7 +165,7 @@ public sealed class AccountStateEngineTests
             holdings:
             [
                 Holding(Fund, "FUND", prices: [(Mar3.AddDays(-1), 95m), (Dec31, 110m)], anchors: [Anchor(statement, 60m, 6600m)]),
-                Holding(Settlement, "VMFXX", anchors: [Anchor(statement, 100m, 100m)], stablePrice: 1m),
+                Holding(Settlement, "ZXMXX", anchors: [Anchor(statement, 100m, 100m)], stablePrice: 1m),
             ]);
 
         var opening = engine.OpeningDate!.Value;
@@ -293,6 +293,88 @@ public sealed class AccountStateEngineTests
         engine.Findings.ShouldContain(f => f.Code == FindingCode.UnmatchedSplit && f.Date == Jun2);
     }
 
+    [Fact]
+    public void A_broker_split_the_provider_doesnt_know_applies_its_own_ratio_from_its_date()
+    {
+        var engine = Build(
+            ledger:
+            [
+                Row(Jan2, TransactionType.Buy, -1000m, Fund, 10m),
+                Row(Jun2, TransactionType.Split, 0m, Fund, quantity: 20m) with { SplitFactor = 3m },
+            ],
+            holdings: [Holding(Fund, "SPLT", prices: [(Jun2.AddDays(-1), 300m), (Dec31, 100m)])]);
+
+        engine.ValueAt(Jun2.AddDays(-1)).Components.Single(c => c.HoldingId == Fund).Quantity.ShouldBe(10m);
+        // The ratio applies; the row's own change in shares (+20) is the same split and isn't added on top.
+        engine.ValueAt(Dec31).Components.Single(c => c.HoldingId == Fund).Quantity.ShouldBe(30m);
+        engine.Findings.ShouldContain(f => f.Code == FindingCode.UnmatchedSplit && f.Date == Jun2);
+    }
+
+    [Fact]
+    public void A_broker_split_with_no_ratio_adds_its_change_in_shares()
+    {
+        var engine = Build(
+            ledger: [Row(Jan2, TransactionType.Buy, -1000m, Fund, 10m), Row(Jun2, TransactionType.Split, 0m, Fund, quantity: 10m)],
+            holdings: [Holding(Fund, "SPLT", prices: [(Dec31, 50m)])]);
+
+        engine.ValueAt(Dec31).Components.Single(c => c.HoldingId == Fund).Quantity.ShouldBe(20m);
+    }
+
+    [Fact]
+    public void A_broker_split_ratio_defers_to_the_providers_split_for_the_same_event()
+    {
+        var exDate = new DateOnly(2025, 6, 2);
+        var engine = Build(
+            ledger:
+            [
+                Row(Jan2, TransactionType.Buy, -1000m, Fund, 10m),
+                Row(exDate.AddDays(2), TransactionType.Split, 0m, Fund, quantity: 30m) with { SplitFactor = 4m },
+            ],
+            holdings: [Holding(Fund, "SPLT", prices: [(Dec31, 25m)], splits: [new SplitAction(exDate, 4m)])]);
+
+        engine.ValueAt(Dec31).Components.Single(c => c.HoldingId == Fund).Quantity.ShouldBe(40m);
+        engine.Findings.ShouldNotContain(f => f.Code == FindingCode.UnmatchedSplit);
+    }
+
+    [Fact]
+    public void Return_of_capital_is_cash_in_but_not_a_contribution_and_a_journal_moves_nothing()
+    {
+        var engine = Build(
+            ledger:
+            [
+                Row(Jan2, TransactionType.Deposit, 1000m),
+                Row(Jan2, TransactionType.Buy, -1000m, Fund, 10m),
+                Row(Mar3, TransactionType.ReturnOfCapital, 30m, Fund),
+                Row(Jun2, TransactionType.Journal, 0m, Fund, quantity: 5m),
+                Row(Jun2, TransactionType.Journal, 200m),
+            ],
+            holdings: [Holding(Fund, "FUND", prices: [(Dec31, 100m)])]);
+
+        var value = engine.ValueAt(Dec31);
+        value.Components.Single(c => c.HoldingId == Fund).Quantity.ShouldBe(10m);
+        value.Components.Single(c => c.IsCash).Value.ShouldBe(30m);
+        engine.FlowsBetween(Jan2, Dec31).ShouldHaveSingleItem().Kind.ShouldBe(FlowKind.Deposit);
+    }
+
+    [Fact]
+    public void A_fund_the_broker_marks_as_its_settlement_fund_is_the_accounts_cash()
+    {
+        // Rows from a broker profile carry the flag; no "Sweep" label and no money market registry entry needed.
+        var core = Guid.NewGuid();
+        var engine = Build(
+            ledger:
+            [
+                Row(Jan2, TransactionType.Deposit, 500m),
+                Row(Jan2, TransactionType.Buy, -500m, core, 500m, ticker: "CORE") with { IsSettlementFund = true },
+            ],
+            holdings: [Holding(core, "CORE")]);
+
+        engine.SettlementTickers.ShouldContain("CORE");
+        var value = engine.ValueAt(Dec31);
+        value.IsComplete.ShouldBeTrue();
+        value.Components.Single(c => c.IsCash).Value.ShouldBe(500m);
+    }
+
     // ---------- reconciliation ----------
 
     [Fact]
@@ -327,7 +409,7 @@ public sealed class AccountStateEngineTests
     {
         var engine = Build(
             ledger: [Row(Jan2, TransactionType.Deposit, 50_000m), Row(Jan2, TransactionType.Buy, -50_000m, Fund, 50_000m)],
-            holdings: [Holding(Fund, "VUSXX", stablePrice: 1m)]);
+            holdings: [Holding(Fund, "ZXUXX", stablePrice: 1m)]);
 
         engine.ValueAt(Jun2).Components.Single(c => c.HoldingId == Fund).ShouldSatisfyAllConditions(
             c => c.Value.ShouldBe(50_000m),
@@ -407,7 +489,7 @@ public sealed class AccountStateEngineTests
         string? sourceType = null,
         string? ticker = null)
     {
-        ticker ??= holdingId == Settlement ? "VMFXX" : holdingId is null ? null : "T" + holdingId.Value.ToString("N")[..5];
+        ticker ??= holdingId == Settlement ? "ZXMXX" : holdingId is null ? null : "T" + holdingId.Value.ToString("N")[..5];
         return new LedgerRow(Guid.NewGuid(), source, date, null, type, holdingId, ticker, quantity, amount, null, sourceType);
     }
 

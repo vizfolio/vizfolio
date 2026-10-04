@@ -64,6 +64,10 @@ internal sealed class AccountHoldingConfiguration : IEntityTypeConfiguration<Acc
             .IsRequired(false);
 
         builder.Property(h => h.CreatedAt).IsRequired();
+        builder.Property(h => h.IsSettlementFund).IsRequired().HasDefaultValue(false);
+
+        // Provenance pointer with no FK, as on AccountTransaction.ImportBatchId.
+        builder.Property(h => h.CreatedByImportBatchId);
 
         builder.HasIndex(h => h.AccountId);
         builder.HasIndex(h => h.SecurityId);

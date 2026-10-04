@@ -17,6 +17,8 @@ import {
   formatPercent,
   trendOf,
 } from './dashboard.util';
+import { pollWhilePending } from '../../shared/util/poll';
+import { performanceAwaitsPrices } from '../../shared/util/performance-format';
 
 /**
  * loading — resolving portfolios or performance
@@ -153,7 +155,7 @@ export class Dashboard {
             return of<PortfolioPerformance | null>(null);
           }
           this.perfStatus.set('loading');
-          return this.api.getPerformance(portfolioId).pipe(
+          return pollWhilePending(() => this.api.getPerformance(portfolioId), performanceAwaitsPrices).pipe(
             catchError(() => {
               this.perfStatus.set('error');
               return of<PortfolioPerformance | null>(null);

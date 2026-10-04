@@ -29,6 +29,7 @@
               [complete]="p.startingBalance.isComplete"
               [missing]="p.startingBalance.holdingsMissingSnapshot"
               [asOf]="p.startingBalance.snapshotAsOf"
+              [pending]="pendingPrices(p.startingBalance)"
             /></dt>
           <dd>{{ money(p.startingBalance.value) }}</dd>
         </div>
@@ -37,6 +38,7 @@
               [complete]="p.endingBalance.isComplete"
               [missing]="p.endingBalance.holdingsMissingSnapshot"
               [asOf]="p.endingBalance.snapshotAsOf"
+              [pending]="pendingPrices(p.endingBalance)"
             /></dt>
           <dd>{{ money(p.endingBalance.value) }}</dd>
         </div>

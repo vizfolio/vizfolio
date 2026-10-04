@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Application.Portfolios.Valuation;
+using Vizfolio.Application.Pricing.Abstractions;
 using Vizfolio.Domain.Portfolios;
 
 namespace Vizfolio.Api.Endpoints.Portfolios;
@@ -19,11 +20,13 @@ public sealed class GetAccountHoldingsEndpoint
 {
     private readonly IAppDbContext _db;
     private readonly AccountValuationLoader _valuationLoader;
+    private readonly IPriceRefreshStatus _priceRefresh;
 
-    public GetAccountHoldingsEndpoint(IAppDbContext db, AccountValuationLoader valuationLoader)
+    public GetAccountHoldingsEndpoint(IAppDbContext db, AccountValuationLoader valuationLoader, IPriceRefreshStatus priceRefresh)
     {
         _db = db;
         _valuationLoader = valuationLoader;
+        _priceRefresh = priceRefresh;
     }
 
     public override void Configure()
@@ -71,6 +74,10 @@ public sealed class GetAccountHoldingsEndpoint
             .GroupBy(s => s.AccountHoldingId)
             .ToDictionary(g => g.Key, g => g.MaxBy(s => s.AsOf)!);
 
+        var pricesPending = _priceRefresh.IsPending(req.AccountId);
+        string? CauseOf(ComponentValue v)
+            => v.Status == HoldingValuationStatus.Missing ? MissingCauseNames.Of(v.Cause, pricesPending) : null;
+
         var results = new List<HoldingResponse>();
         var cashHoldings = new List<Guid>();
         foreach (var h in holdings)
@@ -105,7 +112,8 @@ public sealed class GetAccountHoldingsEndpoint
                 gainLoss,
                 StatusName(v.Status),
                 v.Source?.ToString(),
-                v.PriceAsOf ?? v.SnapshotAsOf));
+                v.PriceAsOf ?? v.SnapshotAsOf,
+                CauseOf(v)));
         }
 
         results = results
@@ -145,7 +153,8 @@ public sealed class GetAccountHoldingsEndpoint
                 null,
                 StatusName(cash.Status),
                 cash.Source?.ToString(),
-                null));
+                null,
+                CauseOf(cash)));
         }
 
         await Send.OkAsync(results, ct);

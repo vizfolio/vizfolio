@@ -124,7 +124,7 @@ public sealed class ImpliedContributionService : IImpliedContributionService
             .AsNoTracking()
             .Where(t => t.AccountId == accountId && t.SourceSystem != SourceSystem)
             .Select(t => new CashLedgerRow(
-                t.TradeDate, t.Type, t.Amount, t.Quantity, t.Ticker, t.SourceType, t.SettlementDate))
+                t.TradeDate, t.Type, t.Amount, t.Quantity, t.Ticker, t.SourceType, t.SettlementDate, t.IsSettlementFund))
             .ToListAsync(cancellationToken);
 
     /// <summary>

@@ -102,6 +102,48 @@ describe('PortfolioApiService', () => {
     req.flush({});
   });
 
+  it('GETs the import history and undo preview, and POSTs an undo with no body', () => {
+    service.getImports('p1').subscribe();
+    const list = http.expectOne('/api/portfolios/p1/imports');
+    expect(list.request.method).toBe('GET');
+    list.flush({ imports: [], transactionsImportedBeforeHistory: 0 });
+
+    service.getImportUndoPreview('p1', 'b1').subscribe();
+    const preview = http.expectOne('/api/portfolios/p1/imports/b1/undo-preview');
+    expect(preview.request.method).toBe('GET');
+    preview.flush({});
+
+    service.undoImport('p1', 'b1').subscribe();
+    const undo = http.expectOne('/api/portfolios/p1/imports/b1/undo');
+    expect(undo.request.method).toBe('POST');
+    expect(undo.request.body).toBeNull();
+    undo.flush({});
+  });
+
+  it('POSTs a reprocess of the stored import files', () => {
+    service.reprocessImports().subscribe();
+    const req = http.expectOne('/api/imports/reprocess');
+    expect(req.request.method).toBe('POST');
+    req.flush({ batches: 0, inserted: 0, updated: 0, snapshotsInserted: 0, perBatch: [] });
+  });
+
+  it('reads price status and providers, queues a refresh, and PUTs a provider key', () => {
+    service.getPriceStatus().subscribe();
+    http.expectOne('/api/prices/status').flush({ refresh: {}, providersAvailable: 0, series: [] });
+
+    service.refreshPrices().subscribe();
+    expect(http.expectOne('/api/prices/refresh').request.method).toBe('POST');
+
+    service.getPriceProviders().subscribe();
+    http.expectOne('/api/settings/price-providers').flush([]);
+
+    service.setPriceProviderKey('Tiingo', 'abc').subscribe();
+    const put = http.expectOne('/api/settings/price-providers/Tiingo');
+    expect(put.request.method).toBe('PUT');
+    expect(put.request.body).toEqual({ apiKey: 'abc' });
+    put.flush({});
+  });
+
   it('GETs the available import parsers', () => {
     service.getImportParsers().subscribe();
     const req = http.expectOne('/api/imports/parsers');

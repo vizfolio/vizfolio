@@ -8,7 +8,7 @@ namespace Vizfolio.Application.Portfolios;
 public sealed class AccountHistoryService : IAccountHistoryService
 {
     /// <summary>Symbol that addresses an account's cash in an opening balance.</summary>
-    public const string CashSymbol = "$CASH";
+    public const string CashSymbol = CashHoldings.Symbol;
 
     private readonly IAppDbContext _db;
     private readonly AccountValuationLoader _valuationLoader;
@@ -190,17 +190,7 @@ public sealed class AccountHistoryService : IAccountHistoryService
 
         // The account's cash has one holding of its own, valued with (and anchoring) the settlement fund's cash.
         if (normalized == CashSymbol)
-        {
-            var cash = await _db.AccountHoldings.FirstOrDefaultAsync(
-                h => h.AccountId == accountId && h.Kind == AccountHoldingKind.Cash, cancellationToken);
-            if (cash is not null) return cash;
-
-            cash = new AccountHolding(accountId, AccountHoldingKind.Cash);
-            cash.SetIdentifiers(CashSymbol, name: "Cash", isin: null, cusip: null);
-            cash.SetCurrency(currencyCode);
-            _db.AccountHoldings.Add(cash);
-            return cash;
-        }
+            return (await CashHoldings.GetOrCreateAsync(_db, accountId, currencyCode, cancellationToken)).Holding;
 
         var existing = await _db.AccountHoldings
             .FirstOrDefaultAsync(

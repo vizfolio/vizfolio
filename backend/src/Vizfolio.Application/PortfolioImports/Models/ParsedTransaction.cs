@@ -16,5 +16,12 @@ public sealed record ParsedTransaction(
     string? CurrencyCode,
     string? Memo,
     // The broker's raw type label, preserved verbatim (see AccountTransaction.SourceType).
-    // Trailing with a default so existing parsers/tests compile unchanged.
-    string? SourceType = null);
+    // Trailing optional fields with defaults so existing parsers/tests compile unchanged.
+    string? SourceType = null,
+    // A movement of the account's settlement (core / sweep) fund, as the broker or format marks it.
+    bool IsSettlementFund = false,
+    // A split's ratio (new : old shares), on Split rows.
+    decimal? SplitNumerator = null,
+    decimal? SplitDenominator = null,
+    // The broker's sub-account (e.g. OFX SUBACCTSEC "CASH"/"MARGIN"); metadata only.
+    string? SubAccount = null);

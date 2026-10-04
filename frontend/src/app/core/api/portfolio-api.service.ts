@@ -17,8 +17,15 @@ import {
   SetOpeningBalanceRequest,
 } from './models/coverage.models';
 import { HoldingRow } from './models/holdings.models';
-import { ImportParser, PortfolioImportResult } from './models/imports.models';
+import {
+  ImportHistory,
+  ImportParser,
+  ImportUndoSummary,
+  PortfolioImportResult,
+  ReprocessResult,
+} from './models/imports.models';
 import { LedgerEntry } from './models/ledger.models';
+import { PriceProvider, PriceRefreshState, PriceStatus } from './models/prices.models';
 import {
   AccountSummary,
   PortfolioPerformance,
@@ -154,6 +161,56 @@ export class PortfolioApiService {
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/imports`,
       fileForm(file, sourceSystem),
     );
+  }
+
+  /** GET /api/portfolios/{portfolioId}/imports — the portfolio's imports, newest first. */
+  getImports(portfolioId: string): Observable<ImportHistory> {
+    return this.http.get<ImportHistory>(`${API_BASE}/portfolios/${portfolioId}/imports`);
+  }
+
+  /** GET .../imports/{importBatchId}/undo-preview — what undoing would remove or revert (dry run). */
+  getImportUndoPreview(portfolioId: string, importBatchId: string): Observable<ImportUndoSummary> {
+    return this.http.get<ImportUndoSummary>(
+      `${API_BASE}/portfolios/${portfolioId}/imports/${importBatchId}/undo-preview`,
+    );
+  }
+
+  /** POST .../imports/{importBatchId}/undo — reverses the import (409 if already undone). */
+  undoImport(portfolioId: string, importBatchId: string): Observable<ImportUndoSummary> {
+    return this.http.post<ImportUndoSummary>(
+      `${API_BASE}/portfolios/${portfolioId}/imports/${importBatchId}/undo`,
+      null,
+    );
+  }
+
+  /**
+   * POST /api/imports/reprocess — re-reads every stored import file with the current parsers, adding rows they
+   * used to drop and updating rows they now read differently. All portfolios.
+   */
+  reprocessImports(): Observable<ReprocessResult> {
+    return this.http.post<ReprocessResult>(`${API_BASE}/imports/reprocess`, {});
+  }
+
+  // ---- Prices --------------------------------------------------------------
+
+  /** GET /api/prices/status — the background refresh and each price series' coverage. */
+  getPriceStatus(): Observable<PriceStatus> {
+    return this.http.get<PriceStatus>(`${API_BASE}/prices/status`);
+  }
+
+  /** POST /api/prices/refresh — queue a fetch for every holding (returns at once, 202). */
+  refreshPrices(): Observable<PriceRefreshState> {
+    return this.http.post<PriceRefreshState>(`${API_BASE}/prices/refresh`, {});
+  }
+
+  /** GET /api/settings/price-providers — providers in the order they're tried. */
+  getPriceProviders(): Observable<PriceProvider[]> {
+    return this.http.get<PriceProvider[]>(`${API_BASE}/settings/price-providers`);
+  }
+
+  /** PUT /api/settings/price-providers/{provider} — save an API key; a blank key removes the saved one. */
+  setPriceProviderKey(provider: string, apiKey: string | null): Observable<PriceProvider> {
+    return this.http.put<PriceProvider>(`${API_BASE}/settings/price-providers/${provider}`, { apiKey });
   }
 
   // ---- Performance ---------------------------------------------------------

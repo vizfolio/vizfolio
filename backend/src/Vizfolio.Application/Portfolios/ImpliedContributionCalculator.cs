@@ -10,7 +10,8 @@ public readonly record struct CashLedgerRow(
     decimal? Quantity,
     string? Ticker,
     string? SourceType,
-    DateOnly? SettlementDate = null)
+    DateOnly? SettlementDate = null,
+    bool IsSettlementFund = false)
 {
     /// <summary>
     /// When the cash actually moves: at settlement, not on the trade date. A purchase settles days after
@@ -68,14 +69,15 @@ public static class ImpliedContributionCalculator
         => Roll(rows, tolerance, openingCash).Cash;
 
     /// <summary>
-    /// Tickers the account treats as its settlement fund: any ticker seen on a "Sweep" row. This keys off
-    /// Vanguard's raw label; when a second broker is added, move this knowledge into its parser (see
-    /// docs/performance-api.md → "Broker assumptions").
+    /// Tickers the account treats as its settlement fund: any ticker on a row the broker's parser marked as a
+    /// settlement-fund movement (see the broker profiles in docs/performance-api.md), or — for rows stored before
+    /// parsers marked them — on a row labelled "Sweep…".
     /// </summary>
     public static IReadOnlySet<string> SettlementTickers(IEnumerable<CashLedgerRow> rows)
         => rows
             .Where(r => !string.IsNullOrWhiteSpace(r.Ticker)
-                        && r.SourceType?.TrimStart().StartsWith("sweep", StringComparison.OrdinalIgnoreCase) == true)
+                        && (r.IsSettlementFund
+                            || r.SourceType?.TrimStart().StartsWith("sweep", StringComparison.OrdinalIgnoreCase) == true))
             .Select(r => r.Ticker!.Trim().ToUpperInvariant())
             .ToHashSet(StringComparer.Ordinal);
 
@@ -95,9 +97,12 @@ public static class ImpliedContributionCalculator
                 return -row.Amount;
 
             // Cash ↔ settlement fund is cash ↔ cash; only its income adds to what the account can spend.
-            return row.Type is TransactionType.Dividend or TransactionType.Interest or TransactionType.CapitalGain
-                ? row.Amount
-                : 0m;
+            return row.Type switch
+            {
+                TransactionType.Dividend or TransactionType.Interest or TransactionType.CapitalGain => row.Amount,
+                TransactionType.ReturnOfCapital => Math.Abs(row.Amount),
+                _ => 0m,
+            };
         }
 
         return CashEffect(row);
@@ -117,10 +122,16 @@ public static class ImpliedContributionCalculator
         TransactionType.Dividend or TransactionType.Interest or TransactionType.CapitalGain =>
             row.Quantity is null ? row.Amount : 0m,
 
+        // Part of the investment paid back: cash in, but neither income nor a contribution.
+        TransactionType.ReturnOfCapital => Math.Abs(row.Amount),
+
+        // A split moves shares only; any amount is cash paid for fractional shares.
+        TransactionType.Split => row.Amount,
+
         // Unrecognised broker activity is taken at its reported cash sign.
         TransactionType.Other => row.Amount,
 
-        _ => 0m, // Split
+        _ => 0m, // Journal: between the account's own sub-accounts
     };
 
     /// <summary>

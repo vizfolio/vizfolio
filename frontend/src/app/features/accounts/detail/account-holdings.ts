@@ -9,6 +9,9 @@ import {
   formatMoney,
   formatQuantity,
 } from '../../../shared/util/performance-format';
+import { pollWhilePending } from '../../../shared/util/poll';
+
+const awaitsPrices = (rows: HoldingRow[] | null) => rows?.some((h) => h.missingCause === 'PricesPending') ?? false;
 
 type Status = 'loading' | 'ready' | 'error';
 
@@ -42,7 +45,12 @@ export class AccountHoldings {
   );
 
   protected readonly missingCount = computed(
-    () => this.holdings().filter((h) => h.status === 'Missing').length,
+    () => this.holdings().filter((h) => h.status === 'Missing' && h.missingCause !== 'PricesPending').length,
+  );
+
+  /** Positions waiting on prices that are still downloading (the list refreshes until they arrive). */
+  protected readonly pendingCount = computed(
+    () => this.holdings().filter((h) => h.missingCause === 'PricesPending').length,
   );
 
   protected readonly columns: DataColumn<HoldingRow>[] = [
@@ -96,7 +104,7 @@ export class AccountHoldings {
       .pipe(
         switchMap(({ portfolioId, accountId }) => {
           this.status.set('loading');
-          return this.api.getAccountHoldings(portfolioId, accountId).pipe(
+          return pollWhilePending(() => this.api.getAccountHoldings(portfolioId, accountId), awaitsPrices).pipe(
             catchError(() => {
               this.status.set('error');
               return of<HoldingRow[] | null>(null);

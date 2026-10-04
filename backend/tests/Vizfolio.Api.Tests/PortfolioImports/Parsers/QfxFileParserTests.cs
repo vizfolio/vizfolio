@@ -293,7 +293,7 @@ NEWFILEUID:NONE
           <BUYSTOCK>
             <INVBUY>
               <INVTRAN><FITID>A-BUY-1</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
-              <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+              <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
               <UNITS>1</UNITS><UNITPRICE>100.00</UNITPRICE><TOTAL>-100.00</TOTAL>
             </INVBUY>
             <BUYTYPE>BUY</BUYTYPE>
@@ -339,7 +339,7 @@ NEWFILEUID:NONE
         first.InstitutionCode.ShouldBe("vanguard.com");
         first.Transactions.Count.ShouldBe(1);
         first.Transactions[0].ExternalId.ShouldBe("A-BUY-1");
-        first.Transactions[0].Ticker.ShouldBe("VTSAX");
+        first.Transactions[0].Ticker.ShouldBe("ZXTAX");
 
         var second = parsed.Statements.Single(s => s.AccountNumber == "22222");
         second.InstitutionCode.ShouldBe("vanguard.com");
@@ -436,7 +436,7 @@ NEWFILEUID:NONE
         </POSSTOCK>
         <POSMF>
           <INVPOS>
-            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
             <HELDINACCT>CASH</HELDINACCT>
             <POSTYPE>LONG</POSTYPE>
             <UNITS>50.123</UNITS>
@@ -468,10 +468,10 @@ NEWFILEUID:NONE
         voo.CostBasis.ShouldBe(5000.00m);
         voo.CurrencyCode.ShouldBe("USD");
 
-        var vtsax = statement.Positions.Single(p => p.Ticker == "VTSAX");
-        vtsax.Units.ShouldBe(50.123m);
-        vtsax.CostBasis.ShouldBeNull();
-        vtsax.CurrencyCode.ShouldBeNull();
+        var fundPosition = statement.Positions.Single(p => p.Ticker == "ZXTAX");
+        fundPosition.Units.ShouldBe(50.123m);
+        fundPosition.CostBasis.ShouldBeNull();
+        fundPosition.CurrencyCode.ShouldBeNull();
     }
 
     [Fact]

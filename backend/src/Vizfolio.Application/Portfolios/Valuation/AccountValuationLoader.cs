@@ -68,7 +68,7 @@ public sealed class AccountValuationLoader
         var holdings = await _db.AccountHoldings
             .AsNoTracking()
             .Where(h => ids.Contains(h.AccountId))
-            .Select(h => new { h.AccountHoldingId, h.AccountId, h.Kind, h.Symbol, h.SecurityId })
+            .Select(h => new { h.AccountHoldingId, h.AccountId, h.Kind, h.Symbol, h.SecurityId, h.IsSettlementFund })
             .ToListAsync(cancellationToken);
         var holdingIds = holdings.Select(h => h.AccountHoldingId).ToList();
 
@@ -90,7 +90,8 @@ public sealed class AccountValuationLoader
                 t.AccountId,
                 Row = new LedgerRow(
                     t.AccountTransactionId, t.SourceSystem, t.TradeDate, t.SettlementDate, t.Type, t.AccountHoldingId,
-                    t.Ticker, t.Quantity, t.Amount, t.Price, t.SourceType),
+                    t.Ticker, t.Quantity, t.Amount, t.Price, t.SourceType, t.IsSettlementFund,
+                    t.SplitNumerator > 0m && t.SplitDenominator > 0m ? t.SplitNumerator / t.SplitDenominator : null),
             })
             .ToListAsync(cancellationToken);
 
@@ -177,7 +178,8 @@ public sealed class AccountValuationLoader
                     new PriceSeries(priceList, StablePrices.Resolve(registryPrice, priceList)),
                     (IReadOnlyList<SplitAction>?)splits ?? [],
                     anchors,
-                    isMoneyMarket));
+                    isMoneyMarket,
+                    h.IsSettlementFund));
             }
 
             engines[accountId] = new AccountStateEngine(new AccountValuationInput(

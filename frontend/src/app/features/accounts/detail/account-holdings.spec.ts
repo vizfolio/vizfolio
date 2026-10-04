@@ -80,7 +80,7 @@ describe('AccountHoldings', () => {
     const api = new MockApi();
     api.holdings = of([
       holding({ hasSnapshot: false, snapshotAsOf: null, source: null }),
-      holding({ accountHoldingId: 'h2', symbol: 'VBMFX', status: 'NotHeld', quantity: 0, marketValue: 0 }),
+      holding({ accountHoldingId: 'h2', symbol: 'ZXBMX', status: 'NotHeld', quantity: 0, marketValue: 0 }),
     ]);
     const cmp = setup(api) as any;
     expect(cmp.missingCount()).toBe(0);

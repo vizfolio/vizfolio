@@ -9,15 +9,16 @@ namespace Vizfolio.Application.Portfolios.Valuation;
 /// Folding a money market fund into cash only matters when its own share history can't be rolled, so that's the
 /// test. A fund is the settlement fund when:
 /// <list type="bullet">
+///   <item>the broker marks it so — a row or position its parser flagged from the broker profile (e.g. Vanguard's
+///   "MONEY FUND PURCHASE" sweeps, or the position that <i>is</i> the statement's available cash), or</item>
 ///   <item>its ticker appears on a "Sweep…" row (any broker that labels sweeps), or</item>
 ///   <item>it's a money market fund (<see cref="HoldingInput.IsMoneyMarket"/>, from the SEC N-MFP registry) and
 ///   either its purchases/sales/reinvestments come without share counts (e.g. Vanguard's transaction report), or
 ///   it appears on the broker's statements while none of its movements are in the ledger.</item>
 /// </list>
 /// A money market fund whose movements are all reported with share counts (e.g. a QFX recording sweeps as buys
-/// and sells of the fund) stays an ordinary holding valued at its stable price — which gives the same answer.
-/// Per-broker knowledge (e.g. whether a QFX <c>AVAILCASH</c> already includes the core position) belongs in
-/// broker profiles (roadmap Phase 2.4), not here.
+/// and sells of the fund, from a broker with no profile) stays an ordinary holding valued at its stable price —
+/// which gives the same answer.
 /// </para>
 /// </summary>
 public static class SettlementFunds
@@ -26,9 +27,13 @@ public static class SettlementFunds
     public static IReadOnlySet<string> Identify(IReadOnlyList<LedgerRow> ledger, IEnumerable<HoldingInput> holdings)
     {
         var tickers = ledger
-            .Where(r => r.IsSweep && !string.IsNullOrWhiteSpace(r.Ticker))
+            .Where(r => (r.IsSweep || r.IsSettlementFund) && !string.IsNullOrWhiteSpace(r.Ticker))
             .Select(r => Normalize(r.Ticker!))
             .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var holding in holdings)
+            if (holding.IsSettlementFund && !string.IsNullOrWhiteSpace(holding.Symbol))
+                tickers.Add(Normalize(holding.Symbol));
 
         var rowsByHolding = ledger
             .Where(r => r.HoldingId is not null)

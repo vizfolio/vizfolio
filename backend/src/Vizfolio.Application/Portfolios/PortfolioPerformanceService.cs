@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
 using Vizfolio.Application.Portfolios.Valuation;
+using Vizfolio.Application.Pricing.Abstractions;
 
 namespace Vizfolio.Application.Portfolios;
 
@@ -10,13 +11,16 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
     private readonly AccountValuationLoader _valuationLoader;
     private readonly ITimeWeightedReturnCalculator _twrCalculator;
     private readonly IMoneyWeightedReturnCalculator _mwrCalculator;
+    private readonly IPriceRefreshStatus? _priceRefresh;
 
     public PortfolioPerformanceService(
         IAppDbContext db,
         AccountValuationLoader valuationLoader,
         ITimeWeightedReturnCalculator twrCalculator,
-        IMoneyWeightedReturnCalculator mwrCalculator)
+        IMoneyWeightedReturnCalculator mwrCalculator,
+        IPriceRefreshStatus? priceRefresh = null)
     {
+        _priceRefresh = priceRefresh;
         _db = db;
         _valuationLoader = valuationLoader;
         _twrCalculator = twrCalculator;
@@ -176,7 +180,7 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
     }
 
     /// <summary>The value of every loaded account at the close of <paramref name="date"/>.</summary>
-    private static PerformanceBalanceResult BalanceAt(LoadedValuation valuation, DateOnly date)
+    private PerformanceBalanceResult BalanceAt(LoadedValuation valuation, DateOnly date)
     {
         decimal sum = 0m;
         DateOnly? maxAsOf = null;
@@ -200,7 +204,8 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
                         missingCount++;
                         if (missing.Count < PerformanceBalanceResult.MaxMissingDetails)
                             missing.Add(new MissingValuation(
-                                account.Key, component.HoldingId, component.Symbol, component.Cause?.ToString() ?? "Unknown"));
+                                account.Key, component.HoldingId, component.Symbol,
+                                MissingCauseNames.Of(component.Cause, _priceRefresh?.IsPending(account.Key) == true)));
                         break;
                 }
             }

@@ -14,7 +14,7 @@ public sealed class TiingoPriceHistorySourceTests
     private const string ApiKey = "test-key";
 
     private static readonly PriceSeriesRequest Request =
-        new("VTSAX", null, new DateOnly(2020, 8, 28), new DateOnly(2020, 9, 1));
+        new("ZXTAX", null, new DateOnly(2020, 8, 28), new DateOnly(2020, 9, 1));
 
     // Synthetic Tiingo EOD payload: raw close alongside the adjusted close, with a 4-for-1 split on 8/31.
     private const string SamplePayload = """
@@ -63,7 +63,7 @@ public sealed class TiingoPriceHistorySourceTests
         request.Headers.GetValues("Authorization").ShouldHaveSingleItem().ShouldBe($"Token {ApiKey}");
         request.RequestUri!.ToString().ShouldNotContain(ApiKey);
         request.RequestUri.ToString().ShouldBe(
-            "https://api.tiingo.com/tiingo/daily/VTSAX/prices?startDate=2020-08-28&endDate=2020-09-01&format=json");
+            "https://api.tiingo.com/tiingo/daily/ZXTAX/prices?startDate=2020-08-28&endDate=2020-09-01&format=json");
     }
 
     [Theory]
@@ -105,9 +105,8 @@ public sealed class TiingoPriceHistorySourceTests
 
     private static TiingoPriceHistorySource BuildSource(StubHttpMessageHandler handler, string apiKey = ApiKey)
     {
-        var options = new PriceHistoryOptions();
-        options.Providers.Tiingo.ApiKey = apiKey;
+        var keys = string.IsNullOrEmpty(apiKey) ? new StaticKeyStore() : new StaticKeyStore((PriceSource.Tiingo, apiKey));
         return new TiingoPriceHistorySource(
-            new HttpClient(handler), Options.Create(options), NullLogger<TiingoPriceHistorySource>.Instance);
+            new HttpClient(handler), Options.Create(new PriceHistoryOptions()), NullLogger<TiingoPriceHistorySource>.Instance, keys);
     }
 }

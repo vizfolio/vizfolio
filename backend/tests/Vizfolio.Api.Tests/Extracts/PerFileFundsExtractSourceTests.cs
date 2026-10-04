@@ -46,11 +46,11 @@ public sealed class PerFileFundsExtractSourceTests
                   "generated_at": "2026-10-03T12:00:00Z",
                   "funds": [
                     {
-                      "series_id": "S000004462", "name": "Federal Money Market Fund", "registrant_cik": "0000106830",
-                      "as_of": "2026-08-31", "source_filing": "0001410368-26-091076", "source_url": "https://example.test",
+                      "series_id": "S000077777", "name": "Example Money Market Fund", "registrant_cik": "0000000001",
+                      "as_of": "2026-08-31", "source_filing": "0000000001-26-091076", "source_url": "https://example.test",
                       "category": "Government", "seeks_stable_price": true, "stable_price_per_share": 1.0, "is_retail": false,
                       "registrant_name": "Example Reserves",
-                      "classes": [ { "class_id": "C000012238", "ticker": "VMFXX" } ]
+                      "classes": [ { "class_id": "C000077777", "ticker": "ZXMXX" } ]
                     }
                   ]
                 }
@@ -63,7 +63,7 @@ public sealed class PerFileFundsExtractSourceTests
         var fund = registry!.Funds.ShouldHaveSingleItem();
         fund.SeeksStablePrice.ShouldBeTrue();
         fund.StablePricePerShare.ShouldBe(1.0m);
-        fund.Classes!.Single().Ticker.ShouldBe("VMFXX");
+        fund.Classes!.Single().Ticker.ShouldBe("ZXMXX");
     }
 
     [Fact]

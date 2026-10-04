@@ -4,6 +4,9 @@ public sealed class PriceHistoryOptions
 {
     public const string SectionName = "PriceHistory";
 
+    /// <summary>Fetch prices in the background right after an import, for the accounts it touched.</summary>
+    public bool RefreshOnImport { get; set; } = true;
+
     public PriceSchedule Schedule { get; set; } = new();
 
     public PriceProviders Providers { get; set; } = new();
@@ -28,10 +31,12 @@ public sealed class PriceProviders
     public TiingoProviderOptions Tiingo { get; set; } = new();
 }
 
-/// <summary>Keyless default provider. No API key — works out of the box.</summary>
+/// <summary>
+/// Keyless provider, off by default: its closes are split/dividend adjusted (stored, but never used for valuation).
+/// </summary>
 public sealed class StooqProviderOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 
     public string BaseUrl { get; set; } = "https://stooq.com/q/d/l/";
 
@@ -61,11 +66,22 @@ public sealed class TiingoProviderOptions
     public int RequestsPerHour { get; set; } = 50;
 }
 
+/// <summary>
+/// The scheduled refresh: a catch-up shortly after startup, then daily at <see cref="DailyAt"/> in
+/// <see cref="TimeZone"/> — after the US close, once mutual fund NAVs are published. Without <see cref="DailyAt"/>,
+/// every <see cref="Interval"/>.
+/// </summary>
 public sealed class PriceSchedule
 {
     public bool Enabled { get; set; } = true;
 
-    public bool RunOnStartup { get; set; }
+    public bool RunOnStartup { get; set; } = true;
+
+    /// <summary>Local time of day for the daily refresh (in <see cref="TimeZone"/>); null to use <see cref="Interval"/>.</summary>
+    public TimeSpan? DailyAt { get; set; } = new TimeSpan(20, 0, 0);
+
+    /// <summary>IANA (or Windows) time zone id for <see cref="DailyAt"/>.</summary>
+    public string TimeZone { get; set; } = "America/New_York";
 
     public TimeSpan Interval { get; set; } = TimeSpan.FromHours(24);
 

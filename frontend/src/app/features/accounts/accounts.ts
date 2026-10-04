@@ -10,6 +10,9 @@ import { AccountSummary } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
 import { impliedContributionsNote } from './implied-contributions-note';
+import { ImportHistoryList } from './import-history/import-history-list';
+import { alreadyImportedNote } from './import-text';
+import { ImportWarnings } from './import-warnings/import-warnings';
 import { FileUpload } from '../../shared/ui/file-upload/file-upload';
 import { SelectField } from '../../shared/ui/select-field/select-field';
 import { parserAcceptAttr, parserFormatOptions } from './import-format-options';
@@ -37,7 +40,7 @@ const EMPTY_FORM: AccountForm = {
  */
 @Component({
   selector: 'app-accounts',
-  imports: [EmptyState, FileUpload, RouterLink, SelectField],
+  imports: [EmptyState, FileUpload, ImportHistoryList, ImportWarnings, RouterLink, SelectField],
   templateUrl: './accounts.html',
   styleUrl: './accounts.scss',
 })
@@ -49,6 +52,9 @@ export class Accounts {
   protected readonly activeId = this.activePortfolio.activeId;
   protected readonly activeName = computed(() => this.activePortfolio.active()?.name ?? null);
   protected readonly impliedNote = impliedContributionsNote;
+  protected readonly alreadyImportedNote = alreadyImportedNote;
+  /** Bumped after each import so the history list reloads. */
+  protected readonly historyKey = signal(0);
 
   protected readonly accounts = signal<AccountSummary[]>([]);
   protected readonly listStatus = signal<ListStatus>('idle');
@@ -166,6 +172,7 @@ export class Accounts {
         next: (result) => {
           this.importResult.set(result);
           this.importing.set(false);
+          this.historyKey.update((n) => n + 1);
           this.reload();
         },
         error: (err: HttpErrorResponse) => {
@@ -175,8 +182,8 @@ export class Accounts {
       });
   }
 
-  /** One-off refetch of the account list (after a mutation that the server performed). */
-  private reload(): void {
+  /** One-off refetch of the account list (after a mutation that the server performed, e.g. an undo). */
+  protected reload(): void {
     const portfolioId = this.activeId();
     if (!portfolioId) {
       return;

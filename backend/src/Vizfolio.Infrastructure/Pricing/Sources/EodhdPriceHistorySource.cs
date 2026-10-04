@@ -20,15 +20,18 @@ public sealed class EodhdPriceHistorySource : IPriceHistorySource, IDisposable
     private readonly HttpClient _http;
     private readonly ApiKeyProviderOptions _options;
     private readonly ILogger<EodhdPriceHistorySource> _logger;
+    private readonly IProviderKeyStore _keys;
     private readonly RateLimiter _limiter;
 
     public EodhdPriceHistorySource(
         HttpClient http,
         IOptions<PriceHistoryOptions> options,
-        ILogger<EodhdPriceHistorySource> logger)
+        ILogger<EodhdPriceHistorySource> logger,
+        IProviderKeyStore keys)
     {
         _http = http;
         _options = options.Value.Providers.Eodhd;
+        _keys = keys;
         _logger = logger;
 
         var perSecond = Math.Max(1, _options.RequestsPerSecond);
@@ -45,10 +48,19 @@ public sealed class EodhdPriceHistorySource : IPriceHistorySource, IDisposable
 
     public PriceSource Source => PriceSource.Eodhd;
 
+    public string DisplayName => "EODHD";
+
+    public bool RequiresApiKey => true;
+
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(ApiKey);
+
+    // Configuration wins over a key saved from Settings (see IProviderKeyStore).
+    private string? ApiKey => _keys.GetApiKey(PriceSource.Eodhd);
+
     public int Priority => 10;
 
     public bool Supports(PriceSeriesRequest request)
-        => !string.IsNullOrWhiteSpace(_options.ApiKey) && !string.IsNullOrWhiteSpace(request.Symbol);
+        => IsAvailable && !string.IsNullOrWhiteSpace(request.Symbol);
 
     public async Task<PriceSeriesResult?> GetDailyClosesAsync(
         PriceSeriesRequest request, CancellationToken cancellationToken = default)
@@ -71,7 +83,7 @@ public sealed class EodhdPriceHistorySource : IPriceHistorySource, IDisposable
     private async Task<List<PricePoint>> GetPricesAsync(
         string baseUrl, string symbol, string range, CancellationToken cancellationToken)
     {
-        var url = $"{baseUrl}/eod/{Uri.EscapeDataString(symbol)}?api_token={_options.ApiKey}&period=d&fmt=json&{range}";
+        var url = $"{baseUrl}/eod/{Uri.EscapeDataString(symbol)}?api_token={ApiKey}&period=d&fmt=json&{range}";
         using var lease = await AcquireAsync(cancellationToken);
         await using var stream = await _http.GetStreamAsync(url, cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -94,7 +106,7 @@ public sealed class EodhdPriceHistorySource : IPriceHistorySource, IDisposable
     private async Task<List<SplitEvent>> GetSplitsAsync(
         string baseUrl, string symbol, string range, CancellationToken cancellationToken)
     {
-        var url = $"{baseUrl}/splits/{Uri.EscapeDataString(symbol)}?api_token={_options.ApiKey}&fmt=json&{range}";
+        var url = $"{baseUrl}/splits/{Uri.EscapeDataString(symbol)}?api_token={ApiKey}&fmt=json&{range}";
         var splits = new List<SplitEvent>();
         try
         {

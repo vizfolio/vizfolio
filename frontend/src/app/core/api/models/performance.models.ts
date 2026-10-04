@@ -45,7 +45,9 @@ export type PerformanceMissingCause =
   | 'StalePrice'
   | 'NegativePosition'
   | 'MaterialMismatch'
-  | 'BeforeHistory';
+  | 'BeforeHistory'
+  /** No (recent) price yet, but a background price fetch for the account is queued or running. */
+  | 'PricesPending';
 
 export interface PerformanceMissing {
   accountId: string;

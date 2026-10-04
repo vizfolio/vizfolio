@@ -12,6 +12,11 @@
           <span class="total-label">Total value</span>
           <span class="total-value">{{ totalLabel() }}</span>
         </div>
+        @if (pendingCount() > 0) {
+          <p class="pending" role="status">
+            Prices updating… {{ pendingCount() }} holding(s) will be valued as soon as their prices finish downloading.
+          </p>
+        }
         @if (missingCount() > 0) {
           <p class="missing" role="status">
             {{ missingCount() }} holding(s) couldn't be valued: there's no recent price or

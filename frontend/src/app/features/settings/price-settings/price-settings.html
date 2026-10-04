@@ -1,0 +1,124 @@
+<div class="card">
+  <h2 class="card-title">Prices</h2>
+  <p class="card-hint">
+    Prices are fetched for you after each import, when Vizfolio starts, and every evening after the US market
+    closes. Providers are tried in the order below; the first with prices for a holding is used.
+  </p>
+
+  @if (loadError(); as e) {
+    <p class="error" role="alert">{{ e }}</p>
+  }
+
+  @if (noProvider()) {
+    <p class="callout" role="status">
+      No price provider is set up yet, so holdings are valued from your broker's statements only. Get a free API key
+      at tiingo.com and save it below.
+    </p>
+  }
+
+  <!-- Status -->
+  <div class="action">
+    <div class="action-head">
+      <h3>Status</h3>
+      <button type="button" class="btn btn--primary" [disabled]="updating()" (click)="refreshNow()">
+        {{ updating() ? 'Updating…' : 'Fetch prices now' }}
+      </button>
+    </div>
+    @if (status(); as s) {
+      <p class="result" role="status">
+        @if (updating()) {
+          Prices updating…
+        } @else if (s.refresh.lastFinishedAt) {
+          Last fetched {{ formatWhen(s.refresh.lastFinishedAt) }}: {{ s.refresh.lastUpserted ?? 0 }} new close(s).
+        } @else {
+          {{ seriesCount() }} price series tracked.
+        }
+      </p>
+      @if (s.refresh.lastError; as e) {
+        <p class="error" role="alert">The last fetch failed: {{ e }}</p>
+      }
+      @if (problems().length > 0) {
+        <details class="problems">
+          <summary>{{ problems().length }} of {{ seriesCount() }} price series need a look</summary>
+          <ul>
+            @for (series of problems(); track series.symbol) {
+              <li>
+                <strong>{{ series.symbol }}</strong> — {{ outcomeText(series) }}
+                @if (series.message) {
+                  <span class="message">{{ series.message }}</span>
+                }
+              </li>
+            }
+          </ul>
+        </details>
+      }
+    }
+  </div>
+
+  <!-- Providers -->
+  <div class="action">
+    <div class="action-head">
+      <h3>Providers</h3>
+    </div>
+    <ul class="providers">
+      @for (provider of providers(); track provider.provider) {
+        <li class="provider">
+          <div class="provider-head">
+            <span class="provider-name">{{ provider.displayName }}</span>
+            <span class="chip" [class.chip--active]="provider.available && provider.providesRawCloses">
+              {{ providerState(provider) }}
+            </span>
+          </div>
+          @if (!provider.providesRawCloses) {
+            <p class="card-hint">
+              Only split- and dividend-adjusted prices, which can't value your holdings — they're kept but not used.
+            </p>
+          }
+          @if (provider.requiresApiKey) {
+            @if (provider.keySource === 'Configuration') {
+              <p class="card-hint">Key set in the server configuration.</p>
+            } @else {
+              <div class="key-row">
+                <label class="field">
+                  <span class="field-label">
+                    {{ provider.keySource === 'Settings' ? 'Replace API key' : 'API key' }}
+                  </span>
+                  <input
+                    type="password"
+                    autocomplete="off"
+                    [value]="drafts()[provider.provider] ?? ''"
+                    [disabled]="saving() === provider.provider"
+                    (input)="onDraft(provider.provider, $event)"
+                  />
+                </label>
+                <button
+                  type="button"
+                  class="btn btn--primary"
+                  [disabled]="saving() === provider.provider || !(drafts()[provider.provider] ?? '').trim()"
+                  (click)="saveKey(provider)"
+                >
+                  Save
+                </button>
+                @if (provider.keySource === 'Settings') {
+                  <button
+                    type="button"
+                    class="btn btn--ghost"
+                    [disabled]="saving() === provider.provider"
+                    (click)="removeKey(provider)"
+                  >
+                    Remove key
+                  </button>
+                }
+              </div>
+            }
+          }
+          @if (keyMessage(); as m) {
+            @if (m.provider === provider.provider) {
+              <p [class.error]="m.error" [class.result]="!m.error" [attr.role]="m.error ? 'alert' : 'status'">{{ m.text }}</p>
+            }
+          }
+        </li>
+      }
+    </ul>
+  </div>
+</div>

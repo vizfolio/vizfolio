@@ -18,6 +18,9 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
         builder.Property(a => a.AccountType).HasMaxLength(50);
         builder.Property(a => a.CreatedAt).IsRequired();
 
+        // Provenance pointer with no FK, as on AccountTransaction.ImportBatchId.
+        builder.Property(a => a.CreatedByImportBatchId);
+
         builder.HasIndex(a => new { a.PortfolioId, a.InstitutionCode, a.AccountNumber }).IsUnique();
 
         builder.HasOne<Portfolio>()

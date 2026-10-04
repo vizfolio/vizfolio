@@ -17,11 +17,21 @@ public sealed record PriceSeriesResult(
 {
     public static PriceSeriesResult Empty { get; } =
         new(Array.Empty<PricePoint>(), Array.Empty<SplitEvent>(), null);
+
+    /// <summary>
+    /// True when the closes are split/dividend-adjusted rather than as traded (e.g. Stooq). They're stored marked as
+    /// such, and valuation ignores them: adjusted closes against raw ledger quantities overstate returns.
+    /// </summary>
+    public bool Adjusted { get; init; }
 }
 
-/// <summary>Options for a price-history import run.</summary>
+/// <summary>
+/// Options for a price-history import run. <see cref="AccountIds"/> limits it to the series those accounts hold (each
+/// still fetched over the window every account holding it needs).
+/// </summary>
 public sealed record PriceHistoryImportOptions(
     IReadOnlyList<string>? Tickers = null,
     DateOnly? From = null,
     DateOnly? To = null,
-    bool Force = false);
+    bool Force = false,
+    IReadOnlyCollection<Guid>? AccountIds = null);

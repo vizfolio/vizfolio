@@ -12,10 +12,14 @@ public sealed record AccountImportResult(
     IReadOnlyList<PortfolioImportFailure> Failures)
 {
     /// <summary>
-    /// Rows already stored from this source whose type the parser now maps differently (e.g. after a label
-    /// mapping fix), updated in place. They are also counted in <see cref="Skipped"/>.
+    /// Rows already stored from this source that the parser now maps differently (type, amount, quantity, price,
+    /// settlement date, label or settlement-fund flag — e.g. after a mapping fix), updated in place. They are also
+    /// counted in <see cref="Skipped"/>.
     /// </summary>
-    public int Reclassified { get; init; }
+    public int Updated { get; init; }
+
+    /// <summary>Statement positions (and cash balances) recorded as snapshots.</summary>
+    public int SnapshotsInserted { get; init; }
 
     /// <summary>
     /// Contributions the account's history implies but never recorded (purchases with no deposit), stored as

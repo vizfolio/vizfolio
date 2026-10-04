@@ -1,7 +1,7 @@
 <section class="settings">
   <header class="page-header">
     <h1>Settings</h1>
-    <p class="page-subtitle">Reference data and appearance.</p>
+    <p class="page-subtitle">Reference data, prices and appearance.</p>
   </header>
 
   <!-- Reference data sync -->
@@ -99,6 +99,8 @@
     </div>
   </div>
 
+  <app-price-settings />
+
   <!-- Ledger relink -->
   <div class="card">
     <h2 class="card-title">Ledger</h2>
@@ -117,6 +119,33 @@
         <p class="result" role="status">Linked {{ r.linked }} transaction(s).</p>
       }
       @if (relink().error; as e) {
+        <p class="error" role="alert">{{ e }}</p>
+      }
+    </div>
+
+    <div class="action">
+      <div class="action-head">
+        <h3>Re-read imported files</h3>
+        <button type="button" class="btn btn--primary"
+          [disabled]="reprocess().status === 'running'" (click)="runReprocess()">
+          {{ reprocess().status === 'running' ? 'Running…' : 'Reprocess imports' }}
+        </button>
+      </div>
+      <p class="card-hint">
+        Read every stored import file again with the current version of Vizfolio, so improvements to how files are
+        read reach data you've already imported: rows it used to skip are added and rows it now reads differently are
+        updated. Nothing is cleared, and each change can still be undone with its import.
+      </p>
+      @if (reprocess().result; as r) {
+        <p class="result" role="status">
+          Re-read {{ r.batches }} file(s): {{ r.inserted }} transaction(s) added, {{ r.updated }} updated,
+          {{ r.snapshotsInserted }} position(s) recorded.
+        </p>
+        @for (skipped of skippedFiles(r); track skipped.fileName) {
+          <p class="card-hint">Skipped {{ skipped.fileName }}: {{ skipped.reason }}</p>
+        }
+      }
+      @if (reprocess().error; as e) {
         <p class="error" role="alert">{{ e }}</p>
       }
     </div>

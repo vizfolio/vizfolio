@@ -31,15 +31,24 @@ const RESULT: PortfolioImportResult = {
       failures: [],
       impliedContributions: 0,
       impliedContributionsAmount: 0,
+      updated: 0,
+      snapshotsInserted: 0,
     },
   ],
   duration: 'PT0.1S',
+  importBatchId: 'b1',
+  importedAt: '2026-10-03T16:05:00Z',
+  warnings: [],
+  fileAccountNumbers: [],
 };
 
 class MockApi {
   result: Observable<PortfolioImportResult> = of(RESULT);
   file: File | null = null;
   sourceSystem: string | undefined;
+  getImports() {
+    return of({ imports: [], transactionsImportedBeforeHistory: 0 });
+  }
   getImportParsers() {
     return of(PARSERS);
   }
@@ -93,13 +102,31 @@ describe('AccountImport', () => {
     expect(api.sourceSystem).toBe('VANGUARD');
   });
 
-  it('explains a 422 as a multi-account file that belongs on the Accounts page', () => {
+  it('explains a 422 as a file for other accounts, naming them, that belongs on the Accounts page', () => {
     const api = new MockApi();
-    api.result = throwError(() => new HttpErrorResponse({ status: 422 }));
+    api.result = throwError(
+      () => new HttpErrorResponse({ status: 422, error: { status: PortfolioImportStatus.AccountMismatch, fileAccountNumbers: ['…1111'] } }),
+    );
     const cmp = setup(api);
     cmp.onFileSelected(new File(['data'], 'multi.qfx'));
 
-    expect(cmp.error()).toContain('multiple accounts');
+    expect(cmp.error()).toContain('different account (…1111)');
+    expect(cmp.error()).toContain('Accounts page');
     expect(cmp.result()).toBeNull();
+  });
+
+  it('says so when the same file was already imported, showing the earlier result', () => {
+    const api = new MockApi();
+    api.result = of({ ...RESULT, status: PortfolioImportStatus.AlreadyImported });
+    const fixture = TestBed.configureTestingModule({ providers: [{ provide: PortfolioApiService, useValue: api }] })
+      .createComponent(AccountImport);
+    fixture.componentRef.setInput('portfolioId', 'p1');
+    fixture.componentRef.setInput('accountId', 'a1');
+    fixture.detectChanges();
+
+    (fixture.componentInstance as any).onFileSelected(new File(['data'], 'statement.qfx'));
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('already imported on');
   });
 });

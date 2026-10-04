@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Vizfolio.Application.Extracts.Abstractions;
 using Vizfolio.Application.Extracts.Importers;
 using Vizfolio.Application.PortfolioImports.Abstractions;
+using Vizfolio.Application.PortfolioImports.Brokers;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
 using Vizfolio.Application.Portfolios;
@@ -25,7 +26,15 @@ public static class DependencyInjection
         services.AddScoped<IPortfolioFileParser, QfxFileParser>();
         services.AddScoped<IPortfolioFileParser, VanguardTransactionHistoryReportParser>();
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
+        services.AddScoped<IImportUndoService, ImportUndoService>();
+        services.AddScoped<IImportHistoryService, ImportHistoryService>();
+        services.AddScoped<IStableExternalIdMigration, StableExternalIdMigration>();
         services.AddScoped<ILedgerRelinker, LedgerRelinker>();
+
+        // Broker profiles: per-broker OFX conventions (sweep labels, what AVAILCASH means). Brokers without one get
+        // DefaultBrokerProfile. Register another IBrokerProfile to teach the QFX parser a new broker.
+        services.AddSingleton<IBrokerProfile, VanguardBrokerProfile>();
+        services.AddSingleton<BrokerProfiles>();
         // Valuation rules shared by performance and the Holdings view. Defaults here; the host may replace the
         // options with configuration-bound values (see Program.cs, section "Valuation").
         services.AddSingleton(new ValuationOptions());

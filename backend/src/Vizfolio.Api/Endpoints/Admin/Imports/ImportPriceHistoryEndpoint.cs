@@ -36,11 +36,12 @@ public sealed class ImportPriceHistoryEndpoint : Endpoint<ImportPriceHistoryRequ
         {
             s.Summary = "Fetch daily close prices for held holdings into the local price history.";
             s.Description =
-                "Derives one price series per held security/symbol from the ledger and fetches raw daily " +
-                "closes (and split events) from the configured price source — keyless Stooq by default, or " +
-                "an API-key provider when configured. By default only the missing tail after the latest " +
-                "stored date is fetched; pass `force: true` to re-fetch the full window, or `tickers` / " +
-                "`from` / `to` to scope the run. Returns 409 if another import is already running.";
+                "Synchronous run of the same fetch the background refresh does (prefer POST /api/prices/refresh). " +
+                "Derives one price series per held security/symbol from the ledger and fetches raw daily closes " +
+                "(and split events), asking the configured providers in priority order until one has data. By " +
+                "default only what's missing is fetched (before the earliest and after the latest stored close); " +
+                "pass `force: true` to re-fetch the full window, or `tickers` / `from` / `to` to scope the run. " +
+                "Each series' outcome is recorded (see GET /api/prices/status). Returns 409 if another import is already running.";
             s.ExampleRequest = new ImportPriceHistoryRequest(new[] { "AAPL", "MSFT" }, null, null, false);
             s.RequestParam(r => r.Tickers!, "Optional list of symbols (case-insensitive) to restrict the run to.");
             s.RequestParam(r => r.From!, "Optional start date (ISO). Defaults to each series' earliest ledger trade date.");

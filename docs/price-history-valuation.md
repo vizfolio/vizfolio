@@ -8,10 +8,10 @@
 > - Domain: `PriceHistory` + `CorporateAction` (`backend/src/Vizfolio.Domain/Pricing/`), raw/as-traded basis.
 > - Roll-forward + resolver: `HoldingQuantityCalculator`, `HoldingValuationResolver`, wired into
 >   `PortfolioPerformanceService.BuildResolverAsync` / `ComputeBalance`.
-> - Pluggable fetch: `IPriceHistorySource` (keyless `StooqPriceHistorySource` default, optional
->   `TiingoPriceHistorySource` (recommended) / `EodhdPriceHistorySource` /
->   `AlphaVantagePriceHistorySource`), `PriceHistoryImporter`, `PriceHistoryRefreshHostedService`, and
->   `POST /admin/imports/price-history`. See "Price providers" below.
+> - Pluggable fetch: `IPriceHistorySource` (`TiingoPriceHistorySource` recommended, `AlphaVantagePriceHistorySource`,
+>   `EodhdPriceHistorySource`; `StooqPriceHistorySource` off by default — adjusted closes), tried as a fallback chain by
+>   `PriceHistoryImporter`; fetched automatically in the background (`PriceRefreshQueue`/`PriceRefreshWorker`) after
+>   imports, at startup and daily. See "Price providers" and "Fetching prices automatically" below.
 > - Model: per-user-instance fetch into the local DB for personal use — **not** a redistributed public
 >   dataset (exchange price data licensing forbids that; unlike public-domain EDGAR data).
 >
@@ -149,15 +149,17 @@ invariant. With no snapshot yet, the roll-forward starts from zero at inception.
 
 ### Price providers
 
-The selector (`PriceHistorySourceSelector`) uses the highest-priority source whose `Supports` is true;
-API-key sources are disabled until their key is set.
+Providers form a **fallback chain** (`PriceHistorySourceSelector.SelectAll`): each range is asked of every provider
+that supports it, highest priority first, until one returns raw closes; a provider that fails (error, rate limit) or
+has no data passes to the next. API-key sources are disabled until their key is set — in Settings → Prices (saved
+server-side in `AppSetting`) or in configuration, which always wins (`IProviderKeyStore`).
 
 | Provider | Priority | Key | Basis | Splits | Mutual funds | Notes |
 |---|---|---|---|---|---|---|
 | **Tiingo** (recommended) | 30 | free sign-up | raw `close` (fund `close` = NAV) | `splitFactor` on the same rows | yes | Free tier: 50 req/hour, 1,000/day, 500 symbols/month, 30+ yrs history; "internal use only" |
 | Alpha Vantage | 20 | yes | raw (`TIME_SERIES_DAILY`) | — | check provider | Free tier is small; check its current limits before backfilling years |
 | EODHD | 10 | yes | raw `close` | separate splits call | check provider | Free tier is limited; check its current history/call limits |
-| Stooq | 0 | none | ⚠️ split/dividend **adjusted** | — | — | Often gated by an anti-bot page; best-effort only |
+| Stooq | 0 | none | ⚠️ split/dividend **adjusted** | — | — | **Off by default.** Rows stored `Adjusted = true` and never used to value anything; often gated by an anti-bot page |
 
 **Tiingo** (`TiingoPriceHistorySource`) makes one request per symbol for the whole range
 (`GET {BaseUrl}/tiingo/daily/{ticker}/prices?startDate=&endDate=`), sends the key in the
@@ -166,12 +168,41 @@ writes share-class tickers with a hyphen (`BRK.B` → `BRK-B`), and treats a 404
 empty series. Its limiter is **hourly** (`PriceHistory:Providers:Tiingo:RequestsPerHour`, default 50),
 so an import with more symbols than that waits for the next hour rather than failing.
 
-Configure the key outside the repo, e.g. an environment variable
-`PriceHistory__Providers__Tiingo__ApiKey=<key>` (don't commit it to `appsettings*.json`). Stored prices
+Set the key in **Settings → Prices** (stored server-side, never returned by the API), or outside the repo, e.g. an
+environment variable `PriceHistory__Providers__Tiingo__ApiKey=<key>` or dotnet user-secrets (don't commit it to
+`appsettings*.json`); a configured key wins over one saved in Settings. Stored prices
 are never overwritten (the importer only fills missing dates), so switching providers doesn't replace
 rows already fetched — clear the `PriceHistory` / `CorporateAction` rows for a series (or the dev DB)
 to re-fetch it from the new source. Licensing: data is fetched per user into their own local DB for
 personal use and is never redistributed via the repo — see §"Model" above.
+
+### Fetching prices automatically
+
+Nobody has to fetch prices by hand (roadmap Phase 3):
+
+- **After an import** (and a reprocess that added rows), `PortfolioImportService` enqueues a refresh for the accounts it
+  touched (`IPriceRefreshQueue`; switch off with `PriceHistory:RefreshOnImport`).
+- **At startup** (`Schedule:RunOnStartup`, default on, after `StartupDelay`) and **daily after the US close**
+  (`Schedule:DailyAt` 20:00 in `Schedule:TimeZone` America/New_York, once fund NAVs are out; `Interval` when `DailyAt`
+  is unset). `appsettings.Development.json` disables the schedule; import-triggered and manual fetches still run.
+- **From Settings** ("Fetch prices now", `POST /api/prices/refresh`) and whenever a provider key is saved.
+
+One `PriceRefreshWorker` runs whatever is queued as a single run, and **waits** for the shared `ImportRunGate`
+(never overlapping an extracts import, never skipped). While an account's refresh is queued or running, a value
+missing for want of a price reports `PricesPending` instead of `NoPrice`/`StalePrice`, and the UI shows "Updating…"
+and polls until it clears.
+
+**What's fetched.** One series per security/symbol held (never the `$CASH` holding), needed from a week before the
+first account holding it starts trading. Coverage counts **raw** closes only, so adjusted rows never block a raw
+backfill. Missing ranges are the gap before the earliest stored close and the tail from the latest (refetched in case
+the provider corrected it). When every provider answers a backfill with nothing, the series records `NoDataBefore` and
+that range isn't asked for again — e.g. money market funds whose provider history starts years after they were held
+(valued at their stable price before that).
+
+**Outcomes.** Each series' last attempt is kept in `PriceSeriesStatus`: `Ok` (raw closes stored; a message notes
+history starting after `NeededFrom`), `Empty` (no data from any provider), `Failed` (every provider errored),
+`NoSource` (no provider set up) or `AdjustedOnly`. `GET /api/prices/status` lists them, problems first, with the
+refresh state; non-`Ok` series are also the run's `ImportResult.Failures`.
 
 ## 5. Gotchas to carry forward
 
@@ -196,8 +227,8 @@ The expensive-to-rediscover bits — read these before implementing:
      close; `Adjusted` is always `false`. API-key providers are queried for unadjusted closes
      (Tiingo `close`, not `adjClose`; EODHD `close`, not `adjusted_close`; Alpha Vantage
      `TIME_SERIES_DAILY`). ⚠️ The keyless Stooq
-     daily feed is split/dividend *adjusted* — it's a best-effort default; configure an API-key
-     provider for a clean raw series and split events. ⚠️ Stooq also gates automated requests with a
+     daily feed is split/dividend *adjusted*, so it's **off by default** and its rows are stored with
+     `Adjusted = true`, which valuation never reads (a migration marked any existing Stooq rows). ⚠️ Stooq also gates automated requests with a
      200-OK HTML JavaScript proof-of-work challenge (common from server/datacenter IPs);
      `StooqPriceHistorySource` detects that page and throws a clear error instead of importing zero
      rows, and sends a browser-like `User-Agent` (reduces but doesn't eliminate it). Use an API-key
@@ -348,3 +379,99 @@ count it twice.
 anchored roll-forward; snapshot newer than the latest price; unpriced position sold to zero;
 revaluation at the snapshot's unit price) and `HoldingQuantityCalculatorTests` (sell sign, reinvested
 income rows, anchored roll-forward, cash-only income isn't share activity).
+
+## 10. Silent "complete" gaps (FIXED, 2026-10)
+
+Found by checking real data against broker statements (roadmap `.claude/plans/accuracy-and-import-ux-roadmap.md`,
+Phase 1). Each produced a wrong number **reported as complete**:
+
+- **A "nothing held" snapshot valued a held position at $0.** A `$0` / 0-share opening balance at inception was the
+  latest valued snapshot for years; with no price yet (e.g. a money-market fund whose provider history starts
+  later), fallback (2) returned its `$0` as *covered*. Such a snapshot carries no price, so it's now skipped for a
+  position the ledger says is held → `Missing` (honest null).
+- **Money-market funds before their price history.** `StablePrices` (the SEC N-MFP registry, or ≥ 20 unchanging closes) values
+  a held stable-NAV fund at `quantity × $1.00` when there's no recent close. The full price series is loaded (not
+  just closes ≤ `to`) so the $1.00 test works for periods before the series starts.
+- **Stale closes.** A close older than `Valuation:MaxPriceAgeDays` (default 10) is "no price" — a delisted or merged
+  ticker is no longer valued at a years-old close. Stable-NAV funds are exempt. (Snapshot-derived unit prices are
+  not age-limited yet; that comes with the account valuation engine, roadmap Phase 4.)
+- **Holdings dropped from scope.** Every holding of the in-scope accounts is valued (see performance-api.md
+  "Completeness").
+- **Unrecognised tickers never valued.** Every row naming a security now has a holding (er-diagram.md
+  "AccountHolding"), so e.g. a delisted money-market fund's history is no longer invisible.
+- **`Other` rows that carry shares** now move them (signed), e.g. Vanguard's old "Sweep" rows that move
+  money-market shares out — previously a phantom position remained.
+
+The loading and resolver build live in `HoldingValuationLoader`, shared by performance and the Holdings endpoint.
+
+## 11. Account valuation engine (Phase 4)
+
+> **This supersedes §4/§8/§9's implementation.** `HoldingQuantityCalculator`, `HoldingValuationResolver` and the
+> per-holding loader are retired; their rules live on in the engine. Code: `backend/src/Vizfolio.Application/
+> Portfolios/Valuation/` — `AccountStateEngine`, `AccountCash`, `AccountValuationLoader`, `SettlementFunds`,
+> `StablePrices`, `PriceSeries`. Tests: `tests/.../Portfolios/Valuation/AccountStateEngineTests.cs`.
+
+One engine per account values **every holding and the account's cash** on any date. Performance (balances, flows,
+series), the Holdings endpoint, implied contributions (opening-cash seed), history coverage and the
+opening-positions endpoint all read it, so every screen agrees.
+
+**Loading.** `AccountValuationLoader` loads each account's *whole* history (holdings, snapshots, ledger incl. implied
+rows, raw non-adjusted prices in the reporting currency, splits) whatever period is asked about: openings are derived
+by rolling a *later* statement back, which needs the rows and statements after the period.
+
+**Shares** (every holding except settlement funds and the cash holding):
+- Row effects: Buy/Reinvest/Transfer add the signed quantity; income and `Other` rows add theirs when they carry one;
+  a Sell always subtracts `|quantity|`.
+- **Splits**: each provider `CorporateAction` multiplies the position at the **start of its ex-date** — no ledger Split
+  row needed. A broker Split row within ±10 days of one is the same event (not applied again); one with no provider
+  split is reported (`UnmatchedSplit`) and applies **its own ratio** (QFX `NUMERATOR`/`DENOMINATOR`) from its date, or
+  its change in shares when it has no ratio. A no-cost share row ≈ `shares × (factor − 1)` near the
+  ex-date is the broker recording the split's extra shares and is skipped.
+- **Anchors**: stored snapshots (broker, statement, opening balance; value-only snapshots excluded) and the **derived
+  opening**. The roll resets to each anchor; the drift found there is a `QuantityMismatch` finding.
+- **Derived opening** (at `OpeningDate` = the day before the account's first transaction, when no stored position is
+  on/before it): the earliest statement rolled back — undo each day's rows, then that day's split. ≈0 (under 0.001
+  shares or $1 at the statement's price) → `None`; positive → `PreHistory` (held before the history, valued from
+  PriceHistory there); negative → `Inconsistent` (the ledger and broker disagree; roll from zero instead). No
+  statement at all → assumed zero (`Verified = false`).
+- **Valuation per date**: the fallback order in performance-api.md "Balance basis" (fresh statement → recent close →
+  stable price → statement per-share price → missing with a cause). Before `OpeningDate`, a `PreHistory` position is
+  `BeforeHistory` (unknown) unless a stored statement covers the date.
+
+**Cash** = uninvested cash + the settlement fund. `SettlementFunds` recognises it from the account's own history — no ticker
+list: a ticker the broker's parser marked as the settlement fund (broker profiles — e.g. Vanguard's "MONEY FUND
+PURCHASE" sweeps, or the position that is the statement's `AVAILCASH`), a ticker on a "Sweep…" row, or a money market fund (per the SEC registry) whose buys/sells/reinvestments come
+without share counts, or that appears on statements with no movements in the ledger. Folding a fund into cash only
+matters when its share history can't be rolled; one with complete share counts is valued at its stable price instead,
+which gives the same answer. Per-broker knowledge lives in the QFX broker profiles (performance-api.md → "Broker
+profiles"). A statement's available cash that isn't the settlement fund is recorded on the account's `$CASH` holding
+and anchors cash like a settlement-fund snapshot.
+- `AccountCash` gives each row's effect on its **trade date** (so cash may dip negative between a trade and the
+  deposit that funds it — that's correct net value). Sweeps and settlement-fund Buy/Sell/Reinvest are neutral;
+  settlement-fund income and transfers move cash; an old fund-company *positive-amount Buy of the money-market fund*
+  is neutral here because its implied contribution row carries the money; reinvestments are funded by their income
+  (per-day add-back, sources compared rather than summed so overlapping QFX + Vanguard-report rows don't double it).
+- Anchored on each date's settlement-fund (and `$CASH` holding) snapshots; drift there is a `CashMismatch` finding.
+- Opening cash (A.2): derived from the earliest cash statement over *imported* rows **only when some position is
+  `PreHistory`** (a partial history); otherwise $0, and unfunded purchases are implied contributions as before.
+
+**Materiality.** A drift at a statement worth more than `max(MismatchMaterialityMin ($10), MismatchMaterialityPct
+(0.5%) × account value there)` makes that component `MaterialMismatch` (missing) between the previous anchor and the
+statement; a smaller one is just recorded. On real multi-year Vanguard data every share position reconciles
+exactly with the statements, and the cash roll lands within a few dollars of the settlement-fund balances.
+
+**Flows.** Deposits, withdrawals and cash transfers at their amounts; implied contributions as their own kind; an
+in-kind security transfer at its reported amount, else valued at the day's close × quantity (then the row's
+`Price`, then the latest statement's per-share price) — unvalued flows make both returns `null` (`UnvaluedTransfer`).
+
+**Known limits:** the opening is the
+day before the first *transaction*, not the statement's `DTSTART`; the age limit doesn't yet apply to
+statement-derived prices (waits for automatic price fetching).
+
+**Money market reference data (no ticker lists).** Which tickers are money market funds, and at what stable price,
+comes from SEC Form N-MFP: the edgar-extract pipeline publishes `money_market_funds.json` (every N-MFP filer —
+~330 funds, ~900 tickers — with `seeks_stable_price` / `stable_price_per_share` / category, tickers from SEC's
+`company_tickers_mf.json`). `MoneyMarketFundsImporter` loads it into `MoneyMarketFund` on every reference-data refresh;
+`AccountValuationLoader` sets each holding's `IsMoneyMarket` and stable price from it. Institutional prime and
+tax-exempt funds float, so a money market fund is only valued at a fixed price when its filing says so.
+

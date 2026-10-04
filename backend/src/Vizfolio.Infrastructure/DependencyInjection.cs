@@ -5,6 +5,7 @@ using Vizfolio.Application.Abstractions;
 using Vizfolio.Application.Portfolios;
 using Vizfolio.Infrastructure.Extracts;
 using Vizfolio.Infrastructure.Persistence;
+using Vizfolio.Infrastructure.PortfolioImports;
 using Vizfolio.Infrastructure.Pricing;
 
 namespace Vizfolio.Infrastructure;
@@ -21,6 +22,7 @@ public static class DependencyInjection
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
         services.AddExtracts(configuration);
         services.AddPricing(configuration);
+        services.AddHostedService<ImportMaintenanceHostedService>();
 
         // Valuation tunables from configuration (replaces AddApplication's defaults when the section exists).
         var valuation = configuration.GetSection(ValuationOptions.SectionName).Get<ValuationOptions>();

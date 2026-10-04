@@ -30,6 +30,11 @@ export type HoldingRow = {
   valuationSource: 'Price' | 'Snapshot' | 'StableNav' | null;
   /** Date of the price or snapshot the value is based on. */
   priceAsOf: string | null;
+  /**
+   * Why a `Missing` row couldn't be valued (`NoPrice`, `StalePrice`, `PricesPending` while prices are still
+   * downloading, …); null otherwise.
+   */
+  missingCause?: string | null;
 };
 
 export type HoldingValuationStatus = 'Valued' | 'NotHeld' | 'Missing';

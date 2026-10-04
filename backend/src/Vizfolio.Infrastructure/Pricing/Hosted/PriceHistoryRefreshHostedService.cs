@@ -1,35 +1,32 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Vizfolio.Application.Pricing.Abstractions;
-using Vizfolio.Application.Pricing.Models;
-using Vizfolio.Infrastructure.Extracts.Hosted;
 
 namespace Vizfolio.Infrastructure.Pricing.Hosted;
 
 /// <summary>
-/// Periodically fetches daily close prices for every held holding into the local DB. Mirrors
-/// <c>ExtractsRefreshHostedService</c> and shares the same <see cref="ImportRunGate"/>, so price fetches
-/// never overlap an extracts import.
+/// The price schedule: a catch-up shortly after startup (<see cref="PriceSchedule.RunOnStartup"/>), then a daily
+/// refresh after the US close (<see cref="PriceSchedule.DailyAt"/> in <see cref="PriceSchedule.TimeZone"/>), or every
+/// <see cref="PriceSchedule.Interval"/>. It only enqueues: <see cref="PriceRefreshWorker"/> does the fetching.
 /// </summary>
 public sealed class PriceHistoryRefreshHostedService : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ImportRunGate _gate;
+    private readonly IPriceRefreshQueue _queue;
     private readonly IOptionsMonitor<PriceHistoryOptions> _options;
+    private readonly TimeProvider _time;
     private readonly ILogger<PriceHistoryRefreshHostedService> _logger;
 
     public PriceHistoryRefreshHostedService(
-        IServiceScopeFactory scopeFactory,
-        ImportRunGate gate,
+        IPriceRefreshQueue queue,
         IOptionsMonitor<PriceHistoryOptions> options,
-        ILogger<PriceHistoryRefreshHostedService> logger)
+        ILogger<PriceHistoryRefreshHostedService> logger,
+        TimeProvider? time = null)
     {
-        _scopeFactory = scopeFactory;
-        _gate = gate;
+        _queue = queue;
         _options = options;
         _logger = logger;
+        _time = time ?? TimeProvider.System;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,61 +38,51 @@ public sealed class PriceHistoryRefreshHostedService : BackgroundService
             return;
         }
 
-        if (schedule.StartupDelay > TimeSpan.Zero)
-        {
-            try { await Task.Delay(schedule.StartupDelay, stoppingToken); }
-            catch (OperationCanceledException) { return; }
-        }
-
-        if (schedule.RunOnStartup)
-            await RunOnceSafelyAsync(stoppingToken);
-
-        var interval = schedule.Interval <= TimeSpan.Zero ? TimeSpan.FromHours(24) : schedule.Interval;
-        using var timer = new PeriodicTimer(interval);
         try
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken))
-                await RunOnceSafelyAsync(stoppingToken);
+            if (schedule.StartupDelay > TimeSpan.Zero)
+                await Task.Delay(schedule.StartupDelay, _time, stoppingToken);
+
+            if (schedule.RunOnStartup)
+                _queue.Enqueue(PriceRefreshRequest.Everything(PriceRefreshTrigger.Schedule));
+
+            var zone = ResolveTimeZone(schedule.TimeZone);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                var now = _time.GetUtcNow();
+                var next = NextRun(now, schedule, zone);
+                _logger.LogInformation("Next scheduled price refresh at {Next:u}", next);
+                await Task.Delay(next - now, _time, stoppingToken);
+                _queue.Enqueue(PriceRefreshRequest.Everything(PriceRefreshTrigger.Schedule));
+            }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
     }
 
-    private async Task RunOnceSafelyAsync(CancellationToken cancellationToken)
+    /// <summary>The next scheduled refresh after <paramref name="nowUtc"/>: today's or tomorrow's DailyAt, or now + Interval.</summary>
+    internal static DateTimeOffset NextRun(DateTimeOffset nowUtc, PriceSchedule schedule, TimeZoneInfo zone)
+    {
+        if (schedule.DailyAt is not { } dailyAt)
+            return nowUtc + (schedule.Interval <= TimeSpan.Zero ? TimeSpan.FromHours(24) : schedule.Interval);
+
+        var local = TimeZoneInfo.ConvertTime(nowUtc, zone);
+        var candidate = local.Date + dailyAt;
+        if (candidate <= local.DateTime) candidate = candidate.AddDays(1);
+        return new DateTimeOffset(candidate, zone.GetUtcOffset(candidate)).ToUniversalTime();
+    }
+
+    private TimeZoneInfo ResolveTimeZone(string id)
     {
         try
         {
-            await RunOnceAsync(cancellationToken);
+            return TimeZoneInfo.FindSystemTimeZoneById(id);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Scheduled price-history refresh failed.");
-        }
-    }
-
-    private async Task RunOnceAsync(CancellationToken cancellationToken)
-    {
-        if (!_gate.TryAcquire(out var handle))
-        {
-            _logger.LogInformation("Skipping scheduled price-history refresh — another run is in progress.");
-            return;
-        }
-
-        using (handle)
-        {
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var importer = scope.ServiceProvider.GetRequiredService<IPriceHistoryImporter>();
-
-            _logger.LogInformation("Beginning scheduled price-history refresh.");
-            var result = await importer.ImportAsync(new PriceHistoryImportOptions(), cancellationToken);
-            _logger.LogInformation(
-                "Price-history refresh complete. {Upserted} rows added, {Skipped} already present, {Failed} failed.",
-                result.Upserted, result.Skipped, result.Failed);
+            _logger.LogWarning("Unknown time zone {TimeZone} for the price schedule; using UTC.", id);
+            return TimeZoneInfo.Utc;
         }
     }
 }

@@ -38,7 +38,7 @@ public sealed class PortfolioImportServiceTests
           <BUYSTOCK>
             <INVBUY>
               <INVTRAN><FITID>A-BUY-1</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
-              <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+              <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
               <UNITS>1</UNITS><UNITPRICE>100.00</UNITPRICE><TOTAL>-100.00</TOTAL>
             </INVBUY>
             <BUYTYPE>BUY</BUYTYPE>
@@ -125,21 +125,39 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task ImportToAccountAsync_is_idempotent_within_same_account()
+    public async Task Re_uploading_the_same_file_is_recognised_by_its_hash_and_writes_nothing()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var account = await SeedAccountAsync(ctx);
+        var service = NewService(ctx);
+
+        var first = await service.ImportToAccountAsync(account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
+        var second = await service.ImportToAccountAsync(account.AccountId, Stream(CanonicalCsv), "renamed.csv", CancellationToken.None);
+
+        // The earlier import's summary is shown again, pointing at its batch.
+        second.Status.ShouldBe(PortfolioImportStatus.AlreadyImported);
+        second.ImportBatchId.ShouldBe(first.ImportBatchId);
+        second.ImportedAt.ShouldBe(first.ImportedAt);
+        second.Accounts[0].Inserted.ShouldBe(2);
+
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync(t => t.AccountId == account.AccountId)).ShouldBe(2);
+        (await ctx.Db.ImportBatches.AsNoTracking().CountAsync()).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ImportToAccountAsync_is_idempotent_for_a_different_file_with_the_same_rows()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
         var service = NewService(ctx);
 
         await service.ImportToAccountAsync(account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
-        var second = await service.ImportToAccountAsync(account.AccountId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
+        var second = await service.ImportToAccountAsync(account.AccountId, Stream(CanonicalCsv + "\n"), "sample.csv", CancellationToken.None);
 
+        second.Status.ShouldBe(PortfolioImportStatus.Success);
         second.Accounts[0].Inserted.ShouldBe(0);
         second.Accounts[0].Skipped.ShouldBe(2);
-
-        var stored = await ctx.Db.AccountTransactions.AsNoTracking()
-            .CountAsync(t => t.AccountId == account.AccountId);
-        stored.ShouldBe(2);
+        (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync(t => t.AccountId == account.AccountId)).ShouldBe(2);
     }
 
     [Fact]
@@ -231,7 +249,7 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task ImportToAccountAsync_returns_FileHasAccountInfo_when_OFX_carries_account_metadata()
+    public async Task ImportToAccountAsync_rejects_a_QFX_whose_accounts_are_all_different_accounts()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
@@ -239,9 +257,11 @@ public sealed class PortfolioImportServiceTests
 
         var result = await service.ImportToAccountAsync(account.AccountId, Stream(TwoAccountQfx), "multi.qfx", CancellationToken.None);
 
-        result.Status.ShouldBe(PortfolioImportStatus.FileHasAccountInfo);
+        result.Status.ShouldBe(PortfolioImportStatus.AccountMismatch);
         result.SourceSystem.ShouldBe("QFX");
         result.Accounts.ShouldBeEmpty();
+        // Masked to the last four characters, so the message can say which accounts the file holds.
+        result.FileAccountNumbers.ShouldBe(["…A111", "…B222"]);
 
         var stored = await ctx.Db.AccountTransactions.AsNoTracking().CountAsync();
         stored.ShouldBe(0);
@@ -310,7 +330,7 @@ public sealed class PortfolioImportServiceTests
             .Where(t => t.AccountId == a1.AccountId).ToListAsync();
         a1Txs.Count.ShouldBe(1);
         a1Txs[0].ExternalId.ShouldBe("A-BUY-1");
-        a1Txs[0].Ticker.ShouldBe("VTSAX");
+        a1Txs[0].Ticker.ShouldBe("ZXTAX");
 
         var a2Txs = await ctx.Db.AccountTransactions.AsNoTracking()
             .Where(t => t.AccountId == a2.AccountId).ToListAsync();
@@ -352,8 +372,10 @@ public sealed class PortfolioImportServiceTests
         var service = NewService(ctx);
 
         await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(TwoAccountQfx), "multi.qfx", CancellationToken.None);
-        var second = await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(TwoAccountQfx), "multi.qfx", CancellationToken.None);
+        // A byte-different export of the same statements (here: a trailing newline) is deduped row by row.
+        var second = await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(TwoAccountQfx + "\n"), "multi.qfx", CancellationToken.None);
 
+        second.Status.ShouldBe(PortfolioImportStatus.Success);
         second.Accounts.Count.ShouldBe(2);
         second.Accounts.ShouldAllBe(a => !a.Created);
         second.Accounts.Sum(a => a.Inserted).ShouldBe(0);
@@ -525,14 +547,14 @@ public sealed class PortfolioImportServiceTests
         var account = await SeedAccountAsync(ctx);
         ParsedTransaction CusipBuy(DateOnly date, decimal qty) =>
             new(ExternalId: null, Type: TransactionType.Buy, TradeDate: date, SettlementDate: null,
-                Ticker: null, Cusip: "922908769", Quantity: qty, Price: null, Amount: -qty * 100m,
+                Ticker: null, Cusip: "123456AB7", Quantity: qty, Price: null, Amount: -qty * 100m,
                 Fees: null, CurrencyCode: null, Memo: null);
 
         await ServiceFor(ctx, new LedgerStubParser("SRC", [CusipBuy(new DateOnly(2025, 1, 6), 2m), CusipBuy(new DateOnly(2025, 2, 3), 3m)]))
             .ImportToAccountAsync(account.AccountId, Stream("c"), "c.dat", CancellationToken.None, "SRC");
 
         var holding = await ctx.Db.AccountHoldings.AsNoTracking().SingleAsync();
-        holding.Cusip.ShouldBe("922908769");
+        holding.Cusip.ShouldBe("123456AB7");
         holding.Kind.ShouldBe(AccountHoldingKind.Other);
         (await ctx.Db.AccountTransactions.AsNoTracking().ToListAsync())
             .ShouldAllBe(t => t.AccountHoldingId == holding.AccountHoldingId);
@@ -541,7 +563,7 @@ public sealed class PortfolioImportServiceTests
     [Fact]
     public async Task ImportToPortfolioAsync_creates_distinct_holdings_and_snapshots_for_share_classes_of_same_fund()
     {
-        // VTI (ETF) and VTSAX (mutual fund) are share classes of the same Vanguard fund —
+        // ZXTE (ETF) and ZXTAX (mutual fund) are share classes of the same Vanguard fund —
         // same FundId, different tickers. They must produce two AccountHoldings and two snapshots.
         const string shareClassQfx = """
 <?xml version="1.0" encoding="UTF-8"?>
@@ -556,16 +578,16 @@ public sealed class PortfolioImportServiceTests
         <DTSTART>20260101</DTSTART><DTEND>20260601</DTEND>
         <BUYMF>
           <INVBUY>
-            <INVTRAN><FITID>VTI-BUY</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
-            <SECID><UNIQUEID>VTI</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <INVTRAN><FITID>ZXTE-BUY</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>ZXTE</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
             <UNITS>10</UNITS><UNITPRICE>250.00</UNITPRICE><TOTAL>-2500.00</TOTAL>
           </INVBUY>
           <BUYTYPE>BUY</BUYTYPE>
         </BUYMF>
         <BUYMF>
           <INVBUY>
-            <INVTRAN><FITID>VTSAX-BUY</FITID><DTTRADE>20260116</DTTRADE></INVTRAN>
-            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <INVTRAN><FITID>ZXTAX-BUY</FITID><DTTRADE>20260116</DTTRADE></INVTRAN>
+            <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
             <UNITS>20</UNITS><UNITPRICE>125.00</UNITPRICE><TOTAL>-2500.00</TOTAL>
           </INVBUY>
           <BUYTYPE>BUY</BUYTYPE>
@@ -574,13 +596,13 @@ public sealed class PortfolioImportServiceTests
       <INVPOSLIST>
         <POSMF>
           <INVPOS>
-            <SECID><UNIQUEID>VTI</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <SECID><UNIQUEID>ZXTE</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
             <UNITS>10</UNITS><UNITPRICE>260.00</UNITPRICE><MKTVAL>2600.00</MKTVAL>
           </INVPOS>
         </POSMF>
         <POSMF>
           <INVPOS>
-            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
             <UNITS>20</UNITS><UNITPRICE>130.00</UNITPRICE><MKTVAL>2600.00</MKTVAL>
           </INVPOS>
         </POSMF>
@@ -596,8 +618,8 @@ public sealed class PortfolioImportServiceTests
         var snapshot = new FundSnapshot(fund.FundId, new DateOnly(2026, 5, 31), "filing", "https://example.test/seed");
         snapshot.ReplaceShareClasses(new[]
         {
-            new ShareClass("C1", "ETF Class",       "VTI",   0.03m),
-            new ShareClass("C2", "Admiral Class",   "VTSAX", 0.04m),
+            new ShareClass("C1", "ETF Class",       "ZXTE",   0.03m),
+            new ShareClass("C2", "Admiral Class",   "ZXTAX", 0.04m),
         });
         ctx.Db.FundSnapshots.Add(snapshot);
         await ctx.Db.SaveChangesAsync();
@@ -607,19 +629,19 @@ public sealed class PortfolioImportServiceTests
 
         var holdings = await ctx.Db.AccountHoldings.AsNoTracking().ToListAsync();
         holdings.Count.ShouldBe(2);
-        holdings.Select(h => h.Symbol).ShouldBe(new[] { "VTI", "VTSAX" }, ignoreOrder: true);
+        holdings.Select(h => h.Symbol).ShouldBe(new[] { "ZXTE", "ZXTAX" }, ignoreOrder: true);
         holdings.ShouldAllBe(h => h.FundId == fund.FundId);
 
         var snapshots = await ctx.Db.AccountHoldingSnapshots.AsNoTracking().ToListAsync();
         snapshots.Count.ShouldBe(2);
-        var vti = holdings.Single(h => h.Symbol == "VTI");
-        var vtsax = holdings.Single(h => h.Symbol == "VTSAX");
-        snapshots.Single(s => s.AccountHoldingId == vti.AccountHoldingId).Quantity.ShouldBe(10m);
-        snapshots.Single(s => s.AccountHoldingId == vtsax.AccountHoldingId).Quantity.ShouldBe(20m);
+        var etf = holdings.Single(h => h.Symbol == "ZXTE");
+        var mutualFund = holdings.Single(h => h.Symbol == "ZXTAX");
+        snapshots.Single(s => s.AccountHoldingId == etf.AccountHoldingId).Quantity.ShouldBe(10m);
+        snapshots.Single(s => s.AccountHoldingId == mutualFund.AccountHoldingId).Quantity.ShouldBe(20m);
 
         var txs = await ctx.Db.AccountTransactions.AsNoTracking().ToListAsync();
-        txs.Single(t => t.Ticker == "VTI").AccountHoldingId.ShouldBe(vti.AccountHoldingId);
-        txs.Single(t => t.Ticker == "VTSAX").AccountHoldingId.ShouldBe(vtsax.AccountHoldingId);
+        txs.Single(t => t.Ticker == "ZXTE").AccountHoldingId.ShouldBe(etf.AccountHoldingId);
+        txs.Single(t => t.Ticker == "ZXTAX").AccountHoldingId.ShouldBe(mutualFund.AccountHoldingId);
     }
 
     [Fact]
@@ -756,7 +778,8 @@ public sealed class PortfolioImportServiceTests
         var first = await service.ImportToAccountAsync(account.AccountId, Stream("x"), "x.dat", CancellationToken.None, "SRCA");
         first.Accounts[0].Inserted.ShouldBe(2);
 
-        var second = await service.ImportToAccountAsync(account.AccountId, Stream("x"), "x.dat", CancellationToken.None, "SRCA");
+        // A different file listing the same two rows: each matches its own occurrence id ("{fingerprint}-0", "-1").
+        var second = await service.ImportToAccountAsync(account.AccountId, Stream("y"), "y.dat", CancellationToken.None, "SRCA");
         second.Accounts[0].Inserted.ShouldBe(0);
         second.Accounts[0].Skipped.ShouldBe(2);
         (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync()).ShouldBe(2);
@@ -899,10 +922,10 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task Reimporting_the_same_file_after_a_mapping_fix_reclassifies_the_stored_rows()
+    public async Task Reprocessing_stored_files_after_a_mapping_fix_updates_the_stored_rows()
     {
         // A label the parser used to map to Other ("Reinvestment (LT gain)") is now mapped to Reinvest.
-        // Re-uploading the file must correct the stored row in place — not skip it as a duplicate forever.
+        // Reprocessing the stored file must correct the stored row in place — no re-upload, no clearing data.
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
         var before = LabelledReinvestment(TransactionType.Other);
@@ -910,11 +933,12 @@ public sealed class PortfolioImportServiceTests
 
         await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [before]))
             .ImportToAccountAsync(account.AccountId, Stream("v1"), "report.xlsx", CancellationToken.None, "VANGUARD");
-        var second = await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [after]))
-            .ImportToAccountAsync(account.AccountId, Stream("v1"), "report.xlsx", CancellationToken.None, "VANGUARD");
+        var reprocessed = await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [after]))
+            .ReprocessAsync(portfolioId: null, batchIds: null, CancellationToken.None);
 
-        second.Accounts[0].Inserted.ShouldBe(0);
-        second.Accounts[0].Reclassified.ShouldBe(1);
+        reprocessed.Batches.ShouldBe(1);
+        reprocessed.Inserted.ShouldBe(0);
+        reprocessed.Updated.ShouldBe(1);
         var stored = await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync(t => t.AccountId == account.AccountId);
         stored.Type.ShouldBe(TransactionType.Reinvest);
         stored.SourceType.ShouldBe("Reinvestment (LT gain)");
@@ -927,7 +951,7 @@ public sealed class PortfolioImportServiceTests
         // synthetic id): it's matched by its fingerprint instead, and still corrected.
         await using var ctx = await TestDbContext.CreateAsync();
         var account = await SeedAccountAsync(ctx);
-        var newer = Buy("VTSAX", new DateOnly(2025, 1, 6), quantity: 2m, amount: -280m);
+        var newer = Buy("ZXTAX", new DateOnly(2025, 1, 6), quantity: 2m, amount: -280m);
 
         await ServiceFor(ctx, new LedgerStubParser("VANGUARD", [LabelledReinvestment(TransactionType.Other)]))
             .ImportToAccountAsync(account.AccountId, Stream("v1"), "old.xlsx", CancellationToken.None, "VANGUARD");
@@ -935,7 +959,7 @@ public sealed class PortfolioImportServiceTests
             .ImportToAccountAsync(account.AccountId, Stream("v2"), "new.xlsx", CancellationToken.None, "VANGUARD");
 
         second.Accounts[0].Inserted.ShouldBe(1);
-        second.Accounts[0].Reclassified.ShouldBe(1);
+        second.Accounts[0].Updated.ShouldBe(1);
         (await ctx.Db.AccountTransactions.AsNoTracking().CountAsync(t => t.Type == TransactionType.Reinvest)).ShouldBe(1);
     }
 
@@ -953,13 +977,13 @@ public sealed class PortfolioImportServiceTests
             .ImportToAccountAsync(account.AccountId, Stream("b"), "b.dat", CancellationToken.None, "SRCB");
 
         second.Accounts[0].Skipped.ShouldBe(1);
-        second.Accounts[0].Reclassified.ShouldBe(0);
+        second.Accounts[0].Updated.ShouldBe(0);
         (await ctx.Db.AccountTransactions.AsNoTracking().SingleAsync()).Type.ShouldBe(TransactionType.Other);
     }
 
     private static ParsedTransaction LabelledReinvestment(TransactionType type) =>
         new(ExternalId: null, Type: type, TradeDate: new DateOnly(2024, 12, 20), SettlementDate: new DateOnly(2024, 12, 20),
-            Ticker: "VBTLX", Cusip: null, Quantity: 2m, Price: 12.5m, Amount: -25m,
+            Ticker: "ZXBAX", Cusip: null, Quantity: 2m, Price: 12.5m, Amount: -25m,
             Fees: null, CurrencyCode: null, Memo: null, SourceType: "Reinvestment (LT gain)");
 
     private static PortfolioImportService ServiceFor(TestDbContext ctx, params IPortfolioFileParser[] parsers)

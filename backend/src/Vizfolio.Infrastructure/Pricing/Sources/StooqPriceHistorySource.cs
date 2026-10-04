@@ -9,11 +9,11 @@ using Vizfolio.Domain.Pricing;
 namespace Vizfolio.Infrastructure.Pricing.Sources;
 
 /// <summary>
-/// Keyless default price source backed by Stooq's public daily CSV endpoint
-/// (<c>https://stooq.com/q/d/l/?s=aapl.us&amp;i=d</c>). No API key required, so the app fetches prices
-/// out of the box. Note: Stooq's daily series is split/dividend adjusted — treat its closes as
-/// best-effort. For the raw/as-traded basis the ledger requires (and clean split events), configure an
-/// API-key provider (EODHD / Alpha Vantage), which sit above this source in priority.
+/// Keyless price source backed by Stooq's public daily CSV endpoint
+/// (<c>https://stooq.com/q/d/l/?s=aapl.us&amp;i=d</c>). <b>Off by default</b> (<c>Providers:Stooq:Enabled</c>):
+/// its daily series is split/dividend <i>adjusted</i>, so its rows are stored with <c>Adjusted = true</c> and never
+/// value anything — adjusted closes against the ledger's as-traded quantities overstate returns — and it also gates
+/// automated requests behind an anti-bot page. Use an API-key provider (Tiingo recommended) for valuation.
 /// </summary>
 public sealed class StooqPriceHistorySource : IPriceHistorySource, IDisposable
 {
@@ -45,11 +45,19 @@ public sealed class StooqPriceHistorySource : IPriceHistorySource, IDisposable
 
     public PriceSource Source => PriceSource.Stooq;
 
+    public string DisplayName => "Stooq (adjusted closes only)";
+
+    public bool RequiresApiKey => false;
+
+    public bool ProvidesRawCloses => false;
+
+    public bool IsAvailable => _options.Enabled;
+
     // Lowest priority: the keyless fallback. Configured API-key providers override it.
     public int Priority => 0;
 
     public bool Supports(PriceSeriesRequest request)
-        => _options.Enabled && !string.IsNullOrWhiteSpace(request.Symbol);
+        => IsAvailable && !string.IsNullOrWhiteSpace(request.Symbol);
 
     public async Task<PriceSeriesResult?> GetDailyClosesAsync(
         PriceSeriesRequest request, CancellationToken cancellationToken = default)
@@ -74,8 +82,8 @@ public sealed class StooqPriceHistorySource : IPriceHistorySource, IDisposable
         {
             throw new InvalidOperationException(
                 $"Stooq returned an anti-bot challenge page for '{symbol}' instead of CSV. The keyless " +
-                "Stooq endpoint is gating automated requests; configure an API-key price provider " +
-                "(PriceHistory:Providers:Eodhd or :AlphaVantage) for reliable fetching.");
+                "Stooq endpoint is gating automated requests; add an API key for another price provider " +
+                "(Tiingo recommended) in Settings → Prices.");
         }
 
         var prices = ParseCsv(csv);
@@ -86,7 +94,8 @@ public sealed class StooqPriceHistorySource : IPriceHistorySource, IDisposable
         }
 
         // Stooq's CSV daily endpoint carries no split feed; splits come from API-key providers.
-        return new PriceSeriesResult(prices, Array.Empty<SplitEvent>(), CurrencyCode: null);
+        // Stooq's daily series is split/dividend adjusted: stored marked as such, never used for valuation.
+        return new PriceSeriesResult(prices, Array.Empty<SplitEvent>(), CurrencyCode: null) { Adjusted = true };
     }
 
     private const string BrowserUserAgent =
