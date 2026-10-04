@@ -91,6 +91,7 @@ public sealed class ExtractsRefreshHostedService : BackgroundService
             _logger.LogInformation("Beginning scheduled extracts refresh.");
             var secResult = await securities.ImportAsync(new SecuritiesImportOptions(), cancellationToken);
             var fundResult = await funds.ImportAsync(new FundsImportOptions(), cancellationToken);
+            await scope.ServiceProvider.GetRequiredService<IMoneyMarketFundsImporter>().ImportAsync(cancellationToken);
             var relinked = await relinker.RelinkAsync(cancellationToken);
             // New reference data may recognise tickers that account holdings were created without.
             var ledgerRelinked = await scope.ServiceProvider.GetRequiredService<ILedgerRelinker>().RelinkAsync(cancellationToken);

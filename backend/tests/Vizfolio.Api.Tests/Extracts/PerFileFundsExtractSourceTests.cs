@@ -35,6 +35,46 @@ public sealed class PerFileFundsExtractSourceTests
     }
 
     [Fact]
+    public async Task GetMoneyMarketRegistryAsync_reads_the_registry_with_its_stable_price_facts()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            req.RequestUri!.ToString().ShouldEndWith("money_market_funds.json");
+            return StubHttpMessageHandler.Ok("""
+                {
+                  "schema_version": "1",
+                  "generated_at": "2026-10-03T12:00:00Z",
+                  "funds": [
+                    {
+                      "series_id": "S000004462", "name": "Federal Money Market Fund", "registrant_cik": "0000106830",
+                      "as_of": "2026-08-31", "source_filing": "0001410368-26-091076", "source_url": "https://example.test",
+                      "category": "Government", "seeks_stable_price": true, "stable_price_per_share": 1.0, "is_retail": false,
+                      "registrant_name": "Example Reserves",
+                      "classes": [ { "class_id": "C000012238", "ticker": "VMFXX" } ]
+                    }
+                  ]
+                }
+            """);
+        });
+        using var source = BuildSource(handler);
+
+        var registry = await source.GetMoneyMarketRegistryAsync();
+
+        var fund = registry!.Funds.ShouldHaveSingleItem();
+        fund.SeeksStablePrice.ShouldBeTrue();
+        fund.StablePricePerShare.ShouldBe(1.0m);
+        fund.Classes!.Single().Ticker.ShouldBe("VMFXX");
+    }
+
+    [Fact]
+    public async Task GetMoneyMarketRegistryAsync_returns_null_until_the_registry_is_published()
+    {
+        using var source = BuildSource(new StubHttpMessageHandler(_ => StubHttpMessageHandler.NotFound()));
+
+        (await source.GetMoneyMarketRegistryAsync()).ShouldBeNull();
+    }
+
+    [Fact]
     public async Task GetSnapshotAsync_substitutes_template_and_decompresses_gzip_body()
     {
         var snapshotJson = """

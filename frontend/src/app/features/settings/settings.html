@@ -84,11 +84,12 @@
         <input type="checkbox" [checked]="allForce()" (change)="onCheck(allForce.set, $event)" />
         <span>Force (bypass delta checks)</span>
       </label>
-      <p class="card-hint">Securities → funds → holding re-link, under a single run.</p>
+      <p class="card-hint">Securities → funds → money market registry → holding re-link, under a single run.</p>
       @if (all().result; as r) {
         <p class="result" role="status">
           Securities: upserted {{ r.securities.upserted }}, skipped {{ r.securities.skipped }} ·
           Funds: upserted {{ r.funds.upserted }}, skipped {{ r.funds.skipped }} ·
+          Money market funds: upserted {{ r.moneyMarketFunds.upserted }} ·
           Re-linked {{ r.relinked }}
         </p>
       }

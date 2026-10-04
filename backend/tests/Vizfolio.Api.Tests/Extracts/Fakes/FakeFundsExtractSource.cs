@@ -14,6 +14,11 @@ public sealed class FakeFundsExtractSource : IFundsExtractSource
     public Task<FundsManifest> GetManifestAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(new FundsManifest("0.4", DateTimeOffset.UtcNow, ManifestEntries));
 
+    public MoneyMarketRegistryExtract? MoneyMarketRegistry { get; set; }
+
+    public Task<MoneyMarketRegistryExtract?> GetMoneyMarketRegistryAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(MoneyMarketRegistry);
+
     public Task<FundSnapshotExtract?> GetSnapshotAsync(string seriesId, string latestPeriod, CancellationToken cancellationToken = default)
     {
         var key = $"{seriesId}/{latestPeriod}";

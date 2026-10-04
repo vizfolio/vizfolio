@@ -38,6 +38,8 @@ public sealed class AppDbContext : DbContext, IAppDbContext
 
     public DbSet<CitSubstitution> CitSubstitutions => Set<CitSubstitution>();
 
+    public DbSet<MoneyMarketFund> MoneyMarketFunds => Set<MoneyMarketFund>();
+
     public DbSet<Currency> Currencies => Set<Currency>();
 
     public DbSet<Country> Countries => Set<Country>();

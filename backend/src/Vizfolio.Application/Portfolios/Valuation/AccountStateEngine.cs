@@ -39,7 +39,7 @@ public sealed class AccountStateEngine
         _options = input.Options;
 
         var ledger = input.Ledger;
-        _settlement = SettlementFunds.Identify(ledger, input.Holdings.Select(h => h.Symbol));
+        _settlement = SettlementFunds.Identify(ledger, input.Holdings);
         OpeningDate = ledger.Count == 0 ? null : ledger.Min(r => r.TradeDate).AddDays(-1);
 
         var rowsByHolding = ledger
@@ -365,7 +365,7 @@ public sealed class AccountStateEngine
             {
                 var unitPrice = m.AnchorUnitPrice
                                 ?? share.Holding.Prices.OnOrBefore(m.Date)?.Close
-                                ?? (share.Holding.Prices.IsStableNav ? 1m : null);
+                                ?? share.Holding.Prices.StablePrice;
                 var diff = m.Rolled - m.Anchor;
                 var diffValue = unitPrice is { } p ? Math.Abs(diff * p) : (decimal?)null;
                 var material = diffValue is { } dv
@@ -449,11 +449,11 @@ public sealed class AccountStateEngine
         if (anchor is { } fresh && !c.HasActivity(fresh.AsOf, date) && (price is null || price.Value.AsOf <= fresh.AsOf))
             return Covered(q, fresh.MarketValue!.Value, ComponentSource.Snapshot, fresh.UnitPrice, fresh.AsOf, fresh.AsOf);
 
-        // (1) Quantity × a recent close; a money-market fund is $1.00 a share whatever the price data.
+        // (1) Quantity × a recent close; a stable-NAV fund at its fixed price whatever the price data.
         if (price is { } p)
             return Covered(q, q * p.Close, ComponentSource.Price, p.Close, p.AsOf, null);
-        if (h.Prices.IsStableNav)
-            return Covered(q, q, ComponentSource.StableNav, 1m, null, null);
+        if (h.Prices.StablePrice is { } stable)
+            return Covered(q, q * stable, ComponentSource.StableNav, stable, null, null);
 
         // (2) Carry the last statement forward, revalued at its per-share price if shares changed since.
         if (anchor is { } last)
@@ -504,7 +504,7 @@ public sealed class AccountStateEngine
             var unit = share.Holding.Prices.Recent(row.TradeDate, _options.MaxPriceAgeDays)?.Close
                        ?? row.Price
                        ?? Latest(share.ValuedAnchors, row.TradeDate)?.UnitPrice
-                       ?? (share.Holding.Prices.IsStableNav ? 1m : null);
+                       ?? share.Holding.Prices.StablePrice;
             return unit is { } u
                 ? new ExternalFlow(row.TradeDate, qty * u, FlowKind.InKindTransfer, row.TransactionId, true)
                 : new ExternalFlow(row.TradeDate, 0m, FlowKind.InKindTransfer, row.TransactionId, false);

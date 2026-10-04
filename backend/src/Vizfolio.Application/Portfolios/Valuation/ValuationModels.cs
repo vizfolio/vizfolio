@@ -46,14 +46,18 @@ public readonly record struct PositionAnchor(DateOnly AsOf, decimal Quantity, de
 /// <summary>A provider split: shares held at the close of the day before <see cref="ExDate"/> are multiplied by <see cref="Factor"/>.</summary>
 public readonly record struct SplitAction(DateOnly ExDate, decimal Factor);
 
-/// <summary>A holding's valuation inputs. Anchors are ascending by date.</summary>
+/// <summary>
+/// A holding's valuation inputs. Anchors are ascending by date. <see cref="IsMoneyMarket"/> is true when the SEC
+/// N-MFP registry lists the ticker as a money market fund (see <see cref="SettlementFunds"/>).
+/// </summary>
 public sealed record HoldingInput(
     Guid HoldingId,
     string? Symbol,
     AccountHoldingKind Kind,
     PriceSeries Prices,
     IReadOnlyList<SplitAction> Splits,
-    IReadOnlyList<PositionAnchor> AnchorsAscending);
+    IReadOnlyList<PositionAnchor> AnchorsAscending,
+    bool IsMoneyMarket = false);
 
 /// <summary>Everything the engine needs to value one account at any date.</summary>
 public sealed record AccountValuationInput(

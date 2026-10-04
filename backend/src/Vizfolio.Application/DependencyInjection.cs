@@ -17,6 +17,7 @@ public static class DependencyInjection
     {
         services.AddScoped<ISecuritiesImporter, SecuritiesImporter>();
         services.AddScoped<IFundsImporter, FundsImporter>();
+        services.AddScoped<IMoneyMarketFundsImporter, MoneyMarketFundsImporter>();
         services.AddScoped<IHoldingRelinker, HoldingRelinker>();
 
         // Import parsers are plug-ins: register an IPortfolioFileParser and the pipeline discovers it.

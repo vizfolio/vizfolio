@@ -763,14 +763,15 @@ public sealed class PortfolioPerformanceServiceTests
     [Fact]
     public async Task A_money_market_fund_bought_before_its_price_history_starts_is_valued_at_one_dollar_a_share()
     {
-        // VUSXX bought in 2019 while the price provider's history only begins in 2021: a stable-NAV fund is
-        // worth $1.00 a share, so 2020 is valued (not $0, not missing).
+        // A Treasury money market fund bought years before the price provider's history begins: its SEC filing says it keeps
+        // a stable $1.00 a share, so 2020 is valued (not $0, not missing).
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        await SeedMoneyMarketFundAsync(ctx, "VUSXX", seeksStablePrice: true, stablePrice: 1m);
         var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VUSXX");
-        await SeedSnapshotAsync(ctx, holding, new DateOnly(2019, 6, 30), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
-        await SeedCashAsync(ctx, accountId, new DateOnly(2019, 7, 1), TransactionType.Deposit, 50_000m);
-        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2019, 7, 1), TransactionType.Buy, amount: -50_000m, quantity: 50_000m);
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2017, 2, 28), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2017, 3, 1), TransactionType.Deposit, 50_000m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2017, 3, 1), TransactionType.Buy, amount: -50_000m, quantity: 50_000m);
         await SeedPriceAsync(ctx, "VUSXX", new DateOnly(2021, 6, 1), close: 1m);
 
         var service = NewService(ctx);
@@ -794,7 +795,7 @@ public sealed class PortfolioPerformanceServiceTests
         var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "MMKTX");
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2019, 3, 1), TransactionType.Buy, amount: -500m, quantity: 500m);
         await SeedCashAsync(ctx, accountId, new DateOnly(2019, 3, 1), TransactionType.Deposit, 500m); // funds the purchase
-        for (var day = 0; day < StableNavFunds.MinObservations; day++)
+        for (var day = 0; day < StablePrices.MinObservations; day++)
             await SeedPriceAsync(ctx, "MMKTX", new DateOnly(2021, 6, 1).AddDays(day), close: 1m);
 
         var service = NewService(ctx);
@@ -925,6 +926,35 @@ public sealed class PortfolioPerformanceServiceTests
         missing.Symbol.ShouldBe("GONE");
         missing.Cause.ShouldBe("StalePrice");
         missing.AccountId.ShouldBe(accountId);
+    }
+
+    [Fact]
+    public async Task A_floating_nav_money_market_fund_is_not_assumed_to_be_worth_one_dollar()
+    {
+        // An institutional prime fund floats (its N-MFP says it doesn't seek a stable price): with no close, its
+        // value is unknown rather than a guessed $1.00 a share.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        await SeedMoneyMarketFundAsync(ctx, "FLOATX", seeksStablePrice: false, stablePrice: null);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "FLOATX");
+        await SeedCashAsync(ctx, accountId, new DateOnly(2019, 7, 1), TransactionType.Deposit, 5_000m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2019, 7, 1), TransactionType.Buy, amount: -5_000m, quantity: 5_000m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(
+            portfolioId, accountId, new DateOnly(2019, 7, 1), new DateOnly(2020, 12, 31), CancellationToken.None);
+
+        result!.EndingBalance.IsComplete.ShouldBeFalse();
+        result.EndingBalance.Missing.ShouldHaveSingleItem().Symbol.ShouldBe("FLOATX");
+    }
+
+    private static async Task SeedMoneyMarketFundAsync(TestDbContext ctx, string ticker, bool seeksStablePrice, decimal? stablePrice)
+    {
+        var fund = new Vizfolio.Domain.Funds.MoneyMarketFund($"S{Guid.NewGuid():N}"[..10]);
+        fund.Update($"{ticker} Money Market Fund", null, "Government", seeksStablePrice, stablePrice, false,
+            new DateOnly(2026, 8, 31), Guid.NewGuid().ToString("N")[..20], [ticker]);
+        ctx.Db.MoneyMarketFunds.Add(fund);
+        await ctx.Db.SaveChangesAsync();
     }
 
     private static PortfolioPerformanceService NewService(TestDbContext ctx) =>

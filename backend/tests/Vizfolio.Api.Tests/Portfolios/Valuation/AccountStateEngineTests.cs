@@ -123,7 +123,7 @@ public sealed class AccountStateEngineTests
             ledger:
             [
                 Row(Jan2, TransactionType.Deposit, 12_000.00m),
-                Row(Jan2, TransactionType.Other, -12_000.00m, sourceType: "Sweep in"),
+                Row(Jan2, TransactionType.Other, -12_000.00m, Settlement, sourceType: "Sweep in", ticker: "VMMXX"),
                 Row(Jun2, TransactionType.Transfer, -12_000.00m, Settlement, -12_000.00m, sourceType: "TRANSFER TO 1234", ticker: "VMMXX"),
                 Row(Jun2, TransactionType.Transfer, 12_000.40m, sourceType: "Transfer (incoming)"),
             ],
@@ -135,13 +135,15 @@ public sealed class AccountStateEngineTests
     [Fact]
     public void A_purchase_of_the_money_market_fund_with_outside_money_counts_once_via_its_implied_contribution()
     {
+        // Its purchases carry share counts, so it's valued as an ordinary $1.00 holding; the implied contribution
+        // is the money that bought it.
         var engine = Build(
             ledger:
             [
                 Row(Jan2, TransactionType.Buy, 200m, Settlement, 200m, sourceType: "Buy", ticker: "VMMXX"),
                 Row(Jan2, TransactionType.Deposit, 200m, source: ImpliedContributionService.SourceSystem),
             ],
-            holdings: [Holding(Settlement, "VMMXX")]);
+            holdings: [Holding(Settlement, "VMMXX", stablePrice: 1m)]);
 
         engine.ValueAt(Dec31).Value.ShouldBe(200m);
     }
@@ -163,7 +165,7 @@ public sealed class AccountStateEngineTests
             holdings:
             [
                 Holding(Fund, "FUND", prices: [(Mar3.AddDays(-1), 95m), (Dec31, 110m)], anchors: [Anchor(statement, 60m, 6600m)]),
-                Holding(Settlement, "VMFXX", anchors: [Anchor(statement, 100m, 100m)]),
+                Holding(Settlement, "VMFXX", anchors: [Anchor(statement, 100m, 100m)], stablePrice: 1m),
             ]);
 
         var opening = engine.OpeningDate!.Value;
@@ -325,7 +327,7 @@ public sealed class AccountStateEngineTests
     {
         var engine = Build(
             ledger: [Row(Jan2, TransactionType.Deposit, 50_000m), Row(Jan2, TransactionType.Buy, -50_000m, Fund, 50_000m)],
-            holdings: [Holding(Fund, "VUSXX")]);
+            holdings: [Holding(Fund, "VUSXX", stablePrice: 1m)]);
 
         engine.ValueAt(Jun2).Components.Single(c => c.HoldingId == Fund).ShouldSatisfyAllConditions(
             c => c.Value.ShouldBe(50_000m),
@@ -414,16 +416,19 @@ public sealed class AccountStateEngineTests
         string symbol,
         (DateOnly Date, decimal Close)[]? prices = null,
         PositionAnchor[]? anchors = null,
-        SplitAction[]? splits = null)
+        SplitAction[]? splits = null,
+        decimal? stablePrice = null,
+        bool isMoneyMarket = false)
     {
         var points = (prices ?? []).Select(p => new PricePointData(p.Date, p.Close)).ToList();
         return new HoldingInput(
             id,
             symbol,
             AccountHoldingKind.Fund,
-            new PriceSeries(points, StableNavFunds.IsStableNav(symbol, points)),
+            new PriceSeries(points, StablePrices.Resolve(stablePrice, points)),
             splits ?? [],
-            (anchors ?? []).OrderBy(a => a.AsOf).ToList());
+            (anchors ?? []).OrderBy(a => a.AsOf).ToList(),
+            isMoneyMarket || stablePrice is not null);
     }
 
     private static PositionAnchor Anchor(DateOnly asOf, decimal quantity, decimal marketValue)

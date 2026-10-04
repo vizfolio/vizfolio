@@ -28,6 +28,7 @@ class MockApi {
   all: Observable<ImportAllResponse> = of({
     securities: importResult(),
     funds: importResult(),
+    moneyMarketFunds: importResult(),
     relinked: 3,
   });
   relink: Observable<RelinkLedgerResponse> = of({ linked: 7 });

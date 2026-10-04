@@ -33,6 +33,8 @@ public interface IAppDbContext
 
     DbSet<CitSubstitution> CitSubstitutions { get; }
 
+    DbSet<MoneyMarketFund> MoneyMarketFunds { get; }
+
     DbSet<Currency> Currencies { get; }
 
     DbSet<Country> Countries { get; }

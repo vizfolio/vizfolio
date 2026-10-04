@@ -52,10 +52,12 @@ export interface ImportAllRequest {
   force?: boolean;
 }
 
-/** Result of POST /api/admin/imports/all: both import phases plus the re-link count. */
+/** Result of POST /api/admin/imports/all: each import phase plus the re-link count. */
 export interface ImportAllResponse {
   securities: ImportResult;
   funds: ImportResult;
+  /** The SEC money market fund registry (tickers + stable-price facts). */
+  moneyMarketFunds: ImportResult;
   relinked: number;
 }
 

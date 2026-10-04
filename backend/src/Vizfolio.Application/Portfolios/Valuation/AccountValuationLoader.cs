@@ -139,6 +139,14 @@ public sealed class AccountValuationLoader
             }
         }
 
+        // Which tickers are money market funds, and at what stable price — from the SEC N-MFP registry (a few
+        // hundred rows, loaded whole).
+        var moneyMarkets = await _db.MoneyMarketFunds.AsNoTracking().ToListAsync(cancellationToken);
+        var stablePriceByTicker = new Dictionary<string, decimal?>(StringComparer.Ordinal);
+        foreach (var fund in moneyMarkets)
+            foreach (var ticker in fund.Tickers)
+                stablePriceByTicker.TryAdd(ticker, fund.StablePrice);
+
         var snapshotsByHolding = snapshots.GroupBy(s => s.AccountHoldingId).ToDictionary(g => g.Key, g => g.ToList());
         var ledgerByAccount = ledger.GroupBy(r => r.AccountId).ToDictionary(g => g.Key, g => g.Select(x => x.Row).ToList());
         var holdingsByAccount = holdings.GroupBy(h => h.AccountId).ToDictionary(g => g.Key, g => g.ToList());
@@ -160,13 +168,16 @@ public sealed class AccountValuationLoader
                     .ToList();
 
                 var priceList = (IReadOnlyCollection<PricePointData>?)points ?? [];
+                decimal? registryPrice = null;
+                var isMoneyMarket = symbolKey is not null && stablePriceByTicker.TryGetValue(symbolKey, out registryPrice);
                 inputs.Add(new HoldingInput(
                     h.AccountHoldingId,
                     h.Symbol,
                     h.Kind,
-                    new PriceSeries(priceList, StableNavFunds.IsStableNav(h.Symbol, priceList)),
+                    new PriceSeries(priceList, StablePrices.Resolve(registryPrice, priceList)),
                     (IReadOnlyList<SplitAction>?)splits ?? [],
-                    anchors));
+                    anchors,
+                    isMoneyMarket));
             }
 
             engines[accountId] = new AccountStateEngine(new AccountValuationInput(

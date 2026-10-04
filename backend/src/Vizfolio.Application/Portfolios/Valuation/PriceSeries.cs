@@ -4,22 +4,23 @@ namespace Vizfolio.Application.Portfolios.Valuation;
 public readonly record struct PricePointData(DateOnly AsOf, decimal Close);
 
 /// <summary>
-/// A holding's daily closes, ascending, with on-or-before lookup by binary search. Knows whether the series is a
-/// stable-NAV (money-market) fund, worth $1.00 a share whatever the price data says.
+/// A holding's daily closes, ascending, with on-or-before lookup by binary search. Carries the fixed price of a
+/// stable-NAV (money market) fund, which values it whatever the price data says (see <see cref="StablePrices"/>).
 /// </summary>
 public sealed class PriceSeries
 {
     private readonly PricePointData[] _ascending;
 
-    public PriceSeries(IEnumerable<PricePointData> points, bool isStableNav)
+    public PriceSeries(IEnumerable<PricePointData> points, decimal? stablePrice = null)
     {
         _ascending = points.OrderBy(p => p.AsOf).ToArray();
-        IsStableNav = isStableNav;
+        StablePrice = stablePrice;
     }
 
-    public static PriceSeries Empty { get; } = new([], isStableNav: false);
+    public static PriceSeries Empty { get; } = new([]);
 
-    public bool IsStableNav { get; }
+    /// <summary>The fund's fixed price per share when it's a stable-NAV fund; otherwise null.</summary>
+    public decimal? StablePrice { get; }
 
     public int Count => _ascending.Length;
 
