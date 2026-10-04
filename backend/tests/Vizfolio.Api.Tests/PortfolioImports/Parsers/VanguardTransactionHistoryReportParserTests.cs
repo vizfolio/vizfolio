@@ -303,13 +303,24 @@ public sealed class VanguardTransactionHistoryReportParserTests
         rows.Where(r => !r.SourceType!.StartsWith("Sweep")).ShouldAllBe(r => !r.IsSettlementFund);
     }
 
+    [Fact]
+    public async Task ParseAsync_names_the_broker_but_no_account_so_the_import_routes_by_transactions()
+    {
+        var parser = new VanguardTransactionHistoryReportParser();
+        await using var stream = BuildReport(SampleRows);
+
+        var parsed = await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None);
+
+        parsed.Statements[0].InstitutionCode.ShouldBe("vanguard.com");
+        parsed.Statements[0].AccountNumber.ShouldBeNull();
+    }
+
     private static async Task<IReadOnlyList<ParsedTransaction>> ParseSampleAsync()
     {
         var parser = new VanguardTransactionHistoryReportParser();
         await using var stream = BuildReport(SampleRows);
         var parsed = await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None);
         parsed.Statements.Count.ShouldBe(1);
-        parsed.Statements[0].InstitutionCode.ShouldBeNull();
         return parsed.Statements[0].Transactions;
     }
 

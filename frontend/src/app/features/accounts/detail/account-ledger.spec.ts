@@ -3,7 +3,7 @@ import { Observable, of, throwError } from 'rxjs';
 
 import { LedgerEntry } from '../../../core/api/models/ledger.models';
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
-import { AccountLedger } from './account-ledger';
+import { AccountLedger, typeLabel } from './account-ledger';
 
 function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
   return {
@@ -70,5 +70,11 @@ describe('AccountLedger', () => {
     api.ledger = throwError(() => new Error('boom'));
     const cmp = setup(api) as any;
     expect(cmp.status()).toBe('error');
+  });
+
+  it('names the normalized type in plain words', () => {
+    expect(typeLabel('CapitalGain')).toBe('Capital gain');
+    expect(typeLabel('ReturnOfCapital')).toBe('Return of capital');
+    expect(typeLabel('Buy')).toBe('Buy');
   });
 });

@@ -5,6 +5,7 @@ using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using Vizfolio.Application.Portfolios.Health;
 using Vizfolio.Api.Endpoints.Portfolios;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Domain.Portfolios;
@@ -167,6 +168,94 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     }
 
     [Fact]
+    public async Task POST_account_treats_differently_formatted_numbers_as_the_same_account()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        (await _client.PostAsJsonAsync(
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts",
+            new CreateAccountRequest(portfolio.PortfolioId, "A1", "fidelity.com", "1234-5678", null))).EnsureSuccessStatusCode();
+
+        var second = await _client.PostAsJsonAsync(
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts",
+            new CreateAccountRequest(portfolio.PortfolioId, "A2", "fidelity.com", "12345678", null));
+
+        second.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+    }
+
+    [Theory]
+    [InlineData("", "fidelity.com", "1234")]
+    [InlineData("Brokerage", " ", "1234")]
+    [InlineData("Brokerage", "fidelity.com", " - ")]
+    public async Task POST_account_without_a_name_institution_or_number_returns_400(
+        string name, string institutionCode, string accountNumber)
+    {
+        var portfolio = await CreatePortfolioAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts",
+            new CreateAccountRequest(portfolio.PortfolioId, name, institutionCode, accountNumber, null));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task POST_portfolio_import_with_an_assignment_imports_into_the_chosen_account()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, "5555");
+
+        var response = await UploadPortfolioFileAsync(
+            portfolio.PortfolioId, "sample.csv", CanonicalCsv,
+            assignments: $$"""[{"fileAccountNumber":"","accountId":"{{account.AccountId}}"}]""");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
+        body!.Status.ShouldBe(PortfolioImportStatus.Success);
+        body.Accounts.ShouldHaveSingleItem().AccountId.ShouldBe(account.AccountId);
+    }
+
+    [Fact]
+    public async Task POST_portfolio_import_rejects_unreadable_or_unusable_assignments_with_400()
+    {
+        var portfolio = await CreatePortfolioAsync();
+
+        var garbled = await UploadPortfolioFileAsync(portfolio.PortfolioId, "sample.csv", CanonicalCsv, assignments: "{not json");
+        garbled.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+
+        var noNumber = await UploadPortfolioFileAsync(
+            portfolio.PortfolioId, "sample.csv", CanonicalCsv,
+            assignments: """[{"fileAccountNumber":"","newAccount":{"name":"IRA","institutionCode":"vanguard.com"}}]""");
+        noNumber.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        (await noNumber.Content.ReadFromJsonAsync<PortfolioImportResult>())!
+            .Status.ShouldBe(PortfolioImportStatus.InvalidAccountSelection);
+    }
+
+    [Fact]
+    public async Task GET_health_reports_findings_for_the_portfolio_and_each_account()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, "7777");
+        (await UploadAccountFileAsync(portfolio.PortfolioId, account.AccountId, "sample.csv", CanonicalCsv)).EnsureSuccessStatusCode();
+
+        var portfolioHealth = await _client.GetFromJsonAsync<DataHealthReport>($"/api/portfolios/{portfolio.PortfolioId}/health");
+        var accountHealth = await _client.GetFromJsonAsync<DataHealthReport>(
+            $"/api/portfolios/{portfolio.PortfolioId}/accounts/{account.AccountId}/health");
+
+        portfolioHealth!.Accounts.ShouldHaveSingleItem().AccountId.ShouldBe(account.AccountId);
+        accountHealth!.Findings.ShouldContain(f => f.Code == HealthCodes.UnpricedHolding || f.Code == HealthCodes.StalePrice);
+    }
+
+    [Fact]
+    public async Task GET_health_returns_404_for_unknown_portfolio_or_account()
+    {
+        var portfolio = await CreatePortfolioAsync();
+
+        (await _client.GetAsync($"/api/portfolios/{Guid.NewGuid()}/health")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        (await _client.GetAsync($"/api/portfolios/{portfolio.PortfolioId}/accounts/{Guid.NewGuid()}/health"))
+            .StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task POST_import_csv_inserts_transactions_and_is_idempotent()
     {
         var portfolio = await CreatePortfolioAsync();
@@ -202,8 +291,9 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         var parsers = await _client.GetFromJsonAsync<List<ImportParserResponse>>("/api/imports/parsers");
 
         parsers.ShouldNotBeNull();
-        // Vanguard (200) > QFX (100) > generic test CSV (0).
-        parsers.Select(p => p.SourceSystem).ShouldBe(new[] { "VANGUARD", "QFX", "CSV" });
+        // Vanguard and M1 (200, registration order) > QFX (100) > generic test CSV (0).
+        parsers.Select(p => p.SourceSystem).ShouldBe(new[] { "VANGUARD", "M1", "QFX", "CSV" });
+        parsers.Single(p => p.SourceSystem == "M1").FileExtensions.ShouldBe(new[] { ".csv" });
         parsers.Single(p => p.SourceSystem == "QFX").FileExtensions.ShouldContain(".qfx");
         parsers.Single(p => p.SourceSystem == "VANGUARD").DisplayName.ShouldBe("Vanguard transaction report");
     }
@@ -333,15 +423,16 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     }
 
     [Fact]
-    public async Task POST_portfolio_import_returns_422_when_file_has_no_account_metadata()
+    public async Task POST_portfolio_import_asks_for_an_account_when_the_file_has_no_account_metadata()
     {
         var portfolio = await CreatePortfolioAsync();
 
         var response = await UploadPortfolioFileAsync(portfolio.PortfolioId, "sample.csv", CanonicalCsv);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<PortfolioImportResult>();
-        body!.Status.ShouldBe(PortfolioImportStatus.FileHasNoAccountInfo);
+        body!.Status.ShouldBe(PortfolioImportStatus.NeedsAccountSelection);
+        body.Selections.ShouldHaveSingleItem().Reason.ShouldBe(AccountSelectionReasons.NoAccountNumber);
     }
 
     [Fact]
@@ -750,10 +841,13 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         return await _client.PostAsync($"/api/portfolios/{portfolioId}/accounts/{accountId}/imports", multipart);
     }
 
-    private async Task<HttpResponseMessage> UploadPortfolioFileAsync(Guid portfolioId, string fileName, string content)
+    private async Task<HttpResponseMessage> UploadPortfolioFileAsync(
+        Guid portfolioId, string fileName, string content, string? assignments = null)
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(content)), "File", fileName);
+        if (assignments is not null)
+            multipart.Add(new StringContent(assignments), "Assignments");
         return await _client.PostAsync($"/api/portfolios/{portfolioId}/imports", multipart);
     }
 }

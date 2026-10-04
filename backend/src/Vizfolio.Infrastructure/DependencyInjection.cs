@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Vizfolio.Application.Abstractions;
+using Vizfolio.Application.PortfolioImports;
 using Vizfolio.Application.Portfolios;
 using Vizfolio.Infrastructure.Extracts;
 using Vizfolio.Infrastructure.Persistence;
@@ -27,6 +28,10 @@ public static class DependencyInjection
         // Valuation tunables from configuration (replaces AddApplication's defaults when the section exists).
         var valuation = configuration.GetSection(ValuationOptions.SectionName).Get<ValuationOptions>();
         if (valuation is not null) services.AddSingleton(valuation);
+
+        // Import routing thresholds, likewise.
+        var routing = configuration.GetSection(ImportRoutingOptions.SectionName).Get<ImportRoutingOptions>();
+        if (routing is not null) services.AddSingleton(routing);
 
         return services;
     }

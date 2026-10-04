@@ -9,6 +9,8 @@ The Performance API surfaces how a portfolio (or a single account inside it) per
 | `/api/portfolios/{portfolioId}/performance` | GET | `GetPortfolioPerformanceEndpoint` |
 | `/api/portfolios/{portfolioId}/accounts/{accountId}/performance` | GET | `GetAccountPerformanceEndpoint` |
 
+(Data health — what makes these numbers blank or approximate — is `GET .../health`; see [Data health](#data-health).)
+
 Both accept two optional query parameters:
 
 - `from` — start of period (inclusive). ISO date, e.g. `2025-06-01`. If omitted, defaults to the earliest `AccountTransaction.TradeDate` in scope, falling back to the earliest snapshot `AsOf`, falling back to today.
@@ -428,14 +430,17 @@ Broker files feed the ledger through a plug-in parser pipeline. Each format impl
 `IPortfolioFileParser` (`backend/src/Vizfolio.Application/PortfolioImports/Abstractions/IPortfolioFileParser.cs`)
 and is registered in `DependencyInjection.AddApplication`. `PortfolioImportService`
 (`.../PortfolioImports/Services/PortfolioImportService.cs`) does the dispatch. Parsers ship today:
-`QfxFileParser` (OFX/QFX, `SourceSystem="QFX"`) and `VanguardTransactionHistoryReportParser`
-(the per-account "Create a Report" `.xlsx`, `SourceSystem="VANGUARD"`, read with ClosedXML — MIT).
+`QfxFileParser` (OFX/QFX, `SourceSystem="QFX"`), `VanguardTransactionHistoryReportParser`
+(the per-account "Create a Report" `.xlsx`, `SourceSystem="VANGUARD"`, read with ClosedXML — MIT) and
+`M1FinanceActivityCsvParser` (M1 Finance's activity `.csv`, `SourceSystem="M1"`; see [M1 mapping](#m1-finance-activity-csv)).
+CSV parsers share `CsvTable` (an in-house RFC 4180 reader: quoted commas/line breaks, BOM, short rows padded, columns
+by header name) and `ReportValues` (money, dates and `--` placeholders as brokers print them).
 
 The parser contract carries selection metadata beyond `SourceSystem`:
 
 - **`DisplayName`** — human label shown in the UI "Format" dropdown.
 - **`Priority`** — auto-detect offers parsers highest-first, so provider-specific parsers sit above
-  any generic fallback (QFX = 100, Vanguard = 200). Ties fall back to registration order.
+  any generic fallback (QFX = 100, Vanguard = 200, M1 = 200). Ties fall back to registration order.
 - **`FileExtensions`** — powers the UI `accept` hint (aggregated across parsers).
 
 **Selection.** By default the format is **auto-detected**: the buffered upload is offered to each
@@ -565,9 +570,53 @@ not FKs (a second cascade path from the portfolio is rejected by SQL Server; bat
   other statements are skipped with an `OtherAccountSkipped` warning (masked number, e.g. `…1234`). If none match,
   the upload is rejected with **422 `AccountMismatch`** (8) and `fileAccountNumbers` (masked).
 - **Account numbers match normalized**: letters and digits only, upper-cased (`Account.NormalizeAccountNumber`), so
-  a hand-created "1234 5678" matches a statement's "1234-5678".
+  a hand-created "1234 5678" matches a statement's "1234-5678". `POST .../accounts` uses the same rule for its
+  duplicate check (409) and returns 400 when the name, institution or number is blank — **every account has a
+  number**.
 - **Statements for the same account in one file** are imported together (one holding resolver, one snapshot set),
   so they can't create a holding or snapshot twice.
+
+### Routing a file to its account (files without account numbers)
+
+The portfolio upload (`POST /api/portfolios/{id}/imports`) takes **any** supported file. A statement that names its
+account goes there by number (or creates the account). A statement **without** an account number — the Vanguard
+transaction report names only the broker (`InstitutionCode = "vanguard.com"`), and so does the M1 activity CSV
+(`"m1.com"`) — is routed by **fingerprint
+overlap** (`AccountRoutingAnalyzer`): the file's rows are fingerprinted against each account's stored rows with the
+same multiset rule as dedup (`FingerprintMultiset`). Because the fingerprint includes the exact date, share count and
+amount, a re-export matches its own account on nearly every row and other accounts on a couple at most, even when
+they hold the same funds.
+
+The best account is a **strong match** when (all configurable, `Imports:Routing`):
+
+| Key | Default | Rule |
+|---|---|---|
+| `MinMatchingRows` | 5 | it already holds at least this many of the file's rows |
+| `MinLeadRatio` | 2.0 | …and at least twice as many as the runner-up |
+| `MinOverlapShare` | 0.5 | …and at least half of the file's rows dated within its existing history (a few coincidental rows inside a busy history don't count) |
+| `Mode` | `Auto` | `Auto` imports a strong match straight away; `Confirm` always asks, pre-selecting it |
+| `GuardAccountImports` | `true` | the account Import tab checks too (below) |
+
+When it isn't strong (a new account, an export that overlaps nothing, identical histories in two accounts) or the
+mode is `Confirm`, the response is **`NeedsAccountSelection`** (9, HTTP 200) and **nothing is written**:
+`selections: [{ fileAccountNumber, institutionCode, reason, rows, firstDate, lastDate, candidates: [{ accountId,
+name, accountNumberMasked, matchingRows, rowsInAccountRange, sharedTickers }], suggestedAccountId }]`. The client
+sends the same file again with an `Assignments` form field — a JSON array of `{ fileAccountNumber, accountId? ,
+newAccount?: { name?, institutionCode?, accountNumber? } }`. A new account for a file without a number needs the
+institution and number (400 **`InvalidAccountSelection`** (11) otherwise; a number that already exists imports
+into that account). A file routed this way is recorded against its account (`ImportBatch.AccountId`), so reprocess
+and re-upload checks treat it like an account-tab upload.
+
+- **Typo guard for QFX.** A QFX statement whose number matches no account is fingerprint-checked against the
+  institution's accounts first. If one is a strong match (a mistyped number), the upload asks in both modes
+  (`reason: UnknownAccountNumber`): choose that account (its number becomes the file's) or a new account (the file's
+  number). Without a match the account is created as before.
+- **Account-tab guard.** A file without account details uploaded to an account whose rows are clearly another
+  account's returns **`LikelyOtherAccount`** (10, HTTP 200, `selections[0]` with the candidates including this
+  account) and writes nothing; `IgnoreRoutingCheck=true` imports it here anyway.
+- Every `accounts[]` result says how it was placed — `routing: { method: Uploaded | AccountNumber | Fingerprint |
+  UserSelected | Created, matchingRows }` — plus `firstDate`/`lastDate` of its rows; the response carries
+  `parserDisplayName`.
 
 ### Adding a provider parser
 
@@ -580,6 +629,36 @@ not FKs (a second cascade path from the portfolio is rejected by SQL Server; bat
 
 That's the whole extension surface — the endpoints, discovery, dedup, and UI dropdown pick it up
 automatically.
+
+### M1 Finance activity CSV
+
+M1 offers no OFX/QFX; its activity export is one account's ledger with the columns `Date, Posted Date, Symbol,
+Description, Transaction Type, Amount, Units, Unit Type, Unit Price, Security Id, Security Id Type`. Detection needs
+`Date`, `Posted Date`, `Transaction Type`, `Unit Type` and `Security Id Type` in the header. Dates print as
+`"Nov 17, 2025"`; `--` is an empty cell; the last column may be missing. `TradeDate` is `Date` and `SettlementDate`
+is `Posted Date` (which can be a day earlier, e.g. a dividend paid before a weekend). `Units` count only when
+`Unit Type = SHARES`; `Security Id` is stored as the CUSIP when `Security Id Type = CUSIP`. There are no ids
+(fingerprint ids are synthesized), no positions and no settlement fund — M1 holds plain cash.
+
+**Amounts are unsigned**, so the parser signs them the way cash moves (an amount the file does sign negative is
+respected where the direction can vary):
+
+| `Transaction Type` | When | Stored as | Amount |
+|---|---|---|---|
+| `PURCHASED` | | `Buy` (quantity +) | − |
+| `SOLD` | | `Sell` (quantity −) | + |
+| `DIVIDEND` | | `Dividend` | as reported |
+| `INTEREST` | | `Interest` | as reported |
+| `FEE` | | `Fee` | − |
+| `TRANSFER` (not shares) | description mentions "withdraw", or amount negative | `Withdrawal` | − |
+| `TRANSFER` (not shares) | otherwise ("ACH deposit of …") | `Deposit` | + |
+| `CASH` | description starts `PROMO_CREDIT` | `Interest` | as reported |
+| anything else | e.g. a `TRANSFER` of shares, other `CASH` rows | `Other` + `UnmappedLabel` warning | as reported |
+
+A **promo credit** (sign-up bonus) is money the user didn't put in, so it is income — part of the return, not a
+contribution — and is stored as `Interest` with `SourceType = "CASH"`. Validated so far against a real export with
+`TRANSFER` (deposit), `PURCHASED`, `DIVIDEND` and `CASH` (promo) rows only; `SOLD`, `INTEREST`, `FEE` and withdrawals
+are inferred, and any other shape surfaces as a warning rather than a silent guess.
 
 ## QFX ingestion nuances
 
@@ -656,27 +735,36 @@ Per-broker OFX conventions live in `IBrokerProfile` implementations (`.../Portfo
 Positions whose ticker a sweep row moves are marked as the settlement fund too. To add a broker (Fidelity core
 position, Schwab bank sweep), implement `IBrokerProfile` from a real export and register it.
 
-## Reconciliation (future work)
+## Data health
 
-Snapshots and transactions describe the same account from two angles, and it's tempting to want the service to *reject* a snapshot that doesn't tie out against the ledger. In practice we deliberately don't, because two invariants behave differently:
+`GET /api/portfolios/{id}/health` and `GET /api/portfolios/{id}/accounts/{accountId}/health` (404 when unknown)
+report everything that makes a number blank, approximate or assumed, in plain language with an action
+(`DataHealthService`, `Application/Portfolios/Health/`). Read-only; imports and opening balances always succeed.
 
-- **Quantity is a hard invariant.** For any holding, `expectedQtyAtB = qtyAtA + Σ (Buy.qty − Sell.qty + Reinvest.qty + Transfer.qty) over (A, B]`. When `snapshot.Quantity` disagrees with `expectedQty`, the ledger is genuinely wrong — a transaction is missing, duplicated, or a corporate action (split, spin-off) wasn't captured. This is actionable, and the fix belongs in the ledger.
-- **Market value is a soft invariant.** `actualValueDelta − Σ contributions − Σ income` equals *implied market movement* (unrealized gain/loss + reinvested dividends at unknown prices + FX + fees not otherwise captured). That number is never zero for a snapshot pair spanning real time, because market movement is by definition not in the transaction ledger. There is no threshold at which "tied out" is a defensible cutoff.
+```jsonc
+{ "status": "Healthy" | "Info" | "NeedsAttention", "currencyCode": "USD",
+  "accounts": [{ "accountId", "name", "status", "blocking", "info" }],
+  "findings": [{ "code", "severity": "Blocking" | "Info", "accountId", "holdingId", "symbol", "from", "to",
+                 "message", "action": { "kind", "label" },
+                 "details": { "ledgerQuantity", "brokerQuantity", "amount", "count", "priceFetchOutcome",
+                              "priceFetchMessage", "pricesPending", "warningCode", "samples", "files" } }] }
+```
 
-Rejecting a snapshot on the strict value delta would therefore reject *every honest snapshot*. Rejecting on quantity mismatch would block partial-history users (whose earlier transactions aren't imported yet) from ever recording an opening balance.
+| Code | Source | Severity · action |
+|---|---|---|
+| `QuantityMismatch` / `CashMismatch` | engine findings at each statement | Blocking when material (see Completeness) · `ReimportFile`; else Info |
+| `NegativePosition` | engine | Blocking · `ReimportFile` |
+| `UnmatchedSplit` | a broker split row price data doesn't show | Info |
+| `PreHistoryPosition` | a position held before the imported history | Info · `AdjustStartingPosition` |
+| `UnpricedHolding` / `StalePrice` | `AccountStateEngine.MissingIntervals` — every day from the opening to today, merged into runs; `PriceSeriesStatus` adds the provider outcome | Blocking · `FetchPrices` (`AddPriceProviderKey` when no provider has it); Info while a fetch for the account is pending |
+| `UnvaluedTransfer` | in-kind transfers without a price | Blocking · `FetchPrices` |
+| `ImportWarning` | active batches' warnings, grouped by code (`details.warningCode`, samples, files); `OtherAccountSkipped` left out | Info |
+| `ImpliedContributions` | stored implied contribution rows | Info · `ReviewImpliedContributions` (the existing `GET .../implied-contributions`) |
 
-The right posture is **accept always, report separately**. A future `GET /api/portfolios/{id}/accounts/{accountId}/reconciliation` endpoint would walk adjacent snapshot pairs and, for each holding, return findings labeled:
-
-- `QuantityMismatch` — hard, actionable. `expectedQty ≠ snapshot.Quantity`.
-- `LargeValueDelta` — soft, informational. `|impliedMarketMovement|` exceeds a configurable ratio of the prior balance (default: 3× — twenty-five hundred percent between two snapshots is a real signal, five percent is not).
-
-The endpoint would be report-only; imports and `POST .../opening-balance` continue to succeed regardless. The UI decides whether to render findings quietly on a data-hygiene screen or loudly on onboarding, and could later persist per-finding acknowledgements.
-
-**Partly built.** The account engine now performs this reconciliation while valuing: at every statement it compares
-the rolled quantity (and cash) with the broker's, records a `QuantityMismatch` / `CashMismatch` finding with its
-value, and — only when the drift is *material* (see Completeness) — treats the component as unknown back to the
-previous statement. Snapshots are still always accepted. Not built yet: the report endpoint and UI (roadmap Phase
-6.1, "Data Health"), which will surface `AccountStateEngine.Findings`.
+Why snapshots are never rejected: **quantity** is a hard invariant (a mismatch means the ledger is missing or
+duplicating a row), but **market value** between two statements always moves with the market, so no value threshold
+is a defensible "tied out". The engine therefore accepts every statement, records the mismatch with its value, and
+only a *material* drift makes the component unknown back to the previous statement.
 
 ## Extending the response
 

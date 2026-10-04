@@ -28,9 +28,7 @@ internal sealed class LedgerMatcher
     private LedgerMatcher(Guid accountId, string sourceSystem, IReadOnlyList<StoredRow> rows)
     {
         // Cross-source fingerprint multiset: how many stored rows of each fingerprint are still unclaimed.
-        _unclaimed = rows
-            .GroupBy(r => r.Fingerprint(accountId))
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        _unclaimed = FingerprintMultiset.Count(rows.Select(r => r.Fingerprint(accountId)));
 
         var sameSource = rows.Where(r => string.Equals(r.SourceSystem, sourceSystem, StringComparison.OrdinalIgnoreCase)).ToList();
         _sameSourceById = sameSource

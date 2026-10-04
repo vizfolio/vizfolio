@@ -28,6 +28,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
     private readonly IImpliedContributionService _impliedContributions;
     private readonly ILedgerRelinker? _ledgerRelinker;
     private readonly IPriceRefreshQueue? _priceRefresh;
+    private readonly ImportRoutingOptions _routing;
+    private readonly AccountRoutingAnalyzer _analyzer;
     private readonly ILogger<PortfolioImportService> _logger;
 
     public PortfolioImportService(
@@ -36,9 +38,12 @@ public sealed class PortfolioImportService : IPortfolioImportService
         IImpliedContributionService impliedContributions,
         ILogger<PortfolioImportService> logger,
         ILedgerRelinker? ledgerRelinker = null,
-        IPriceRefreshQueue? priceRefresh = null)
+        IPriceRefreshQueue? priceRefresh = null,
+        ImportRoutingOptions? routing = null)
     {
         _priceRefresh = priceRefresh;
+        _routing = routing ?? new ImportRoutingOptions();
+        _analyzer = new AccountRoutingAnalyzer(db);
         _db = db;
         _parsers = parsers;
         _impliedContributions = impliedContributions;
@@ -51,9 +56,11 @@ public sealed class PortfolioImportService : IPortfolioImportService
         Stream fileStream,
         string fileName,
         CancellationToken cancellationToken,
-        string? requestedSourceSystem = null)
+        string? requestedSourceSystem = null,
+        ImportChoices? choices = null)
     {
         var stopwatch = Stopwatch.StartNew();
+        choices ??= ImportChoices.None;
 
         var account = await _db.Accounts.FirstOrDefaultAsync(a => a.AccountId == accountId, cancellationToken);
         if (account is null)
@@ -75,11 +82,38 @@ public sealed class PortfolioImportService : IPortfolioImportService
             return new PortfolioImportResult(PortfolioImportStatus.AccountMismatch, parsed.SourceSystem, [], stopwatch.Elapsed)
             {
                 FileAccountNumbers = parsed.Statements
-                    .Where(HasAccountNumber).Select(s => MaskAccountNumber(s.AccountNumber!)).Distinct().ToList(),
+                    .Where(HasAccountNumber).Select(s => AccountRoutingAnalyzer.MaskAccountNumber(s.AccountNumber!)).Distinct().ToList(),
+            };
+
+        if (!parsed.Statements.Any(HasAccountNumber) && _routing.GuardAccountImports && !choices.IgnoreRoutingCheck
+            && await BelongsElsewhereAsync(account, statements, cancellationToken) is { } elsewhere)
+            return new PortfolioImportResult(PortfolioImportStatus.LikelyOtherAccount, parsed.SourceSystem, [], stopwatch.Elapsed)
+            {
+                ParserDisplayName = parse.DisplayName,
+                Selections = [elsewhere],
             };
 
         var batch = file.ToBatch(account.PortfolioId, accountId, parsed.SourceSystem);
-        return await RunAsync(batch, parsed.SourceSystem, [new ImportTarget(account, false, statements)], warnings, stopwatch, cancellationToken);
+        var target = new ImportTarget(account, false, statements, new AccountRouting(RoutingMethods.Uploaded));
+        return await RunAsync(batch, parsed.SourceSystem, parse.DisplayName, [target], warnings, stopwatch, cancellationToken);
+    }
+
+    /// <summary>
+    /// For a file without account details uploaded to <paramref name="account"/>: a question to ask when its
+    /// transactions clearly belong to another account in the portfolio (so a wrong-tab upload is caught before it
+    /// writes anything), else null.
+    /// </summary>
+    private async Task<AccountSelection?> BelongsElsewhereAsync(
+        Account account, IReadOnlyList<ParsedAccountStatement> statements, CancellationToken cancellationToken)
+    {
+        var accounts = await _db.Accounts.Where(a => a.PortfolioId == account.PortfolioId).ToListAsync(cancellationToken);
+        if (accounts.Count < 2) return null;
+
+        var rows = statements.SelectMany(s => s.Transactions).ToList();
+        var analysis = await _analyzer.AnalyzeAsync(rows, accounts, cancellationToken);
+        return AccountRoutingAnalyzer.StrongMatch(analysis, _routing) is { } other && other != account.AccountId
+            ? Selection(string.Empty, statements, AccountSelectionReasons.LikelyOtherAccount, analysis, other)
+            : null;
     }
 
     public async Task<PortfolioImportResult> ImportToPortfolioAsync(
@@ -87,9 +121,11 @@ public sealed class PortfolioImportService : IPortfolioImportService
         Stream fileStream,
         string fileName,
         CancellationToken cancellationToken,
-        string? requestedSourceSystem = null)
+        string? requestedSourceSystem = null,
+        ImportChoices? choices = null)
     {
         var stopwatch = Stopwatch.StartNew();
+        choices ??= ImportChoices.None;
 
         var portfolioExists = await _db.Portfolios.AsNoTracking()
             .AnyAsync(p => p.PortfolioId == portfolioId, cancellationToken);
@@ -105,14 +141,36 @@ public sealed class PortfolioImportService : IPortfolioImportService
             return parse.Failure(stopwatch.Elapsed);
         var parsed = parse.File!;
 
-        var targets = await RouteToPortfolioAccountsAsync(portfolioId, parsed, cancellationToken);
+        // A file without account details is the same upload whichever account it went into.
+        var accountless = !parsed.Statements.Any(HasAccountNumber);
+        if (accountless && await FindActiveBatchAsync(portfolioId, null, file.Sha256, cancellationToken, anyAccount: true) is { } earlier)
+            return AlreadyImported(earlier, stopwatch.Elapsed);
+
+        var plan = await RouteToPortfolioAccountsAsync(portfolioId, parsed, cancellationToken, choices);
+        if (plan.Error is not null)
+            return new PortfolioImportResult(PortfolioImportStatus.InvalidAccountSelection, parsed.SourceSystem, [], stopwatch.Elapsed)
+            {
+                ParserDisplayName = parse.DisplayName,
+                Error = plan.Error,
+            };
+        if (plan.Selections.Count > 0)
+            return new PortfolioImportResult(PortfolioImportStatus.NeedsAccountSelection, parsed.SourceSystem, [], stopwatch.Elapsed)
+            {
+                ParserDisplayName = parse.DisplayName,
+                Selections = plan.Selections,
+            };
+        var targets = plan.Targets;
         if (targets.Count == 0)
             return PortfolioImportResult.FileHasNoAccountInfo(parsed.SourceSystem, stopwatch.Elapsed);
 
         var warnings = new ImportWarningCollector();
         warnings.AddRange(parsed.Warnings);
-        var batch = file.ToBatch(portfolioId, accountId: null, parsed.SourceSystem);
-        var result = await RunAsync(batch, parsed.SourceSystem, targets, warnings, stopwatch, cancellationToken);
+
+        // A file without account details that went to one account is recorded against it, so reprocessing it later
+        // goes back there (it can't be routed by account number) and a re-upload from that account is recognised.
+        var batchAccountId = accountless && targets.Count == 1 ? targets[0].Account.AccountId : (Guid?)null;
+        var batch = file.ToBatch(portfolioId, batchAccountId, parsed.SourceSystem);
+        var result = await RunAsync(batch, parsed.SourceSystem, parse.DisplayName, targets, warnings, stopwatch, cancellationToken);
 
         _logger.LogInformation(
             "Imported {Inserted} transactions across {AccountCount} accounts in portfolio {PortfolioId} from {Source}",
@@ -164,7 +222,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
     // ---------------- orchestration ----------------
 
     /// <summary>One account and the statements (from one file) that go into it.</summary>
-    private sealed record ImportTarget(Account Account, bool Created, IReadOnlyList<ParsedAccountStatement> Statements);
+    private sealed record ImportTarget(
+        Account Account, bool Created, IReadOnlyList<ParsedAccountStatement> Statements, AccountRouting? Routing = null);
 
     /// <summary>
     /// Records the batch and imports each target in one database transaction, then relinks holdings and re-derives
@@ -173,6 +232,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
     private async Task<PortfolioImportResult> RunAsync(
         ImportBatch batch,
         string sourceSystem,
+        string? parserDisplayName,
         IReadOnlyList<ImportTarget> targets,
         ImportWarningCollector warnings,
         Stopwatch stopwatch,
@@ -212,6 +272,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
             ImportBatchId = batch.ImportBatchId,
             ImportedAt = batch.ImportedAt,
             Warnings = warnings.ToList(),
+            ParserDisplayName = parserDisplayName,
         };
     }
 
@@ -251,7 +312,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
         }
         else
         {
-            targets = await RouteToPortfolioAccountsAsync(batch.PortfolioId, parsed, cancellationToken);
+            targets = (await RouteToPortfolioAccountsAsync(batch.PortfolioId, parsed, cancellationToken)).Targets;
             foreach (var target in targets.Where(t => t.Created))
             {
                 target.Account.MarkCreatedByImport(batch.ImportBatchId);
@@ -318,59 +379,172 @@ public sealed class PortfolioImportService : IPortfolioImportService
         foreach (var other in parsed.Statements.Except(matching))
             warnings.Add(ImportWarningCodes.OtherAccountSkipped,
                 "The file also has statements for other accounts; they were skipped. Import it from the Accounts page to include them.",
-                MaskAccountNumber(other.AccountNumber!));
+                AccountRoutingAnalyzer.MaskAccountNumber(other.AccountNumber!));
         return matching;
     }
 
-    /// <summary>
-    /// The accounts a portfolio-scoped upload goes to: one per distinct (institution, normalized account number) in
-    /// the file, found among the portfolio's accounts or created (unsaved). Statements for the same account share one
-    /// import, so its holdings and snapshots are resolved once.
-    /// </summary>
-    private async Task<List<ImportTarget>> RouteToPortfolioAccountsAsync(
-        Guid portfolioId, ParsedPortfolioFile parsed, CancellationToken cancellationToken)
+    /// <summary>Where a portfolio-scoped upload's statements go — or what to ask, or why the choices sent don't work.</summary>
+    private sealed record RoutingPlan(List<ImportTarget> Targets, List<AccountSelection> Selections, string? Error = null)
     {
-        var groups = parsed.Statements
-            .Where(s => !string.IsNullOrWhiteSpace(s.InstitutionCode) && HasAccountNumber(s))
-            .GroupBy(s => AccountKey(s.InstitutionCode!, s.AccountNumber!))
-            .ToList();
-        if (groups.Count == 0) return [];
+        public static RoutingPlan Invalid(string error) => new([], [], error);
+    }
 
+    /// <summary>
+    /// The accounts a portfolio-scoped upload goes to. Statements for the same account share one import, so its
+    /// holdings and snapshots are resolved once.
+    /// <list type="bullet">
+    ///   <item>A statement naming its account (institution + number) goes to the portfolio's account with that
+    ///   normalized number, or a new one. Before creating one for an upload, the institution's other accounts are
+    ///   checked: if one already holds the statement's transactions, the number is probably mistyped there, so the
+    ///   upload asks rather than double-counting the history in a duplicate account.</item>
+    ///   <item>Statements without an account number (e.g. the Vanguard report) go to the account that already holds
+    ///   their transactions when the evidence is clear and <see cref="ImportRoutingOptions.Mode"/> is
+    ///   <see cref="ImportRoutingMode.Auto"/>; otherwise the upload asks.</item>
+    /// </list>
+    /// With <paramref name="choices"/> null (reprocessing a stored file) nothing is asked: unknown numbers create
+    /// accounts and statements without one are skipped, as when the file was first imported.
+    /// </summary>
+    private async Task<RoutingPlan> RouteToPortfolioAccountsAsync(
+        Guid portfolioId, ParsedPortfolioFile parsed, CancellationToken cancellationToken, ImportChoices? choices = null)
+    {
+        var interactive = choices is not null;
         var existing = await _db.Accounts.Where(a => a.PortfolioId == portfolioId).ToListAsync(cancellationToken);
-        var pending = _db.Accounts.Local.Where(a => a.PortfolioId == portfolioId && !existing.Contains(a));
-        var byKey = existing.Concat(pending)
+        existing.AddRange(_db.Accounts.Local.Where(a => a.PortfolioId == portfolioId && !existing.Contains(a)));
+        var byKey = existing
             .GroupBy(a => AccountKey(a.InstitutionCode, a.AccountNumber))
             .ToDictionary(g => g.Key, g => g.OrderBy(a => a.CreatedAt).First());
 
-        var targets = new List<ImportTarget>(groups.Count);
-        foreach (var group in groups)
+        var targets = new List<ImportTarget>();
+        var selections = new List<AccountSelection>();
+        void AddTarget(Account account, bool created, IEnumerable<ParsedAccountStatement> statements, AccountRouting routing)
         {
-            var created = !byKey.TryGetValue(group.Key, out var account);
-            if (created)
-            {
-                var first = group.First();
-                account = Account.FromImport(portfolioId, first.InstitutionCode!, first.AccountNumber!);
-                byKey[group.Key] = account;
-            }
-
-            targets.Add(new ImportTarget(account!, created, group.ToList()));
+            var index = targets.FindIndex(t => t.Account.AccountId == account.AccountId);
+            if (index < 0) targets.Add(new ImportTarget(account, created, statements.ToList(), routing));
+            else targets[index] = targets[index] with { Statements = [.. targets[index].Statements, .. statements] };
         }
 
-        return targets;
+        var numbered = parsed.Statements
+            .Where(s => !string.IsNullOrWhiteSpace(s.InstitutionCode) && HasAccountNumber(s))
+            .GroupBy(s => AccountKey(s.InstitutionCode!, s.AccountNumber!));
+        foreach (var group in numbered)
+        {
+            var first = group.First();
+            var fileNumber = Account.NormalizeAccountNumber(first.AccountNumber);
+            if (byKey.TryGetValue(group.Key, out var matched))
+            {
+                AddTarget(matched, false, group, new AccountRouting(RoutingMethods.AccountNumber));
+                continue;
+            }
+
+            if (choices?.For(fileNumber) is { } choice)
+            {
+                if (choice.AccountId is { } chosenId)
+                {
+                    var chosen = existing.FirstOrDefault(a => a.AccountId == chosenId);
+                    if (chosen is null) return RoutingPlan.Invalid("The chosen account isn't in this portfolio.");
+                    chosen.ChangeAccountNumber(first.AccountNumber!);
+                    byKey[group.Key] = chosen;
+                    AddTarget(chosen, false, group, new AccountRouting(RoutingMethods.UserSelected));
+                    continue;
+                }
+
+                var named = Account.FromImport(portfolioId, first.InstitutionCode!, first.AccountNumber!);
+                if (!string.IsNullOrWhiteSpace(choice.NewAccount?.Name)) named.Rename(choice.NewAccount.Name);
+                byKey[group.Key] = named;
+                AddTarget(named, true, group, new AccountRouting(RoutingMethods.Created));
+                continue;
+            }
+
+            if (interactive)
+            {
+                var institution = first.InstitutionCode!.Trim().ToLowerInvariant();
+                var sameInstitution = existing.Where(a => a.InstitutionCode == institution).ToList();
+                if (sameInstitution.Count > 0)
+                {
+                    var analysis = await _analyzer.AnalyzeAsync(
+                        group.SelectMany(s => s.Transactions).ToList(), sameInstitution, cancellationToken);
+                    if (AccountRoutingAnalyzer.StrongMatch(analysis, _routing) is { } lookalike)
+                    {
+                        selections.Add(Selection(fileNumber, group.ToList(), AccountSelectionReasons.UnknownAccountNumber, analysis, lookalike));
+                        continue;
+                    }
+                }
+            }
+
+            var created = Account.FromImport(portfolioId, first.InstitutionCode!, first.AccountNumber!);
+            byKey[group.Key] = created;
+            AddTarget(created, true, group, new AccountRouting(RoutingMethods.Created));
+        }
+
+        var accountless = parsed.Statements.Where(s => !HasAccountNumber(s)).ToList();
+        if (interactive && accountless.Count > 0)
+        {
+            if (choices!.For(string.Empty) is { } choice)
+            {
+                if (choice.AccountId is { } chosenId)
+                {
+                    var chosen = existing.FirstOrDefault(a => a.AccountId == chosenId);
+                    if (chosen is null) return RoutingPlan.Invalid("The chosen account isn't in this portfolio.");
+                    AddTarget(chosen, false, accountless, new AccountRouting(RoutingMethods.UserSelected));
+                }
+                else
+                {
+                    var details = choice.NewAccount;
+                    if (string.IsNullOrWhiteSpace(details?.InstitutionCode) || Account.NormalizeAccountNumber(details.AccountNumber).Length == 0)
+                        return RoutingPlan.Invalid("A new account needs its institution and account number.");
+
+                    // The number typed in may already be an account here; then that's the one meant.
+                    var key = AccountKey(details.InstitutionCode, details.AccountNumber!);
+                    if (byKey.TryGetValue(key, out var same))
+                        AddTarget(same, false, accountless, new AccountRouting(RoutingMethods.UserSelected));
+                    else
+                    {
+                        var name = string.IsNullOrWhiteSpace(details.Name)
+                            ? $"{details.InstitutionCode.Trim().ToLowerInvariant()} {details.AccountNumber!.Trim()}"
+                            : details.Name;
+                        var created = new Account(portfolioId, name, details.InstitutionCode, details.AccountNumber!);
+                        byKey[key] = created;
+                        AddTarget(created, true, accountless, new AccountRouting(RoutingMethods.Created));
+                    }
+                }
+            }
+            else
+            {
+                var analysis = await _analyzer.AnalyzeAsync(
+                    accountless.SelectMany(s => s.Transactions).ToList(), existing, cancellationToken);
+                var strong = AccountRoutingAnalyzer.StrongMatch(analysis, _routing);
+                if (strong is { } id && _routing.Mode == ImportRoutingMode.Auto)
+                    AddTarget(existing.First(a => a.AccountId == id), false, accountless,
+                        new AccountRouting(RoutingMethods.Fingerprint, analysis.Candidates[0].MatchingRows));
+                else
+                    selections.Add(Selection(string.Empty, accountless, AccountSelectionReasons.NoAccountNumber, analysis, strong));
+            }
+        }
+
+        // Ask about everything at once; nothing is imported until every statement has a place.
+        return selections.Count > 0 ? new RoutingPlan([], selections) : new RoutingPlan(targets, []);
     }
+
+    private static AccountSelection Selection(
+        string fileAccountNumber,
+        IReadOnlyList<ParsedAccountStatement> statements,
+        string reason,
+        RoutingAnalysis analysis,
+        Guid? suggested) => new(
+            fileAccountNumber,
+            statements.Select(s => s.InstitutionCode).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))?.Trim().ToLowerInvariant(),
+            reason,
+            analysis.FileRows,
+            analysis.FirstDate,
+            analysis.LastDate,
+            analysis.Candidates,
+            suggested);
 
     private static bool HasAccountNumber(ParsedAccountStatement statement)
         => Account.NormalizeAccountNumber(statement.AccountNumber).Length > 0;
 
     private static string AccountKey(string institutionCode, string accountNumber) =>
         $"{institutionCode.Trim().ToLowerInvariant()}|{Account.NormalizeAccountNumber(accountNumber)}";
-
-    /// <summary>"…1234": enough to recognise an account in a message without spelling out its number.</summary>
-    private static string MaskAccountNumber(string accountNumber)
-    {
-        var normalized = Account.NormalizeAccountNumber(accountNumber);
-        return normalized.Length <= 4 ? normalized : $"…{normalized[^4..]}";
-    }
 
     // ---------------- one account ----------------
 
@@ -482,6 +656,9 @@ public sealed class PortfolioImportService : IPortfolioImportService
         {
             Updated = updates.Count,
             SnapshotsInserted = snapshots,
+            Routing = target.Routing,
+            FirstDate = transactions.Count == 0 ? null : transactions.Min(t => t.TradeDate),
+            LastDate = transactions.Count == 0 ? null : transactions.Max(t => t.TradeDate),
         };
     }
 
@@ -610,12 +787,16 @@ public sealed class PortfolioImportService : IPortfolioImportService
 
     // ---------------- files ----------------
 
+    /// <summary>
+    /// The latest active import of this file into the portfolio — into <paramref name="accountId"/> (null: a
+    /// portfolio-level upload), or into any account when <paramref name="anyAccount"/>.
+    /// </summary>
     private async Task<ImportBatch?> FindActiveBatchAsync(
-        Guid portfolioId, Guid? accountId, string sha256, CancellationToken cancellationToken)
+        Guid portfolioId, Guid? accountId, string sha256, CancellationToken cancellationToken, bool anyAccount = false)
     {
         // Ordered in memory: SQLite can't order by DateTimeOffset, and there's at most a handful of matches.
         var matches = await _db.ImportBatches.AsNoTracking()
-            .Where(b => b.PortfolioId == portfolioId && b.AccountId == accountId && b.FileSha256 == sha256
+            .Where(b => b.PortfolioId == portfolioId && (anyAccount || b.AccountId == accountId) && b.FileSha256 == sha256
                         && b.Status == ImportBatchStatus.Active)
             .ToListAsync(cancellationToken);
         return matches.MaxBy(b => b.ImportedAt);
@@ -652,7 +833,8 @@ public sealed class PortfolioImportService : IPortfolioImportService
         }
     }
 
-    private sealed record ParseOutcome(ParsedPortfolioFile? File, Func<TimeSpan, PortfolioImportResult>? Failure);
+    private sealed record ParseOutcome(
+        ParsedPortfolioFile? File, Func<TimeSpan, PortfolioImportResult>? Failure, string? DisplayName = null);
 
     private async Task<ParseOutcome> ParseAsync(ImportFile file, string? requestedSourceSystem, CancellationToken cancellationToken)
     {
@@ -670,7 +852,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
                 return new ParseOutcome(null, d => PortfolioImportResult.UnknownParser(requested, d));
             }
 
-            return new ParseOutcome(await forced.ParseAsync(buffer, file.FileName, cancellationToken), null);
+            return new ParseOutcome(await forced.ParseAsync(buffer, file.FileName, cancellationToken), null, forced.DisplayName);
         }
 
         // Auto-detect: offer the file to parsers from highest priority to lowest so a
@@ -681,7 +863,7 @@ public sealed class PortfolioImportService : IPortfolioImportService
             if (!await parser.CanParseAsync(buffer, file.FileName, cancellationToken)) continue;
 
             buffer.Position = 0;
-            return new ParseOutcome(await parser.ParseAsync(buffer, file.FileName, cancellationToken), null);
+            return new ParseOutcome(await parser.ParseAsync(buffer, file.FileName, cancellationToken), null, parser.DisplayName);
         }
 
         _logger.LogWarning("No parser matched uploaded file {FileName}", file.FileName);

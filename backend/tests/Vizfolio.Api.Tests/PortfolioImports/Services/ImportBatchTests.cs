@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
+using Vizfolio.Api.Tests.PortfolioImports.Fakes;
 using Vizfolio.Api.Tests.Extracts;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
@@ -301,19 +302,11 @@ public sealed class ImportBatchTests
             Fees: null, CurrencyCode: null, Memo: null, SourceType: "Reinvestment (LT gain)");
 
     private static PortfolioImportService Service(TestDbContext ctx) =>
-        new(ctx.Db, [new QfxFileParser()], new NoImpliedContributions(), NullLogger<PortfolioImportService>.Instance);
+        new(ctx.Db, [new QfxFileParser()], NoImpliedContributions.Instance, NullLogger<PortfolioImportService>.Instance);
 
     private static PortfolioImportService StubService(TestDbContext ctx, IReadOnlyList<ParsedTransaction> rows) =>
-        new(ctx.Db, [new LedgerStub("VANGUARD", rows)], new NoImpliedContributions(), NullLogger<PortfolioImportService>.Instance);
+        new(ctx.Db, [new LedgerStub("VANGUARD", rows)], NoImpliedContributions.Instance, NullLogger<PortfolioImportService>.Instance);
 
-    private sealed class NoImpliedContributions : IImpliedContributionService
-    {
-        public Task<ImpliedContributionPreview?> PreviewForAccountAsync(Guid portfolioId, Guid accountId, CancellationToken cancellationToken)
-            => Task.FromResult<ImpliedContributionPreview?>(null);
-
-        public Task<ImpliedContributionSyncResult> SyncForAccountAsync(Guid accountId, CancellationToken cancellationToken)
-            => Task.FromResult(new ImpliedContributionSyncResult(0, 0m));
-    }
 
     /// <summary>A metadata-less parser emitting fixed rows, selected only by an explicit source system.</summary>
     private sealed class LedgerStub(string sourceSystem, IReadOnlyList<ParsedTransaction> rows) : IPortfolioFileParser

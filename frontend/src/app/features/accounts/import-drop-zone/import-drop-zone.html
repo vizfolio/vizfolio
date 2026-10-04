@@ -1,0 +1,73 @@
+<div class="drop-zone">
+  <app-file-upload
+    [accept]="acceptAttr()"
+    [label]="label()"
+    [multiple]="true"
+    (filesSelected)="onFiles($event)"
+  />
+
+  <details class="advanced">
+    <summary>Advanced</summary>
+    <app-select-field
+      class="format-select"
+      label="Format"
+      [value]="sourceSystem()"
+      [options]="formatOptions()"
+      [disabled]="busy()"
+      (valueChange)="sourceSystem.set($event)"
+    />
+    <p class="hint">The format is detected automatically; pick one only if detection gets it wrong.</p>
+  </details>
+
+  @if (items().length > 0) {
+    <ul class="items" aria-label="Imported files">
+      @for (item of items(); track item.id) {
+        <li class="item">
+          @switch (item.state) {
+            @case ('queued') {
+              <p class="status">{{ item.file.name }} — waiting…</p>
+            }
+            @case ('importing') {
+              <p class="status" role="status">{{ item.file.name }} — importing…</p>
+            }
+            @case ('asking') {
+              @for (selection of unanswered(item); track selection.fileAccountNumber) {
+                <app-account-picker
+                  [selection]="selection"
+                  [label]="item.file.name"
+                  (chosen)="onChosen(item, $event)"
+                  (skipped)="onSkipped(item)"
+                />
+              }
+            }
+            @case ('skipped') {
+              <p class="status">{{ item.file.name }} — skipped.</p>
+            }
+            @case ('error') {
+              <p class="error" role="alert">{{ item.file.name }} — {{ item.error }}</p>
+            }
+            @case ('done') {
+              <app-import-summary
+                [portfolioId]="portfolioId()"
+                [result]="item.result!"
+                [fileName]="item.file.name"
+                [accounts]="accounts()"
+                (undone)="onUndone()"
+              />
+            }
+          }
+          @if (item.state === 'done' || item.state === 'error') {
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm dismiss"
+              [attr.aria-label]="'Dismiss ' + item.file.name"
+              (click)="dismiss(item)"
+            >
+              Dismiss
+            </button>
+          }
+        </li>
+      }
+    </ul>
+  }
+</div>

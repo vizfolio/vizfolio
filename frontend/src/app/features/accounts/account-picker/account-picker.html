@@ -1,0 +1,86 @@
+<form class="picker" (submit)="$event.preventDefault(); submit()">
+  <fieldset [disabled]="disabled()">
+    <legend class="question">
+      @if (label()) {
+        <span class="label">{{ label() }}:</span>
+      }
+      {{ question() }}
+    </legend>
+
+    <div class="options">
+      @for (candidate of selection().candidates; track candidate.accountId) {
+        <label class="option">
+          <input
+            type="radio"
+            [name]="groupName"
+            [value]="candidate.accountId"
+            [checked]="picked() === candidate.accountId"
+            (change)="picked.set(candidate.accountId)"
+          />
+          <span class="option-text">
+            <span class="option-name">
+              {{ candidateLabel(candidate.name, candidate.accountNumberMasked) }}
+              @if (candidate.accountId === selection().suggestedAccountId) {
+                <span class="badge">Best match</span>
+              }
+            </span>
+            <span class="option-evidence">{{ evidence(candidate) }}</span>
+            @if (selection().reason === 'UnknownAccountNumber') {
+              <span class="option-evidence">Its account number becomes …{{ selection().fileAccountNumber.slice(-4) }}.</span>
+            }
+          </span>
+        </label>
+      }
+      <label class="option">
+        <input
+          type="radio"
+          [name]="groupName"
+          [value]="newAccount"
+          [checked]="picked() === newAccount"
+          (change)="picked.set(newAccount)"
+        />
+        <span class="option-text">
+          <span class="option-name">A new account</span>
+        </span>
+      </label>
+    </div>
+
+    @if (picked() === newAccount) {
+      <div class="new-account">
+        <label class="field">
+          <span class="field-label">Name <span class="optional">(optional)</span></span>
+          <input class="field-input" type="text" placeholder="Roth IRA" [value]="name()" (input)="name.set(text($event))" />
+        </label>
+        @if (needsNumber()) {
+          <label class="field">
+            <span class="field-label">Institution</span>
+            <input
+              class="field-input"
+              type="text"
+              required
+              placeholder="vanguard.com"
+              [value]="institution()"
+              (input)="institution.set(text($event))"
+            />
+          </label>
+          <label class="field">
+            <span class="field-label">Account number</span>
+            <input
+              class="field-input"
+              type="text"
+              required
+              autocomplete="off"
+              [value]="number()"
+              (input)="number.set(text($event))"
+            />
+          </label>
+        }
+      </div>
+    }
+
+    <div class="actions">
+      <button type="submit" class="btn btn--primary btn--sm" [disabled]="!canSubmit()">Import</button>
+      <button type="button" class="btn btn--ghost btn--sm" (click)="skipped.emit()">Skip this file</button>
+    </div>
+  </fieldset>
+</form>

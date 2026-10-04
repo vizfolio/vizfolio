@@ -27,27 +27,40 @@
   @if (error(); as message) {
     <p class="error" role="alert">{{ message }}</p>
   }
-  @if (result(); as r) {
-    @if (alreadyImportedNote(r); as note) {
-      <p class="hint" role="status">{{ note }}</p>
-    }
-  }
-  @if (accountResult(); as account) {
-    <p class="ok" role="status">
-      Imported: {{ account.inserted }} added, {{ account.skipped }} skipped
-      @if (account.updated > 0) {
-        , {{ account.updated }} updated
+
+  @if (misfit(); as m) {
+    <div class="misfit" role="group" aria-labelledby="misfit-title">
+      <p class="misfit-title" id="misfit-title">
+        {{ m.file.name }} looks like it belongs to {{ m.suggested?.name ?? 'another account' }}.
+      </p>
+      @if (m.suggested) {
+        <p class="hint">
+          {{ evidence(m.suggested) }} in {{ m.suggested.name }}
+          · {{ m.here?.matchingRows ?? 0 }} here. Nothing was imported yet.
+        </p>
       }
-      @if (account.failed > 0) {
-        , {{ account.failed }} failed
-      }.
-    </p>
-    @if (impliedNote(account); as note) {
-      <p class="hint" role="note">{{ note }}</p>
-    }
+      <div class="misfit-actions">
+        @if (m.suggested) {
+          <button type="button" class="btn btn--primary btn--sm" (click)="importIntoSuggested()">
+            Import into {{ m.suggested.name }}
+          </button>
+        }
+        <button type="button" class="btn btn--ghost btn--sm" (click)="importHereAnyway()">Import here anyway</button>
+        <button type="button" class="btn btn--ghost btn--sm" (click)="cancelMisfit()">Cancel</button>
+      </div>
+    </div>
   }
+
   @if (result(); as r) {
-    <app-import-warnings [warnings]="r.warnings" />
+    @if (elsewhere(); as name) {
+      <p class="hint" role="status">Imported into {{ name }} instead of this account.</p>
+    }
+    <app-import-summary
+      [portfolioId]="portfolioId()"
+      [result]="r"
+      [fileName]="fileName()"
+      (undone)="onUndone()"
+    />
   }
 
   <app-import-history-list

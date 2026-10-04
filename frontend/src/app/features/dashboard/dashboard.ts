@@ -4,12 +4,14 @@ import { RouterLink } from '@angular/router';
 import { catchError, of, switchMap } from 'rxjs';
 
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
-import { PortfolioPerformance } from '../../core/api/models/performance.models';
+import { AccountSummary, PortfolioPerformance } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
 import { PerfChart, PerfDataset } from '../../shared/ui/perf-chart/perf-chart';
 import { ReturnsChart } from '../../shared/ui/returns-chart/returns-chart';
 import { PerformanceHeadline } from '../../shared/ui/performance-headline/performance-headline';
+import { ImportDropZone } from '../accounts/import-drop-zone/import-drop-zone';
+import { ImportOnboarding } from '../accounts/import-onboarding/import-onboarding';
 import { SAMPLE_PERFORMANCE, buildValueSeries } from './dashboard.util';
 import { pollWhilePending } from '../../shared/util/poll';
 import { performanceAwaitsPrices } from '../../shared/util/performance-format';
@@ -27,7 +29,7 @@ type PerfFetchStatus = 'idle' | 'loading' | 'ready' | 'error';
 /** Landing page: the shared headline row + value and returns charts for the active portfolio. */
 @Component({
   selector: 'app-dashboard',
-  imports: [PerformanceHeadline, PerfChart, ReturnsChart, EmptyState, RouterLink],
+  imports: [EmptyState, ImportDropZone, ImportOnboarding, PerfChart, PerformanceHeadline, ReturnsChart, RouterLink],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
@@ -37,6 +39,13 @@ export class Dashboard {
 
   private readonly performance = signal<PortfolioPerformance | null>(null);
   private readonly perfStatus = signal<PerfFetchStatus>('idle');
+  /** Bumped after an import from the onboarding drop zone, to reload what's shown. */
+  private readonly reloads = signal(0);
+
+  protected readonly portfolioId = this.activePortfolio.activeId;
+  /** The active portfolio's accounts (null until loaded): none yet means first run, so the drop zone shows. */
+  protected readonly accounts = signal<AccountSummary[] | null>(null);
+  protected readonly needsFirstImport = computed(() => this.accounts()?.length === 0);
 
   protected readonly portfolioName = computed(
     () => this.activePortfolio.active()?.name ?? null,
@@ -105,10 +114,21 @@ export class Dashboard {
   });
 
   constructor() {
-    // Re-fetch performance whenever the active portfolio changes (e.g. via the switcher).
-    toObservable(this.activePortfolio.activeId)
+    const request = computed(() => ({ portfolioId: this.activePortfolio.activeId(), n: this.reloads() }));
+
+    toObservable(request)
       .pipe(
-        switchMap((portfolioId) => {
+        switchMap(({ portfolioId }) =>
+          portfolioId ? this.api.getAccounts(portfolioId).pipe(catchError(() => of(null))) : of(null),
+        ),
+        takeUntilDestroyed(),
+      )
+      .subscribe((accounts) => this.accounts.set(accounts));
+
+    // Re-fetch performance whenever the active portfolio changes (e.g. via the switcher).
+    toObservable(request)
+      .pipe(
+        switchMap(({ portfolioId }) => {
           if (!portfolioId) {
             this.perfStatus.set('idle');
             return of<PortfolioPerformance | null>(null);
@@ -129,5 +149,10 @@ export class Dashboard {
           this.perfStatus.set('ready');
         }
       });
+  }
+
+  /** The first files were imported: show the portfolio. */
+  protected onFirstImport(): void {
+    this.reloads.update((n) => n + 1);
   }
 }

@@ -1,15 +1,21 @@
 import { TestBed } from '@angular/core/testing';
 
+import { PerformanceMissing } from '../../../core/api/models/performance.models';
 import { CompletenessBadge } from './completeness-badge';
 
-function render(inputs: { complete: boolean; missing?: number; asOf?: string | null; pending?: boolean }) {
+function render(inputs: {
+  complete: boolean;
+  missing?: number;
+  missingDetails?: PerformanceMissing[];
+  pending?: boolean;
+}) {
   const fixture = TestBed.createComponent(CompletenessBadge);
   fixture.componentRef.setInput('complete', inputs.complete);
   if (inputs.missing !== undefined) {
     fixture.componentRef.setInput('missing', inputs.missing);
   }
-  if (inputs.asOf !== undefined) {
-    fixture.componentRef.setInput('asOf', inputs.asOf);
+  if (inputs.missingDetails !== undefined) {
+    fixture.componentRef.setInput('missingDetails', inputs.missingDetails);
   }
   if (inputs.pending !== undefined) {
     fixture.componentRef.setInput('pending', inputs.pending);
@@ -19,26 +25,36 @@ function render(inputs: { complete: boolean; missing?: number; asOf?: string | n
 }
 
 describe('CompletenessBadge', () => {
-  it('shows "Known" with an as-of tooltip when complete', () => {
-    const el = render({ complete: true, asOf: '2026-01-31' });
+  it('shows "Known" when every holding is valued', () => {
+    const el = render({ complete: true });
     const badge = el.querySelector('.badge')!;
     expect(badge.textContent?.trim()).toBe('Known');
     expect(badge.classList.contains('badge--estimate')).toBe(false);
-    expect(badge.getAttribute('title')).toContain('2026-01-31');
+    expect(badge.getAttribute('title')).toBe('Every holding is valued on this date.');
   });
 
-  it('shows "Estimate" with a pluralized missing count when incomplete', () => {
-    const el = render({ complete: false, missing: 3 });
+  it('shows "Estimate" naming what could not be valued and why', () => {
+    const el = render({
+      complete: false,
+      missing: 3,
+      missingDetails: [
+        { accountId: 'a1', accountHoldingId: 'h1', symbol: 'ZXFND', cause: 'NoPrice' },
+        { accountId: 'a1', accountHoldingId: 'h2', symbol: 'ZXBND', cause: 'NoPrice' },
+        { accountId: 'a1', accountHoldingId: null, symbol: null, cause: 'MaterialMismatch' },
+      ],
+    });
     const badge = el.querySelector('.badge')!;
     expect(badge.textContent?.trim()).toBe('Estimate');
     expect(badge.classList.contains('badge--estimate')).toBe(true);
-    expect(badge.getAttribute('title')).toContain('3 holdings are missing');
+    expect(badge.getAttribute('title')).toBe("Estimate — We couldn't value ZXFND: no price available (+2 more).");
   });
 
-  it('uses singular wording for a single missing holding', () => {
-    const el = render({ complete: false, missing: 1 });
-    expect(el.querySelector('.badge')!.getAttribute('title')).toContain(
-      '1 holding is missing',
+  it('falls back to a count, singular or plural, without details', () => {
+    expect(render({ complete: false, missing: 1 }).querySelector('.badge')!.getAttribute('title')).toContain(
+      "1 holding couldn't be valued",
+    );
+    expect(render({ complete: false, missing: 3 }).querySelector('.badge')!.getAttribute('title')).toContain(
+      "3 holdings couldn't be valued",
     );
   });
 

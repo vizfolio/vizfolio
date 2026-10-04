@@ -1,6 +1,6 @@
-using System.Globalization;
 using ClosedXML.Excel;
 using Vizfolio.Application.PortfolioImports.Abstractions;
+using Vizfolio.Application.PortfolioImports.Brokers;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Domain.Portfolios;
 
@@ -70,8 +70,11 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
 
             var warnings = new ImportWarningCollector();
             var transactions = ReadTransactions(worksheet, headerRow, warnings);
+            // The report names no account, only the broker: the import finds the account from the transactions, and a
+            // new one created for it starts out at Vanguard.
             var statement = new ParsedAccountStatement(
-                InstitutionCode: null, AccountNumber: null, Transactions: transactions, Positions: [], AsOf: null);
+                InstitutionCode: VanguardBrokerProfile.InstitutionCode, AccountNumber: null,
+                Transactions: transactions, Positions: [], AsOf: null);
             return Task.FromResult(new ParsedPortfolioFile(SourceSystem, [statement]) { Warnings = warnings.ToList() });
         }
 
@@ -245,8 +248,7 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         if (cell.IsEmpty()) return null;
         if (cell.DataType == XLDataType.DateTime) return DateOnly.FromDateTime(cell.GetDateTime());
 
-        var s = cell.GetString().Trim();
-        return DateOnly.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
+        return ReportValues.ParseDate(cell.GetString());
     }
 
     private static decimal? CellDecimal(IXLWorksheet ws, int row, int? col)
@@ -256,14 +258,9 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         if (cell.IsEmpty()) return null;
         if (cell.DataType == XLDataType.Number) return cell.GetValue<decimal>();
 
-        var s = cell.GetString().Trim();
-        if (string.IsNullOrEmpty(s) || s.Equals("Free", StringComparison.OrdinalIgnoreCase)) return null;
-
-        // Strip currency formatting; accounting-style "(123)" is negative.
-        s = s.Replace("$", string.Empty).Replace(",", string.Empty)
-             .Replace("(", "-").Replace(")", string.Empty).Trim();
-        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
+        // Currency formatting, accounting-style "(123)" negatives, and "Free" commissions.
+        return ReportValues.ParseMoney(cell.GetString());
     }
 
-    private static string? NullIfBlank(string? raw) => string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    private static string? NullIfBlank(string? raw) => ReportValues.NullIfBlank(raw);
 }

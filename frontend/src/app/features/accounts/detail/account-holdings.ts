@@ -5,6 +5,7 @@ import { catchError, of, switchMap } from 'rxjs';
 import { HoldingRow } from '../../../core/api/models/holdings.models';
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { DataColumn, DataTable } from '../../../shared/ui/data-table/data-table';
+import { causeText } from '../../../shared/util/reason-text';
 import {
   formatMoney,
   formatQuantity,
@@ -47,6 +48,17 @@ export class AccountHoldings {
   protected readonly missingCount = computed(
     () => this.holdings().filter((h) => h.status === 'Missing' && h.missingCause !== 'PricesPending').length,
   );
+
+  /** One line per reason a holding couldn't be valued: "ZXFND, ZXBND: no price available". */
+  protected readonly missingLines = computed(() => {
+    const byCause = new Map<string, string[]>();
+    for (const h of this.holdings()) {
+      if (h.status !== 'Missing' || h.missingCause === 'PricesPending') continue;
+      const cause = h.missingCause ?? 'NoPrice';
+      byCause.set(cause, [...(byCause.get(cause) ?? []), h.symbol ?? h.name ?? 'a holding']);
+    }
+    return [...byCause].map(([cause, symbols]) => `${symbols.join(', ')}: ${causeText(cause)}`);
+  });
 
   /** Positions waiting on prices that are still downloading (the list refreshes until they arrive). */
   protected readonly pendingCount = computed(

@@ -72,7 +72,7 @@
 
   @if (namedRows().length > 0) {
     <p class="completeness" role="status">
-      {{ completeCount() }} of {{ namedRows().length }} holding(s) have a complete opening balance.
+      {{ completeCount() }} of {{ namedRows().length }} holding(s) have a complete starting position.
       @if (completeCount() < namedRows().length) {
         Holdings marked ✗ have no market value and will still be flagged as an estimate.
       }
@@ -84,7 +84,7 @@
       + Add holding
     </button>
     <button type="submit" class="btn btn--primary" [disabled]="!canSubmit()">
-      {{ submitting() ? 'Saving…' : 'Save opening balance' }}
+      {{ submitting() ? 'Saving…' : 'Save starting positions' }}
     </button>
   </div>
 

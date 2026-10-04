@@ -1,6 +1,6 @@
 import { PerformanceReturn } from '../../core/api/models/performance.models';
 import { returnDetail } from './performance-format';
-import { causeText, fallbackText, returnMethodText, returnReasonText } from './reason-text';
+import { causeText, fallbackText, missingText, returnMethodText, returnReasonText } from './reason-text';
 
 function ret(overrides: Partial<PerformanceReturn>): PerformanceReturn {
   return {
@@ -67,5 +67,27 @@ describe('returnDetail', () => {
     expect(returnDetail(ret({ rate: null, reason: 'NoSignChange' }))).toBe(
       'Not enough deposits or withdrawals to compute your return.',
     );
+  });
+
+  it('names what could not be valued and why, with how many more', () => {
+    expect(missingText([])).toBeNull();
+    expect(missingText(undefined)).toBeNull();
+    expect(
+      missingText(
+        [
+          { accountId: 'a1', accountHoldingId: 'h1', symbol: 'ZXFND', cause: 'StalePrice' },
+          { accountId: 'a1', accountHoldingId: null, symbol: null, cause: 'NoPrice' },
+        ],
+        'at the end of the period',
+      ),
+    ).toBe("We couldn't value ZXFND at the end of the period: no recent price (+1 more).");
+    expect(missingText([{ accountId: 'a1', accountHoldingId: null, symbol: null, cause: 'MaterialMismatch' }])).toBe(
+      "We couldn't value cash: your history doesn't match your broker's statement.",
+    );
+  });
+
+  it('explains the remaining return reason codes in plain words', () => {
+    expect(returnReasonText('InvalidSubPeriod')).toContain("couldn't be valued");
+    expect(returnReasonText('InsufficientIntermediateSnapshots')).toContain('Not enough valuations');
   });
 });

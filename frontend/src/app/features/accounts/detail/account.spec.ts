@@ -57,15 +57,24 @@ class MockApi {
   getAccountLedger() {
     return of([]);
   }
+  getAccountHealth() {
+    return of({ status: 'Healthy', currencyCode: 'USD', accounts: [], findings: [] });
+  }
+  getHistoryCoverage() {
+    return of(null);
+  }
 }
 
-function setup(api: MockApi): { fixture: ComponentFixture<Account>; cmp: any; el: HTMLElement } {
+function setup(api: MockApi, tab?: string): { fixture: ComponentFixture<Account>; cmp: any; el: HTMLElement } {
   TestBed.configureTestingModule({
     imports: [Account],
     providers: [{ provide: PortfolioApiService, useValue: api }, provideRouter([])],
   });
   const fixture = TestBed.createComponent(Account);
   fixture.componentRef.setInput('accountId', 'a1');
+  if (tab !== undefined) {
+    fixture.componentRef.setInput('tab', tab);
+  }
   fixture.detectChanges();
   TestBed.tick();
   fixture.detectChanges();
@@ -85,6 +94,27 @@ describe('Account (detail)', () => {
   it('defaults to the Performance tab', () => {
     const { cmp } = setup(new MockApi());
     expect(cmp.tab()).toBe('performance');
+  });
+
+  it('labels the tabs, with data health in place of history and starting positions last', () => {
+    const { el } = setup(new MockApi());
+    expect([...el.querySelectorAll('.tab')].map((t) => t.textContent?.trim())).toEqual([
+      'Performance', 'Holdings', 'Ledger', 'Data health', 'Import', 'Adjust starting positions',
+    ]);
+  });
+
+  it('opens the tab named in the query string (e.g. from the accounts list), ignoring unknown ones', () => {
+    expect(setup(new MockApi(), 'health').cmp.tab()).toBe('health');
+    TestBed.resetTestingModule();
+    expect(setup(new MockApi(), 'nonsense').cmp.tab()).toBe('performance');
+  });
+
+  it('sends data health actions to the tab that handles them', () => {
+    const { cmp } = setup(new MockApi());
+    cmp.onHealthNavigate('AdjustStartingPosition');
+    expect(cmp.tab()).toBe('starting-positions');
+    cmp.onHealthNavigate('ReimportFile');
+    expect(cmp.tab()).toBe('import');
   });
 
   it('switches to the Holdings tab', () => {

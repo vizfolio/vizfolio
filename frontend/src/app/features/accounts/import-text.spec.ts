@@ -1,16 +1,17 @@
 import { PortfolioImportResult, PortfolioImportStatus } from '../../core/api/models/imports.models';
-import { accountMismatchMessage, alreadyImportedNote, formatImportedAt, undoPreviewLines } from './import-text';
+import { accountResult, candidate, importResult, selection } from './testing/import-fixtures';
+import {
+  accountMismatchMessage,
+  candidateEvidence,
+  dateRangeText,
+  routingNote,
+  selectionQuestion,
+  alreadyImportedNote,
+  formatImportedAt,
+  undoPreviewLines,
+} from './import-text';
 
-const RESULT: PortfolioImportResult = {
-  status: PortfolioImportStatus.Success,
-  sourceSystem: 'QFX',
-  accounts: [],
-  duration: 'PT0S',
-  importBatchId: 'b1',
-  importedAt: '2026-10-03T16:05:00Z',
-  warnings: [],
-  fileAccountNumbers: [],
-};
+const RESULT: PortfolioImportResult = importResult({ accounts: [] });
 
 describe('import text', () => {
   it('formats an import timestamp and passes unparseable values through', () => {
@@ -47,5 +48,39 @@ describe('import text', () => {
     expect(full[1]).toBe('Restores 4 earlier rows it changed.');
     expect(full[3]).toContain('later.xlsx');
     expect(full[4]).toContain('old.qfx');
+  });
+
+  it('explains how a file found its account', () => {
+    expect(routingNote(accountResult({ routing: { method: 'Fingerprint', matchingRows: 2514 } }))).toBe(
+      'Matched by 2,514 transactions already in this account.',
+    );
+    expect(routingNote(accountResult({ routing: { method: 'AccountNumber', matchingRows: null } }))).toBe(
+      'Matched by account number.',
+    );
+    expect(routingNote(accountResult({ routing: { method: 'Created', matchingRows: null } }))).toContain('new account');
+    expect(routingNote(accountResult({ routing: { method: 'Uploaded', matchingRows: null } }))).toBeNull();
+  });
+
+  it('formats the dates a file covers', () => {
+    expect(dateRangeText('2025-01-02', '2025-12-31')).toBe('Jan 2, 2025 – Dec 31, 2025');
+    expect(dateRangeText('2025-01-02', '2025-01-02')).toBe('Jan 2, 2025');
+    expect(dateRangeText(null, null)).toBeNull();
+  });
+
+  it('states the evidence for a candidate account', () => {
+    expect(candidateEvidence(candidate({ matchingRows: 2514, sharedTickers: 3 }))).toBe(
+      '2,514 matching transactions · 3 shared funds',
+    );
+    expect(candidateEvidence(candidate({ matchingRows: 1 }))).toBe('1 matching transaction');
+  });
+
+  it('asks the right question for each reason', () => {
+    expect(selectionQuestion(selection())).toContain("doesn't match any account yet (120 transactions, Jan 2, 2025 – Dec 31, 2025)");
+    expect(selectionQuestion(selection({ candidates: [candidate()] }))).toBe(
+      'Which account is this file for? (120 transactions, Jan 2, 2025 – Dec 31, 2025)',
+    );
+    expect(selectionQuestion(selection({ reason: 'UnknownAccountNumber', fileAccountNumber: 'AAA111' }))).toContain(
+      "account …A111",
+    );
   });
 });

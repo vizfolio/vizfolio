@@ -114,6 +114,38 @@ public sealed class AccountStateEngine
         return flows;
     }
 
+    /// <summary>
+    /// The stretches of <c>[from, to]</c> where a component couldn't be valued, one per component and cause and
+    /// unbroken run of days — e.g. "no price for XYZ from 2019-07-01 to 2021-05-31". Scans every day (a few
+    /// thousand cheap valuations for a long history), so it lives here rather than in each caller.
+    /// </summary>
+    public IReadOnlyList<MissingInterval> MissingIntervals(DateOnly from, DateOnly to)
+    {
+        var open = new Dictionary<(Guid?, MissingCause), MissingInterval>();
+        var closed = new List<MissingInterval>();
+
+        for (var date = from; date <= to; date = date.AddDays(1))
+            foreach (var component in ValueAt(date).Components)
+            {
+                if (component.Status != HoldingValuationStatus.Missing || component.Cause is not { } cause) continue;
+
+                var key = (component.HoldingId, cause);
+                if (open.TryGetValue(key, out var run) && run.To == date.AddDays(-1))
+                {
+                    open[key] = run with { To = date };
+                    continue;
+                }
+
+                if (run is not null) closed.Add(run);
+                open[key] = new MissingInterval(component.HoldingId, component.Symbol, cause, date, date);
+            }
+
+        return closed.Concat(open.Values)
+            .OrderBy(i => i.From)
+            .ThenBy(i => i.Symbol, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     // ---------------- shares ----------------
 
     private void BuildShareTimeline(ShareComponent c)

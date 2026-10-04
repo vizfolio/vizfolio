@@ -29,4 +29,13 @@ public sealed record AccountImportResult(
 
     /// <summary>Sum of <see cref="ImpliedContributions"/>.</summary>
     public decimal ImpliedContributionsAmount { get; init; }
+
+    /// <summary>How this account was chosen for the file's rows (see <see cref="RoutingMethods"/>).</summary>
+    public AccountRouting? Routing { get; init; }
+
+    /// <summary>The earliest and latest trade dates of the file's rows for this account.</summary>
+    public DateOnly? FirstDate { get; init; }
+
+    /// <inheritdoc cref="FirstDate"/>
+    public DateOnly? LastDate { get; init; }
 }

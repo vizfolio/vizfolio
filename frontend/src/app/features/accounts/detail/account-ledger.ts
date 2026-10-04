@@ -13,6 +13,12 @@ import {
 
 type Status = 'loading' | 'ready' | 'error';
 
+/** "CapitalGain" → "Capital gain", "ReturnOfCapital" → "Return of capital". */
+export function typeLabel(type: string): string {
+  const words = type.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** Ledger tab: an account's transactions over an optional trade-date range. */
 @Component({
   selector: 'app-account-ledger',
@@ -33,11 +39,9 @@ export class AccountLedger {
 
   protected readonly columns: DataColumn<LedgerEntry>[] = [
     { key: 'tradeDate', header: 'Date' },
-    {
-      key: 'type',
-      header: 'Type',
-      format: (_v, row) => row.sourceType ?? row.type,
-    },
+    // What the transaction is, as Vizfolio counts it — next to the broker's own wording.
+    { key: 'type', header: 'Type', format: (_v, row) => typeLabel(row.type) },
+    { key: 'sourceType', header: 'Broker label', format: (_v, row) => row.sourceType ?? '—' },
     { key: 'ticker', header: 'Symbol', format: (_v, row) => row.ticker ?? '—' },
     {
       key: 'quantity',

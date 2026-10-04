@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
+using Vizfolio.Api.Tests.PortfolioImports.Fakes;
 using Vizfolio.Api.Tests.Extracts;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Models;
@@ -220,21 +221,13 @@ public sealed class ImportUndoServiceTests
 
     private static IImpliedContributionService Implied(TestDbContext ctx, bool real) => real
         ? new ImpliedContributionService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()))
-        : new NoImpliedContributions();
+        : NoImpliedContributions.Instance;
 
     private static Task<List<AccountTransaction>> ImpliedAsync(TestDbContext ctx)
         => ctx.Db.AccountTransactions.AsNoTracking()
             .Where(t => t.SourceSystem == ImpliedContributionService.SourceSystem)
             .ToListAsync();
 
-    private sealed class NoImpliedContributions : IImpliedContributionService
-    {
-        public Task<ImpliedContributionPreview?> PreviewForAccountAsync(Guid portfolioId, Guid accountId, CancellationToken cancellationToken)
-            => Task.FromResult<ImpliedContributionPreview?>(null);
-
-        public Task<ImpliedContributionSyncResult> SyncForAccountAsync(Guid accountId, CancellationToken cancellationToken)
-            => Task.FromResult(new ImpliedContributionSyncResult(0, 0m));
-    }
 
     private sealed class StubParser(string sourceSystem, IReadOnlyList<ParsedTransaction> rows) : IPortfolioFileParser
     {

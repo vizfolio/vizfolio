@@ -476,6 +476,36 @@ public sealed class AccountStateEngineTests
 
     // ---------- builders ----------
 
+    // ---------- missing intervals (Data Health) ----------
+
+    [Fact]
+    public void MissingIntervals_merges_unvalued_days_into_runs_per_holding_and_cause()
+    {
+        var engine = Build(
+            ledger:
+            [
+                Row(Jan2, TransactionType.Deposit, 1000m),
+                Row(Jan2, TransactionType.Buy, -1000m, Fund, 10m),
+            ],
+            holdings: [Holding(Fund, "FUND", prices: [(Mar3, 100m)])]);
+
+        var gaps = engine.MissingIntervals(Jan2.AddDays(-1), new DateOnly(2025, 3, 31));
+
+        gaps.Count.ShouldBe(2);
+        gaps[0].ShouldBe(new MissingInterval(Fund, "FUND", MissingCause.NoPrice, Jan2, Mar3.AddDays(-1)));
+        gaps[1].ShouldBe(new MissingInterval(Fund, "FUND", MissingCause.StalePrice, Mar3.AddDays(11), new DateOnly(2025, 3, 31)));
+    }
+
+    [Fact]
+    public void MissingIntervals_is_empty_when_every_held_day_is_priced()
+    {
+        var engine = Build(
+            ledger: [Row(Jan2, TransactionType.Buy, -1000m, Fund, 10m)],
+            holdings: [Holding(Fund, "FUND", prices: [(Jan2, 100m), (Jan2.AddDays(8), 101m), (Jan2.AddDays(16), 102m)])]);
+
+        engine.MissingIntervals(Jan2, Jan2.AddDays(20)).ShouldBeEmpty();
+    }
+
     private static AccountStateEngine Build(IReadOnlyList<LedgerRow> ledger, IReadOnlyList<HoldingInput> holdings)
         => new(new AccountValuationInput(Guid.NewGuid(), ledger, holdings, new ValuationOptions()));
 

@@ -15,6 +15,12 @@ public sealed class ImportAccountFileRequest
 
     /// <summary>Optional parser override (e.g. "QFX"). Omit/blank to auto-detect the format.</summary>
     public string? SourceSystem { get; set; }
+
+    /// <summary>
+    /// Import here even though the file's transactions look like another account's (after a
+    /// <see cref="PortfolioImportStatus.LikelyOtherAccount"/> answer).
+    /// </summary>
+    public bool IgnoreRoutingCheck { get; set; }
 }
 
 public sealed class ImportAccountFileEndpoint : Endpoint<ImportAccountFileRequest, PortfolioImportResult>
@@ -86,7 +92,9 @@ public sealed class ImportAccountFileEndpoint : Endpoint<ImportAccountFileReques
         }
 
         await using var stream = req.File.OpenReadStream();
-        var result = await _importer.ImportToAccountAsync(req.AccountId, stream, req.File.FileName, ct, req.SourceSystem);
+        var result = await _importer.ImportToAccountAsync(
+            req.AccountId, stream, req.File.FileName, ct, req.SourceSystem,
+            new ImportChoices { IgnoreRoutingCheck = req.IgnoreRoutingCheck });
 
         var status = result.Status switch
         {

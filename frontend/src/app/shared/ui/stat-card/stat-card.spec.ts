@@ -14,15 +14,6 @@ describe('StatCard', () => {
     expect(el.querySelector('.stat-value')?.textContent).toContain('$1,234');
   });
 
-  it('shows the incomplete flag only when incomplete is true', async () => {
-    const fixture = TestBed.createComponent(StatCard);
-    fixture.componentRef.setInput('label', 'Value');
-    fixture.componentRef.setInput('value', '$0');
-    fixture.componentRef.setInput('incomplete', true);
-    await fixture.whenStable();
-
-    expect((fixture.nativeElement as HTMLElement).querySelector('.stat-flag')).toBeTruthy();
-  });
 
   it('explains the figure when given a hint, and marks a featured card', async () => {
     const fixture = TestBed.createComponent(StatCard);

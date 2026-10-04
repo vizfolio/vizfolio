@@ -11,10 +11,13 @@ namespace Vizfolio.Application.PortfolioImports.Brokers;
 /// </summary>
 public sealed class VanguardBrokerProfile : IBrokerProfile
 {
+    /// <summary>Vanguard's OFX <c>BROKERID</c>, which Vizfolio uses as its institution code.</summary>
+    public const string InstitutionCode = "vanguard.com";
+
     public string Name => "Vanguard";
 
     public bool Matches(string? institutionCode)
-        => string.Equals(institutionCode?.Trim(), "vanguard.com", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(institutionCode?.Trim(), InstitutionCode, StringComparison.OrdinalIgnoreCase);
 
     public bool? AvailableCashIncludesSettlementFund => true;
 

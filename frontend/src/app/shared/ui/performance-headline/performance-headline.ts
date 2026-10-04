@@ -1,4 +1,5 @@
 import { Component, computed, input } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import {
   PerformanceBalance,
@@ -15,6 +16,7 @@ import {
   INVESTMENT_RETURN_LABEL,
   YOUR_RETURN_HINT,
   YOUR_RETURN_LABEL,
+  missingText,
 } from '../../util/reason-text';
 import { CompletenessBadge } from '../completeness-badge/completeness-badge';
 import { StatCard } from '../stat-card/stat-card';
@@ -27,7 +29,7 @@ import { StatCard } from '../stat-card/stat-card';
  */
 @Component({
   selector: 'app-performance-headline',
-  imports: [StatCard, CompletenessBadge],
+  imports: [CompletenessBadge, RouterLink, StatCard],
   templateUrl: './performance-headline.html',
   styleUrl: './performance-headline.scss',
 })
@@ -41,6 +43,9 @@ export class PerformanceHeadline {
    * meaningful there — see docs/performance-api.md).
    */
   readonly showGrossFlows = input(true);
+  /** Where "Review data health" goes when something couldn't be valued (router commands), or null for no link. */
+  readonly healthLink = input<string[] | null>(null);
+  readonly healthQuery = input<Record<string, string> | null>(null);
 
   protected readonly yourReturnLabel = YOUR_RETURN_LABEL;
   protected readonly yourReturnHint = YOUR_RETURN_HINT;
@@ -66,6 +71,17 @@ export class PerformanceHeadline {
     const p = this.performance();
     const rank = (b: PerformanceBalance) => (b.isComplete ? 0 : hasPendingPrices(b) ? 1 : 2);
     return rank(p.startingBalance) > rank(p.endingBalance) ? p.startingBalance : p.endingBalance;
+  });
+
+  /** Under the cards: what couldn't be valued at the worse end of the period, unless it's only prices downloading. */
+  protected readonly missingNote = computed(() => {
+    const p = this.performance();
+    const b = this.balanceStatus();
+    if (b.isComplete || hasPendingPrices(b)) {
+      return null;
+    }
+    const when = b === p.startingBalance ? 'at the start of the period' : 'at the end of the period';
+    return missingText(b.missing, when);
   });
 
   protected readonly mwrValue = computed(() =>

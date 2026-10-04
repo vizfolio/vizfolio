@@ -14,9 +14,93 @@
       <a class="btn btn--primary" routerLink="/portfolios">Go to portfolios</a>
     </app-empty-state>
   } @else {
-    <!-- Add account -->
-    <form class="card add-form" (submit)="$event.preventDefault(); create()">
-      <h2 class="card-title">Add an account</h2>
+    <!-- Accounts list -->
+    @switch (listStatus()) {
+      @case ('loading') {
+        <p class="loading" role="status">Loading accounts…</p>
+      }
+      @case ('error') {
+        <p class="form-error" role="alert">Couldn't load accounts for this portfolio.</p>
+      }
+      @default {
+        @if (accounts().length === 0) {
+          <app-empty-state
+            title="No accounts yet"
+            message="Drop your broker's export files below — accounts are created for you."
+          />
+        } @else {
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Institution</th>
+                  <th scope="col">Type</th>
+                  <th scope="col" class="align-end">Value</th>
+                  <th scope="col" class="align-end">{{ yourReturnLabel }} <span class="optional">(this year)</span></th>
+                  <th scope="col">Data</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (account of accounts(); track account.accountId) {
+                  <tr>
+                    <td>{{ account.name }}</td>
+                    <td>{{ account.institutionCode }}</td>
+                    <td>{{ accountTypeLabel(account.accountType) }}</td>
+                    <td class="align-end">{{ overview()[account.accountId]?.value ?? '…' }}</td>
+                    <td class="align-end">{{ overview()[account.accountId]?.yourReturn ?? '…' }}</td>
+                    <td>
+                      @if (overview()[account.accountId]?.health; as health) {
+                        <a
+                          class="health-link"
+                          [routerLink]="['/accounts', account.accountId]"
+                          [queryParams]="{ tab: 'health' }"
+                          [title]="healthText(health)"
+                        >
+                          <span class="health-dot health-dot--{{ health }}" aria-hidden="true"></span>
+                          <span class="visually-hidden">{{ healthText(health) }}</span>
+                        </a>
+                      }
+                    </td>
+                    <td class="align-end">
+                      <a class="btn btn--ghost btn--sm" [routerLink]="['/accounts', account.accountId]">
+                        Open
+                      </a>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
+    }
+
+    <!-- Import broker files -->
+    <div class="card">
+      <h2 class="card-title">Import broker files</h2>
+      @if (listStatus() === 'ready' && accounts().length === 0) {
+        <app-import-onboarding />
+      } @else {
+        <p class="card-hint">
+          Drop one or more broker exports. Each goes to its account — by account number, or for a file without one,
+          by the transactions already in an account — and you'll be asked when that isn't clear. Re-importing is
+          safe: duplicate transactions are skipped.
+        </p>
+      }
+      <app-import-drop-zone
+        class="drop-zone"
+        [portfolioId]="activeId()!"
+        [accounts]="accounts()"
+        (changed)="onImportsChanged()"
+      />
+    </div>
+
+    <!-- Add an account by hand (imports normally create accounts) -->
+    <details class="card manual-add">
+      <summary class="card-title">Add an account manually</summary>
+      <form class="add-form" (submit)="$event.preventDefault(); create()">
       <div class="form-grid">
         <label class="field">
           <span class="field-label">Name</span>
@@ -71,123 +155,14 @@
           <p class="form-error" role="alert">{{ message }}</p>
         }
       </div>
-    </form>
-
-    <!-- Accounts list -->
-    @switch (listStatus()) {
-      @case ('loading') {
-        <p class="loading" role="status">Loading accounts…</p>
-      }
-      @case ('error') {
-        <p class="form-error" role="alert">Couldn't load accounts for this portfolio.</p>
-      }
-      @default {
-        @if (accounts().length === 0) {
-          <app-empty-state
-            title="No accounts yet"
-            message="Add an account above or import a broker file below to get started."
-          />
-        } @else {
-          <div class="card table-card">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Institution</th>
-                  <th scope="col">Type</th>
-                  <th scope="col" class="align-end">Transactions</th>
-                  <th scope="col"><span class="visually-hidden">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (account of accounts(); track account.accountId) {
-                  <tr>
-                    <td>{{ account.name }}</td>
-                    <td>{{ account.institutionCode }}</td>
-                    <td>{{ accountTypeLabel(account.accountType) }}</td>
-                    <td class="align-end">{{ account.transactionCount }}</td>
-                    <td class="align-end">
-                      <a class="btn btn--ghost btn--sm" [routerLink]="['/accounts', account.accountId]">
-                        Open
-                      </a>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      }
-    }
-
-    <!-- Import a broker file -->
-    <div class="card">
-      <h2 class="card-title">Import a broker file</h2>
-      <p class="card-hint">
-        Upload a broker export that includes account details — accounts are created
-        automatically and transactions are bucketed to them. The format is detected
-        automatically; override it below if needed.
-      </p>
-      <app-select-field
-        class="format-select"
-        label="Format"
-        [value]="sourceSystem()"
-        [options]="formatOptions()"
-        [disabled]="importing()"
-        (valueChange)="sourceSystem.set($event)"
-      />
-      <app-file-upload
-        [accept]="acceptAttr()"
-        label="Drag a broker file here, or choose one"
-        [disabled]="importing()"
-        (fileSelected)="onFileSelected($event)"
-      />
-      @if (importing()) {
-        <p class="import-status" role="status">Importing…</p>
-      }
-      @if (importError(); as message) {
-        <p class="form-error" role="alert">{{ message }}</p>
-      }
-      @if (importResult(); as result) {
-        <div class="import-result" role="status">
-          @if (alreadyImportedNote(result); as note) {
-            <p class="import-summary">{{ note }}</p>
-          } @else {
-            <p class="import-summary">
-              Imported {{ result.accounts.length }} account(s).
-            </p>
-          }
-          <ul class="import-accounts">
-            @for (account of result.accounts; track account.accountId) {
-              <li>
-                <strong>{{ account.accountNumber || account.accountId }}</strong>
-                — {{ account.inserted }} added, {{ account.skipped }} skipped
-                @if (account.updated > 0) {
-                  , {{ account.updated }} updated
-                }
-                @if (account.failed > 0) {
-                  , {{ account.failed }} failed
-                }
-                @if (account.created) {
-                  <span class="new-badge">new</span>
-                }
-                @if (impliedNote(account); as note) {
-                  <p class="implied-note">{{ note }}</p>
-                }
-              </li>
-            }
-          </ul>
-          <app-import-warnings [warnings]="result.warnings" />
-          <p class="implied-note">Wrong file? Undo it from the import history below.</p>
-        </div>
-      }
-    </div>
+      </form>
+    </details>
 
     <div class="card">
       <app-import-history-list
         [portfolioId]="activeId()!"
         [reloadKey]="historyKey()"
-        (undone)="reload()"
+        (undone)="onImportsChanged()"
       />
     </div>
   }

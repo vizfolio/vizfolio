@@ -6,7 +6,7 @@
       statBadge
       [complete]="b.isComplete"
       [missing]="b.holdingsMissingSnapshot"
-      [asOf]="b.snapshotAsOf"
+      [missingDetails]="b.missing ?? []"
       [pending]="pendingPrices(b)"
     />
   </app-stat-card>
@@ -29,3 +29,12 @@
     [delta]="contributionsDetail()"
   />
 </div>
+
+@if (missingNote(); as note) {
+  <p class="missing-note" role="note">
+    {{ note }}
+    @if (healthLink(); as link) {
+      <a [routerLink]="link" [queryParams]="healthQuery()">Review data health</a>
+    }
+  </p>
+}

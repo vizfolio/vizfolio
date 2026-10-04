@@ -11,13 +11,14 @@
   </svg>
   <p class="label">{{ label() }}</p>
   <button type="button" class="choose-btn" [disabled]="disabled()" (click)="openPicker()">
-    Choose file
+    {{ multiple() ? 'Choose files' : 'Choose file' }}
   </button>
   <input
     #fileInput
     type="file"
     class="visually-hidden"
     [accept]="accept()"
+    [multiple]="multiple()"
     [disabled]="disabled()"
     (change)="onInputChange($event)"
   />

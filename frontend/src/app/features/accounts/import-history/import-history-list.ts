@@ -1,17 +1,4 @@
-import { HttpErrorResponse } from '@angular/common/http';
-import {
-  Component,
-  DestroyRef,
-  ElementRef,
-  Injector,
-  afterNextRender,
-  computed,
-  inject,
-  input,
-  output,
-  signal,
-  viewChild,
-} from '@angular/core';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { catchError, of, switchMap } from 'rxjs';
 
@@ -22,17 +9,11 @@ import {
   ImportHistory,
   ImportUndoSummary,
 } from '../../../core/api/models/imports.models';
-import { formatImportedAt, undoPreviewLines } from '../import-text';
+import { formatImportedAt } from '../import-text';
 import { ImportWarnings } from '../import-warnings/import-warnings';
+import { UndoImportConfirm } from '../undo-import/undo-import-confirm';
 
 type LoadStatus = 'loading' | 'ready' | 'error';
-
-/** An undo the user asked for: its preview loads first, then they confirm or cancel. */
-interface PendingUndo {
-  batch: ImportBatchItem;
-  preview: ImportUndoSummary | null;
-  error: string | null;
-}
 
 /**
  * The portfolio's imports, newest first — what each file did and what it didn't understand — with an Undo for any
@@ -41,7 +22,7 @@ interface PendingUndo {
  */
 @Component({
   selector: 'app-import-history-list',
-  imports: [ImportWarnings],
+  imports: [ImportWarnings, UndoImportConfirm],
   templateUrl: './import-history-list.html',
   styleUrl: './import-history-list.scss',
 })
@@ -55,14 +36,11 @@ export class ImportHistoryList {
   readonly undone = output<ImportUndoSummary>();
 
   private readonly api = inject(PortfolioApiService);
-  private readonly destroyRef = inject(DestroyRef);
-  private readonly injector = inject(Injector);
-  private readonly confirmHeading = viewChild<ElementRef<HTMLElement>>('confirmHeading');
 
   protected readonly status = signal<LoadStatus>('loading');
   private readonly history = signal<ImportHistory | null>(null);
-  protected readonly pending = signal<PendingUndo | null>(null);
-  protected readonly undoing = signal(false);
+  /** The import whose undo is being confirmed. */
+  protected readonly pending = signal<ImportBatchItem | null>(null);
   protected readonly notice = signal<string | null>(null);
 
   protected readonly imports = computed(() => {
@@ -71,10 +49,6 @@ export class ImportHistoryList {
     return accountId ? all.filter((i) => i.accounts.some((a) => a.accountId === accountId)) : all;
   });
   protected readonly beforeHistory = computed(() => this.history()?.transactionsImportedBeforeHistory ?? 0);
-  protected readonly previewLines = computed(() => {
-    const preview = this.pending()?.preview;
-    return preview ? undoPreviewLines(preview) : [];
-  });
   protected readonly formatImportedAt = formatImportedAt;
 
   protected fileUrl(item: ImportBatchItem): string {
@@ -113,60 +87,20 @@ export class ImportHistoryList {
     return accountId ? item.accounts.filter((a) => a.accountId === accountId) : item.accounts;
   }
 
-  /** Opens the confirmation for an undo and loads what it would do. */
+  /** Opens the confirmation for an undo. */
   protected startUndo(batch: ImportBatchItem): void {
     this.notice.set(null);
-    this.pending.set({ batch, preview: null, error: null });
-    afterNextRender(() => this.confirmHeading()?.nativeElement.focus(), { injector: this.injector });
-
-    this.api
-      .getImportUndoPreview(this.portfolioId(), batch.importBatchId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (preview) => this.pending.update((p) => (p ? { ...p, preview } : p)),
-        error: (err: HttpErrorResponse) => this.pending.update((p) => (p ? { ...p, error: undoErrorMessage(err) } : p)),
-      });
+    this.pending.set(batch);
   }
 
   protected cancelUndo(): void {
     this.pending.set(null);
   }
 
-  protected confirmUndo(): void {
-    const pending = this.pending();
-    if (!pending?.preview || this.undoing()) {
-      return;
-    }
-    this.undoing.set(true);
-    this.api
-      .undoImport(this.portfolioId(), pending.batch.importBatchId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (summary) => {
-          this.undoing.set(false);
-          this.pending.set(null);
-          this.notice.set(`Undid the import of ${summary.fileName}.`);
-          this.reloads.update((n) => n + 1);
-          this.undone.emit(summary);
-        },
-        error: (err: HttpErrorResponse) => {
-          this.undoing.set(false);
-          this.pending.update((p) => (p ? { ...p, error: undoErrorMessage(err) } : p));
-          if (err.status === 409) {
-            this.reloads.update((n) => n + 1);
-          }
-        },
-      });
-  }
-}
-
-function undoErrorMessage(err: HttpErrorResponse): string {
-  switch (err.status) {
-    case 409:
-      return 'This import has already been undone.';
-    case 404:
-      return 'This import no longer exists.';
-    default:
-      return "The undo couldn't be completed. Nothing was changed; please try again.";
+  protected onUndone(summary: ImportUndoSummary): void {
+    this.pending.set(null);
+    this.notice.set(`Undid the import of ${summary.fileName}.`);
+    this.reloads.update((n) => n + 1);
+    this.undone.emit(summary);
   }
 }

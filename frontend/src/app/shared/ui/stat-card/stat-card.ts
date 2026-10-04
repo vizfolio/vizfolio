@@ -3,9 +3,8 @@ import { Component, input } from '@angular/core';
 export type StatTrend = 'up' | 'down' | 'neutral';
 
 /**
- * Presentational summary card: a label, a big value, an optional delta/trend line, an optional
- * explanation of what the figure means, and an optional "incomplete data" hint (driven by
- * PerformanceBalance.isComplete). A featured card is the page's headline figure. Richer status can be
+ * Presentational summary card: a label, a big value, an optional delta/trend line and an optional
+ * explanation of what the figure means. A featured card is the page's headline figure. Status can be
  * projected into the header with a `statBadge` attribute (e.g. a completeness badge).
  */
 @Component({
@@ -19,8 +18,6 @@ export class StatCard {
   readonly value = input.required<string>();
   readonly delta = input<string | null>(null);
   readonly trend = input<StatTrend>('neutral');
-  /** When true, shows a subtle hint that the underlying figure is missing snapshot coverage. */
-  readonly incomplete = input(false);
   /** A short plain-language explanation of what the figure measures. */
   readonly hint = input<string | null>(null);
   /** Emphasises the card as the headline figure. */

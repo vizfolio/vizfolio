@@ -1,6 +1,11 @@
 @let p = performance();
 <div class="perf-summary">
-  <app-performance-headline [performance]="p" [showGrossFlows]="showGrossFlows()" />
+  <app-performance-headline
+    [performance]="p"
+    [showGrossFlows]="showGrossFlows()"
+    [healthLink]="healthLink()"
+    [healthQuery]="healthQuery()"
+  />
 
   <details class="calc">
     <summary>How this is calculated</summary>

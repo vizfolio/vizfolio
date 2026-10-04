@@ -216,7 +216,7 @@ export class OpeningBalanceForm {
               ? 'Please provide a date and at least one holding with a symbol and units.'
               : err.status === 404
                 ? 'Account not found. Try reselecting a portfolio.'
-                : 'Could not save the opening balance. Please try again.',
+                : 'Could not save the starting positions. Please try again.',
           );
           this.submitting.set(false);
         },

@@ -24,6 +24,62 @@ export enum PortfolioImportStatus {
   AlreadyImported = 7,
   /** The file names its accounts, and none is the account it was uploaded to (HTTP 422). */
   AccountMismatch = 8,
+  /**
+   * Some statements couldn't be placed on their own; nothing was written. `selections` lists them with candidate
+   * accounts — send the file again with `assignments`.
+   */
+  NeedsAccountSelection = 9,
+  /** Uploaded to one account but the file clearly belongs to another; nothing was written. */
+  LikelyOtherAccount = 10,
+  /** The assignments sent with the file don't work (HTTP 400; see `error`). */
+  InvalidAccountSelection = 11,
+}
+
+/** How an account was chosen for a file's rows (AccountImportResult.routing.method). */
+export type RoutingMethod = 'Uploaded' | 'AccountNumber' | 'Fingerprint' | 'UserSelected' | 'Created';
+
+export interface AccountRouting {
+  method: RoutingMethod;
+  /** For Fingerprint: how many of the file's transactions the account already held. */
+  matchingRows: number | null;
+}
+
+/**
+ * How strongly a file's rows point at an account: how many it already holds out of the file's rows dated within
+ * its history, and how many tickers they share. Source of truth:
+ *   backend/src/Vizfolio.Application/PortfolioImports/Models/ImportRouting.cs
+ */
+export interface RoutingCandidate {
+  accountId: string;
+  name: string;
+  institutionCode: string;
+  accountNumberMasked: string;
+  matchingRows: number;
+  rowsInAccountRange: number;
+  sharedTickers: number;
+}
+
+export type AccountSelectionReason = 'NoAccountNumber' | 'UnknownAccountNumber' | 'LikelyOtherAccount';
+
+/** A statement the import couldn't place on its own. */
+export interface AccountSelection {
+  /** The file's account number (normalized), or '' when it has none — echo it in the assignment. */
+  fileAccountNumber: string;
+  institutionCode: string | null;
+  reason: AccountSelectionReason;
+  rows: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  candidates: RoutingCandidate[];
+  /** The account the evidence points to — pre-select it. */
+  suggestedAccountId: string | null;
+}
+
+/** Where one statement goes when the file is sent again: an existing account, or a new one. */
+export interface StatementAssignment {
+  fileAccountNumber: string;
+  accountId?: string;
+  newAccount?: { name?: string; institutionCode?: string; accountNumber?: string };
 }
 
 /**
@@ -76,6 +132,11 @@ export interface AccountImportResult {
    */
   impliedContributions: number;
   impliedContributionsAmount: number;
+  /** How this account was chosen for the file. */
+  routing: AccountRouting | null;
+  /** Earliest and latest trade dates of the file's rows for this account. */
+  firstDate: string | null;
+  lastDate: string | null;
 }
 
 /**
@@ -94,6 +155,12 @@ export interface PortfolioImportResult {
   warnings: ImportWarning[];
   /** For AccountMismatch: the (masked, e.g. "…1234") account numbers the file contains. */
   fileAccountNumbers: string[];
+  /** The detected format, for people (e.g. "Vanguard transaction report"). */
+  parserDisplayName: string | null;
+  /** For NeedsAccountSelection / LikelyOtherAccount: what to ask. */
+  selections: AccountSelection[];
+  /** For InvalidAccountSelection: what's wrong with the assignments. */
+  error: string | null;
 }
 
 /**

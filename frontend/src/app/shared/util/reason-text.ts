@@ -1,4 +1,4 @@
-import { PerformanceReturn } from '../../core/api/models/performance.models';
+import { PerformanceMissing, PerformanceReturn } from '../../core/api/models/performance.models';
 
 /**
  * Plain-language text for the backend's return reason and cause codes. The headline is the
@@ -23,7 +23,10 @@ const CAUSE_TEXT: Record<string, string> = {
   BeforeHistory: 'it was held before your imported history starts',
   ValueWithoutInvestment: 'value appeared without a recorded deposit',
   ValueVanished: 'value disappeared without a recorded withdrawal',
+  NoDailyValuation: "the account couldn't be valued day by day",
+  IncompleteValuation: "some days couldn't be valued",
 };
+
 
 const REASON_TEXT: Record<string, string> = {
   NoData: 'No activity yet.',
@@ -37,11 +40,28 @@ const REASON_TEXT: Record<string, string> = {
   NoSignChange: 'Not enough deposits or withdrawals to compute your return.',
   DidNotConverge:
     "Your return can't be computed for this pattern of deposits; the investment return still applies.",
+  InvalidSubPeriod: "Part of the period couldn't be valued, so the return can't be computed.",
+  InsufficientIntermediateSnapshots: 'Not enough valuations in the period to compute this return.',
 };
 
 /** Why a valuation was missing, as a lower-case phrase ("no price available"). */
 export function causeText(cause: string): string {
   return CAUSE_TEXT[cause] ?? 'some days couldn’t be valued';
+}
+
+
+/**
+ * Names what couldn't be valued and why, e.g. "We couldn't value ZXFND: no price available (+2 more)." — null when
+ * nothing is missing. A null symbol is the account's cash.
+ */
+export function missingText(missing: readonly PerformanceMissing[] | undefined, when = ''): string | null {
+  if (!missing || missing.length === 0) {
+    return null;
+  }
+  const first = missing[0];
+  const what = first.symbol ?? 'cash';
+  const more = missing.length > 1 ? ` (+${missing.length - 1} more)` : '';
+  return `We couldn't value ${what}${when ? ` ${when}` : ''}: ${causeText(first.cause)}${more}.`;
 }
 
 /** Why a return couldn't be computed; falls back to the raw code for anything unmapped. */

@@ -1,0 +1,47 @@
+.account-health {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.loading {
+  color: var(--color-text-muted);
+}
+
+.error {
+  color: var(--color-negative);
+}
+
+.coverage summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.coverage[open] summary {
+  margin-bottom: var(--space-3);
+}
+
+.coverage-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.coverage-grid > div {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.coverage-grid dt {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+.coverage-grid dd {
+  margin: var(--space-1) 0 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

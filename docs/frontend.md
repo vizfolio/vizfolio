@@ -76,27 +76,52 @@ The headline return is the **money-weighted** `returns.moneyWeighted` (XIRR), la
 
 `features/accounts/detail/account.ts` is a tabbed container over the account-scoped endpoints. Each tab is its own small component taking `portfolioId`/`accountId` inputs and following the same shape: a `status` signal + `toObservable(query) → switchMap(api) → subscribe` feeding a data signal.
 
-- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings are valued by the same engine as performance (see the Performance API's "Holdings & ledger endpoints"): each row has a `status` (`Valued` / `NotHeld` / `Missing`), a `valuationSource` and a "Priced as of" date; the account's cash (incl. its settlement fund) is the last row, `kind: "Cash"`. Missing rows are surfaced in a "couldn't be valued" note. The opening-balance form (`opening-balance-form.ts`) prefills from `getOpeningPositions` — positions held before the imported history are filled in to confirm, ones that can't be derived are blank, cash is a `$CASH` row. The ledger reuses the `date-field` control for its optional trade-date filter.
+- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings are valued by the same engine as performance (see the Performance API's "Holdings & ledger endpoints"): each row has a `status` (`Valued` / `NotHeld` / `Missing`), a `valuationSource` and a "Priced as of" date; the account's cash (incl. its settlement fund) is the last row, `kind: "Cash"`. Missing rows are listed by cause in a "couldn't be valued" note. The "Adjust starting positions" form (`opening-balance-form.ts`) prefills from `getOpeningPositions` — positions held before the imported history are filled in to confirm, ones that can't be derived are blank, cash is a `$CASH` row. The ledger reuses the `date-field` control for its optional trade-date filter.
 
-## Imports: results, warnings and undo
+## Imports: one drop zone, summaries, warnings and undo
 
-Both upload points — the Accounts page (portfolio-scoped: files that name their accounts) and an account's
-**Import** tab (account-scoped; a multi-account QFX imports only that account's statement) — show the same pieces
-from `features/accounts/`:
+- **One drop zone** (`features/accounts/import-drop-zone/`), on the Accounts page and — for a portfolio with no
+  accounts yet — on the dashboard next to `import-onboarding` (export steps per broker; broker names are fine there,
+  they're import formats). It takes several files (`file-upload` with `multiple`) and imports them **one at a time**
+  through the portfolio endpoint, which finds each file's account by number or, for a file without one, by the
+  transactions already in an account. When the server answers `NeedsAccountSelection`, the file waits for an inline
+  **`account-picker`** (candidates with their evidence — "2,514 matching transactions · 3 shared funds" — the
+  likeliest pre-selected, or a new account; a new account for a file without a number asks for the institution and
+  number) and the queue pauses, since the answer can affect later files; the answer is sent with the file again.
+  The Format override sits under "Advanced". The manual add-account form is a collapsed "Add an account manually"
+  card.
+- **Summary** (`import-summary/`), after every import here and on an account's Import tab: the detected format;
+  each account and how it was found (`import-text.ts` → `routingNote`), the dates the file covers, added / already
+  there / updated / failed counts with **failure reasons**; warnings; implied contributions in the account's
+  currency; "Fetching prices…" until the account's value and "Your return" are in (polled); and **Undo this
+  import**. A re-upload of the same file shows the earlier result (`AlreadyImported`).
+- **Account Import tab**: a file without account details that clearly belongs to another account comes back
+  `LikelyOtherAccount` and is held with **Import into {account}** / **Import here anyway**. A 422 is
+  `AccountMismatch` (a QFX for other accounts).
+- **Warnings** (`import-warnings/`): what the parser didn't fully understand, collapsed in a native `<details>`.
+- **Undo** (`undo-import/undo-import-confirm.ts`): loads the server's preview, shows it in an inline confirmation
+  (focus moves to its heading; Undo / Cancel) and undoes. Used by the summary and the **Import history**
+  (`import-history/import-history-list.ts`: uploads newest first, filtered to the account on an account page, with
+  a Download link for the stored file; undone imports stay listed, struck through).
+- **Reprocess** lives on **Settings → Ledger** ("Reprocess imports").
 
-- **Result**: per-account added / skipped / updated counts. A re-upload of the same file comes back
-  `AlreadyImported` and shows the earlier result with a note (`import-text.ts` → `alreadyImportedNote`). A 422 on
-  the Import tab is `AccountMismatch`; the message names the (masked) accounts the file is for.
-- **Warnings** (`import-warnings/`): what the parser didn't fully understand, collapsed in a native `<details>`
-  ("3 rows need a look") listing each message with its row count and examples.
-- **Import history** (`import-history/import-history-list.ts`): the portfolio's uploads newest first — on an account
-  page filtered to that account (`accountId` input) — with what each did, its warnings, a **Download** link for the
-  stored file (a plain `<a download>` to the API, so the browser saves it under its original name), and an **Undo** button. Undo
-  first loads the server's preview and shows it in an inline confirmation panel (focus moves to its heading; Undo /
-  Cancel), then undoes, reloads and emits `undone` so the parent can refresh. Undone imports stay listed, struck
-  through. The parent bumps `reloadKey` after each import so the list picks it up.
-- **Reprocess** lives on **Settings → Ledger** ("Reprocess imports", next to "Re-link ledger"): it re-reads every
-  stored import file with the current parsers and reports files added/updated, plus any it had to skip and why.
+## Data health
+
+- **Account → Data health tab** (`detail/account-health.ts`, replaces the old History tab; `?tab=health` opens it):
+  the account's findings via **`health-list/`** — "Needs attention" (Blocking) then "Worth knowing" (Info), each with
+  its action: *Fetch prices* (queues `POST /api/prices/refresh`, then re-checks), *Add a price provider* (Settings),
+  *Adjust starting positions* / *Import a file* (switch tab), *Review* implied contributions (a by-year table from
+  `GET .../implied-contributions`). History coverage facts sit in a collapsed panel. It re-checks while prices
+  download.
+- **Accounts list**: each account's value, this year's "Your return" (account performance from Jan 1, fetched in
+  parallel) and a health dot from one `GET .../health` call, linking to that account's Data health tab.
+- **Readable reasons** (`shared/util/reason-text.ts`): `missingText` names what couldn't be valued and why ("We
+  couldn't value XYZ at the end of the period: no price available (+2 more).") — in the completeness badge's tooltip
+  and as a note under the headline cards (dashboard, Performance, account Performance) with a "Review data health"
+  link. The Holdings tab lists missing holdings by cause.
+- **Tabs**: Performance · Holdings · Ledger · Data health · Import · Adjust starting positions (the old "Opening
+  balance" form, rarely needed). The Ledger shows the normalized type next to the broker's label.
+- Global `.btn` styles live in `styles.scss`; new components use them instead of copying button CSS.
 
 ## Prices: Settings and "Updating…"
 

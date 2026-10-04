@@ -165,6 +165,9 @@ public enum OpeningClass
 public sealed record DerivedOpening(
     Guid? HoldingId, string? Symbol, DateOnly AsOf, decimal Quantity, OpeningClass Class, bool Verified = true);
 
+/// <summary>An unbroken run of days on which a component (cash, with a null id) couldn't be valued, and why.</summary>
+public sealed record MissingInterval(Guid? HoldingId, string? Symbol, MissingCause Cause, DateOnly From, DateOnly To);
+
 public enum FindingCode
 {
     QuantityMismatch,

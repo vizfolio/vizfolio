@@ -58,6 +58,10 @@ function setup(api: MockApi, accountId: string | null = null) {
   return { fixture, cmp: fixture.componentInstance as any, el: fixture.nativeElement as HTMLElement };
 }
 
+function confirmButton(el: HTMLElement): HTMLButtonElement {
+  return el.querySelector('.confirm .btn--danger') as HTMLButtonElement;
+}
+
 describe('ImportHistoryList', () => {
   it('lists imports newest first with what each did, and marks undone ones without an Undo button', () => {
     const { el } = setup(new MockApi());
@@ -93,7 +97,7 @@ describe('ImportHistoryList', () => {
     expect(api.undone).toBeNull();
 
     const loadsBefore = api.loads;
-    cmp.confirmUndo();
+    confirmButton(el).click();
     fixture.detectChanges();
     expect(api.undone).toBe('b2');
     expect(emitted).toEqual(PREVIEW);
@@ -107,7 +111,8 @@ describe('ImportHistoryList', () => {
     const { fixture, cmp, el } = setup(api);
 
     cmp.startUndo(HISTORY.imports[0]);
-    cmp.cancelUndo();
+    fixture.detectChanges();
+    (el.querySelector('.confirm .btn--ghost') as HTMLButtonElement).click();
     fixture.detectChanges();
 
     expect(el.querySelector('.confirm')).toBeNull();
@@ -120,7 +125,8 @@ describe('ImportHistoryList', () => {
     const { fixture, cmp, el } = setup(api);
 
     cmp.startUndo(HISTORY.imports[0]);
-    cmp.confirmUndo();
+    fixture.detectChanges();
+    confirmButton(el).click();
     fixture.detectChanges();
 
     expect(el.querySelector('.confirm [role="alert"]')?.textContent).toContain('already been undone');

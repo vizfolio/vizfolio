@@ -5,35 +5,14 @@
     <p class="notice" role="status">{{ message }}</p>
   }
 
-  @if (pending(); as undo) {
-    <div class="confirm" role="group" aria-labelledby="confirm-title">
-      <h3 class="confirm-title" id="confirm-title" tabindex="-1" #confirmHeading>
-        Undo the import of {{ undo.batch.fileName }}?
-      </h3>
-      @if (undo.error; as error) {
-        <p class="error" role="alert">{{ error }}</p>
-      } @else if (undo.preview) {
-        <ul class="preview">
-          @for (line of previewLines(); track line) {
-            <li>{{ line }}</li>
-          }
-        </ul>
-        <p class="hint">The import stays listed as undone, and the file can be imported again later.</p>
-      } @else {
-        <p class="hint" role="status">Working out what this would change…</p>
-      }
-      <div class="confirm-actions">
-        <button
-          type="button"
-          class="btn btn--danger"
-          [disabled]="!undo.preview || !!undo.error || undoing()"
-          (click)="confirmUndo()"
-        >
-          {{ undoing() ? 'Undoing…' : 'Undo import' }}
-        </button>
-        <button type="button" class="btn btn--ghost" [disabled]="undoing()" (click)="cancelUndo()">Cancel</button>
-      </div>
-    </div>
+  @if (pending(); as batch) {
+    <app-undo-import-confirm
+      [portfolioId]="portfolioId()"
+      [importBatchId]="batch.importBatchId"
+      [fileName]="batch.fileName"
+      (undone)="onUndone($event)"
+      (cancelled)="cancelUndo()"
+    />
   }
 
   @switch (status()) {

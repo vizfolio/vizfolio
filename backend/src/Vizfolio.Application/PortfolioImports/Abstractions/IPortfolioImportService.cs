@@ -9,14 +9,16 @@ public interface IPortfolioImportService
         Stream fileStream,
         string fileName,
         CancellationToken cancellationToken,
-        string? requestedSourceSystem = null);
+        string? requestedSourceSystem = null,
+        ImportChoices? choices = null);
 
     Task<PortfolioImportResult> ImportToPortfolioAsync(
         Guid portfolioId,
         Stream fileStream,
         string fileName,
         CancellationToken cancellationToken,
-        string? requestedSourceSystem = null);
+        string? requestedSourceSystem = null,
+        ImportChoices? choices = null);
 
     /// <summary>
     /// Re-parses stored import files with the current parsers and applies the result: rows a parser used to drop

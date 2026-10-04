@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FastEndpoints;
 using Microsoft.AspNetCore.Http;
 using Vizfolio.Application.PortfolioImports.Abstractions;
@@ -12,11 +13,19 @@ public sealed class ImportPortfolioFileRequest
 
     /// <summary>Optional parser override (e.g. "QFX"). Omit/blank to auto-detect the format.</summary>
     public string? SourceSystem { get; set; }
+
+    /// <summary>
+    /// After a <see cref="PortfolioImportStatus.NeedsAccountSelection"/> answer: a JSON array of
+    /// <c>{ fileAccountNumber, accountId?, newAccount?: { name?, institutionCode?, accountNumber? } }</c> saying where each
+    /// statement goes.
+    /// </summary>
+    public string? Assignments { get; set; }
 }
 
 public sealed class ImportPortfolioFileEndpoint : Endpoint<ImportPortfolioFileRequest, PortfolioImportResult>
 {
     private const long MaxUploadBytes = 10 * 1024 * 1024;
+    private static readonly JsonSerializerOptions AssignmentJson = new(JsonSerializerDefaults.Web);
 
     private readonly IPortfolioImportService _importer;
 
@@ -40,18 +49,20 @@ public sealed class ImportPortfolioFileEndpoint : Endpoint<ImportPortfolioFileRe
             .Produces<PortfolioImportResult>(StatusCodes.Status422UnprocessableEntity));
         Summary(s =>
         {
-            s.Summary = "Upload a broker file that carries its own account metadata (e.g. multi-account QFX) into a portfolio.";
+            s.Summary = "Upload any supported broker file into a portfolio; each statement finds its account.";
             s.Description =
-                "Used for files that identify each account inline (OFX/QFX `<INVACCTFROM>`/`<BANKACCTFROM>`). " +
-                "For each statement in the file, the matching account in the portfolio is found by `(InstitutionCode, AccountNumber)` " +
-                "or created on the fly with a placeholder name the user can rename later. " +
+                "A statement that names its account (OFX/QFX `<INVACCTFROM>`) goes to the portfolio's account with that " +
+                "`(InstitutionCode, AccountNumber)`, or a new one. A file without account details (e.g. the Vanguard report) goes " +
+                "to the account that already holds its transactions (fingerprint routing, `Imports:Routing`). When that isn't " +
+                "clear — or a new account number looks like an existing account — the response is `NeedsAccountSelection` with " +
+                "candidates and nothing is written; send the file again with `Assignments`. " +
                 "Returns 415 if no parser claims the file, 404 if the portfolio is missing, 413 if the upload exceeds the size cap, " +
-                "and 422 if the file does not carry account metadata (use the account-scoped endpoint instead).";
+                "and 400 if the assignments don't work.";
             s.Responses[StatusCodes.Status200OK] = "Import completed (response carries per-account results).";
             s.Responses[StatusCodes.Status404NotFound] = "Portfolio not found.";
             s.Responses[StatusCodes.Status413PayloadTooLarge] = "Upload exceeded the 10 MB cap.";
             s.Responses[StatusCodes.Status415UnsupportedMediaType] = "No registered parser claimed the file.";
-            s.Responses[StatusCodes.Status422UnprocessableEntity] = "File carries no account metadata; use the account-scoped import endpoint.";
+            s.Responses[StatusCodes.Status422UnprocessableEntity] = "The file has no statements to import.";
         });
     }
 
@@ -69,8 +80,23 @@ public sealed class ImportPortfolioFileEndpoint : Endpoint<ImportPortfolioFileRe
             return;
         }
 
+        IReadOnlyList<StatementAssignment> assignments;
+        try
+        {
+            assignments = string.IsNullOrWhiteSpace(req.Assignments)
+                ? []
+                : JsonSerializer.Deserialize<List<StatementAssignment>>(req.Assignments, AssignmentJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            await Send.ResponseAsync(default!, StatusCodes.Status400BadRequest, ct);
+            return;
+        }
+
         await using var stream = req.File.OpenReadStream();
-        var result = await _importer.ImportToPortfolioAsync(req.PortfolioId, stream, req.File.FileName, ct, req.SourceSystem);
+        var result = await _importer.ImportToPortfolioAsync(
+            req.PortfolioId, stream, req.File.FileName, ct, req.SourceSystem,
+            new ImportChoices { Assignments = assignments });
 
         var status = result.Status switch
         {
@@ -78,6 +104,7 @@ public sealed class ImportPortfolioFileEndpoint : Endpoint<ImportPortfolioFileRe
             PortfolioImportStatus.UnknownParser => StatusCodes.Status415UnsupportedMediaType,
             PortfolioImportStatus.PortfolioNotFound => StatusCodes.Status404NotFound,
             PortfolioImportStatus.FileHasNoAccountInfo => StatusCodes.Status422UnprocessableEntity,
+            PortfolioImportStatus.InvalidAccountSelection => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status200OK,
         };
         await Send.ResponseAsync(result, status, ct);

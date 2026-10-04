@@ -29,6 +29,9 @@ export class PerformanceSummary {
   readonly performance = input.required<PortfolioPerformance>();
   /** Gross deposits / withdrawals under net contributions; off at portfolio scope (see PerformanceHeadline). */
   readonly showGrossFlows = input(true);
+  /** Where "Review data health" goes when something couldn't be valued (see PerformanceHeadline). */
+  readonly healthLink = input<string[] | null>(null);
+  readonly healthQuery = input<Record<string, string> | null>(null);
 
   protected readonly yourReturnLabel = YOUR_RETURN_LABEL;
   protected readonly investmentReturnLabel = INVESTMENT_RETURN_LABEL;

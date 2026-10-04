@@ -279,7 +279,7 @@ public sealed class PortfolioImportServiceTests
     }
 
     [Fact]
-    public async Task ImportToPortfolioAsync_returns_FileHasNoAccountInfo_for_csv()
+    public async Task ImportToPortfolioAsync_asks_for_an_account_when_a_file_without_account_details_matches_none()
     {
         await using var ctx = await TestDbContext.CreateAsync();
         var portfolio = await SeedPortfolioAsync(ctx);
@@ -287,8 +287,65 @@ public sealed class PortfolioImportServiceTests
 
         var result = await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(CanonicalCsv), "sample.csv", CancellationToken.None);
 
-        result.Status.ShouldBe(PortfolioImportStatus.FileHasNoAccountInfo);
+        result.Status.ShouldBe(PortfolioImportStatus.NeedsAccountSelection);
         result.SourceSystem.ShouldBe("CSV");
+        var selection = result.Selections.ShouldHaveSingleItem();
+        selection.Reason.ShouldBe(AccountSelectionReasons.NoAccountNumber);
+        selection.FileAccountNumber.ShouldBe("");
+        selection.Candidates.ShouldBeEmpty();
+        (await ctx.Db.ImportBatches.CountAsync()).ShouldBe(0);
+        (await ctx.Db.AccountTransactions.CountAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task An_M1_activity_csv_imports_into_a_new_account_and_a_later_export_adds_only_its_new_rows()
+    {
+        const string header =
+            "Date,Posted Date,Symbol,Description,Transaction Type,Amount,Units,Unit Type,Unit Price,Security Id,Security Id Type\n";
+        const string rows =
+            "\"Feb 11, 2019\",\"Feb 11, 2019\",,ACH deposit of $250 completed.,TRANSFER,$250.00,--,CURRENCY,--,,\n" +
+            "\"Feb 11, 2019\",\"Feb 11, 2019\",ZXTS,2.5 shares of ZXTS purchased.,PURCHASED,$100.00,2.5,SHARES,$40.00,TEST00001,CUSIP\n" +
+            "\"Jun 8, 2019\",\"Jun 7, 2019\",ZXBD,Dividend of TEST00002 $12.34 received.,DIVIDEND,$12.34,--,CURRENCY,--,TEST00002,CUSIP\n" +
+            "\"Jan 14, 2019\",\"Jan 13, 2019\",,PROMO_CREDIT_INITIAL_FUNDING,CASH,$25.00,--,CURRENCY,--,\n";
+        const string laterRow =
+            "\"Mar 1, 2019\",\"Mar 1, 2019\",ZXTS,0.5 shares of ZXTS purchased.,PURCHASED,$20.00,0.5,SHARES,$40.00,TEST00001,CUSIP\n";
+
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        var service = ServiceWithImpliedContributions(ctx, new QfxFileParser(), new M1FinanceActivityCsvParser());
+
+        // The export names no account, so the first upload asks; the user creates the account.
+        var asked = await service.ImportToPortfolioAsync(portfolio.PortfolioId, Stream(header + rows), "m1.csv", CancellationToken.None);
+        asked.Status.ShouldBe(PortfolioImportStatus.NeedsAccountSelection);
+        asked.Selections.ShouldHaveSingleItem().InstitutionCode.ShouldBe("m1.com");
+
+        var first = await service.ImportToPortfolioAsync(
+            portfolio.PortfolioId, Stream(header + rows), "m1.csv", CancellationToken.None,
+            choices: new ImportChoices { Assignments = [new StatementAssignment("", null, new NewAccountDetails("M1", "m1.com", "ZX-0001"))] });
+
+        first.Status.ShouldBe(PortfolioImportStatus.Success);
+        first.SourceSystem.ShouldBe("M1");
+        var account = first.Accounts.ShouldHaveSingleItem();
+        account.Inserted.ShouldBe(4);
+        account.ImpliedContributions.ShouldBe(0); // the deposit funds the purchase
+
+        var stored = await ctx.Db.AccountTransactions.AsNoTracking()
+            .Where(t => t.AccountId == account.AccountId).ToListAsync();
+        stored.Select(t => (t.Type, t.Amount)).ShouldBe(new[]
+        {
+            (TransactionType.Deposit, 250m), (TransactionType.Buy, -100m),
+            (TransactionType.Dividend, 12.34m), (TransactionType.Interest, 25m),
+        }, ignoreOrder: true);
+
+        // A later export repeats the history plus one new purchase: only the new row is added.
+        var later = await service.ImportToPortfolioAsync(
+            portfolio.PortfolioId, Stream(header + laterRow + rows), "m1-later.csv", CancellationToken.None,
+            choices: new ImportChoices { Assignments = [new StatementAssignment("", account.AccountId, null)] });
+
+        later.Status.ShouldBe(PortfolioImportStatus.Success);
+        var again = later.Accounts.ShouldHaveSingleItem();
+        again.Inserted.ShouldBe(1);
+        again.Skipped.ShouldBe(4);
     }
 
     [Fact]
@@ -999,18 +1056,6 @@ public sealed class PortfolioImportServiceTests
             .OrderBy(t => t.TradeDate)
             .ToListAsync();
 
-    /// <summary>For tests about ingesting imported rows: records no implied contributions.</summary>
-    private sealed class NoImpliedContributions : IImpliedContributionService
-    {
-        public static readonly NoImpliedContributions Instance = new();
-
-        public Task<ImpliedContributionPreview?> PreviewForAccountAsync(
-            Guid portfolioId, Guid accountId, CancellationToken cancellationToken)
-            => Task.FromResult<ImpliedContributionPreview?>(null);
-
-        public Task<ImpliedContributionSyncResult> SyncForAccountAsync(Guid accountId, CancellationToken cancellationToken)
-            => Task.FromResult(new ImpliedContributionSyncResult(0, 0m));
-    }
 
     private static ParsedTransaction Buy(string ticker, DateOnly tradeDate, decimal quantity, decimal amount) =>
         new(ExternalId: null, Type: TransactionType.Buy, TradeDate: tradeDate, SettlementDate: null,

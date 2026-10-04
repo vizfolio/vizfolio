@@ -27,11 +27,20 @@
         <p class="dash-notice" role="status">{{ message }}</p>
       }
 
+      @if (needsFirstImport() && portfolioId(); as pid) {
+        <div class="onboarding-card">
+          <h2>Import your history</h2>
+          <app-import-onboarding />
+          <app-import-drop-zone [portfolioId]="pid" (changed)="onFirstImport()" />
+        </div>
+      }
+
       @if (displayPerformance(); as p) {
         <app-performance-headline
           [performance]="p"
           balanceLabel="Portfolio value"
           [showGrossFlows]="false"
+          [healthLink]="['/accounts']"
         />
       }
 

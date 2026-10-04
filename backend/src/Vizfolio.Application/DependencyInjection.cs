@@ -1,11 +1,13 @@
 using Microsoft.Extensions.DependencyInjection;
 using Vizfolio.Application.Extracts.Abstractions;
 using Vizfolio.Application.Extracts.Importers;
+using Vizfolio.Application.PortfolioImports;
 using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.PortfolioImports.Brokers;
 using Vizfolio.Application.PortfolioImports.Parsers;
 using Vizfolio.Application.PortfolioImports.Services;
 using Vizfolio.Application.Portfolios;
+using Vizfolio.Application.Portfolios.Health;
 using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Application.Pricing;
 using Vizfolio.Application.Pricing.Abstractions;
@@ -25,6 +27,8 @@ public static class DependencyInjection
         // Auto-detect offers them highest Priority first, so provider-specific parsers sit above generics.
         services.AddScoped<IPortfolioFileParser, QfxFileParser>();
         services.AddScoped<IPortfolioFileParser, VanguardTransactionHistoryReportParser>();
+        services.AddScoped<IPortfolioFileParser, M1FinanceActivityCsvParser>();
+        services.AddSingleton(new ImportRoutingOptions());
         services.AddScoped<IPortfolioImportService, PortfolioImportService>();
         services.AddScoped<IImportUndoService, ImportUndoService>();
         services.AddScoped<IImportHistoryService, ImportHistoryService>();
@@ -42,6 +46,7 @@ public static class DependencyInjection
         services.AddScoped<IPortfolioPerformanceService, PortfolioPerformanceService>();
         services.AddScoped<IAccountHistoryService, AccountHistoryService>();
         services.AddScoped<IImpliedContributionService, ImpliedContributionService>();
+        services.AddScoped<IDataHealthService, DataHealthService>();
 
         // Return-metric strategies. The time-weighted ("investment") return is a true TWR from daily valuations,
         // falling back to Modified Dietz when a day in the period can't be valued. The money-weighted XIRR is the

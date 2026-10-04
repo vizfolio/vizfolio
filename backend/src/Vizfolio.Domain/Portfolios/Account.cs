@@ -72,6 +72,12 @@ public sealed class Account
         Name = name.Trim();
     }
 
+    /// <summary>
+    /// Corrects the account number — when an import shows the one typed in was wrong and the user confirms the
+    /// file's number is the account's.
+    /// </summary>
+    public void ChangeAccountNumber(string accountNumber) => SetAccountNumber(accountNumber);
+
     public void SetAccountType(string? accountType)
     {
         AccountType = string.IsNullOrWhiteSpace(accountType) ? null : accountType.Trim();

@@ -29,6 +29,7 @@ public sealed class CreateAccountEndpoint : Endpoint<CreateAccountRequest, Accou
         Description(b => b
             .WithTags("Portfolios")
             .Produces<AccountResponse>(StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict));
         Summary(s =>
@@ -52,13 +53,22 @@ public sealed class CreateAccountEndpoint : Endpoint<CreateAccountRequest, Accou
             return;
         }
 
-        var institutionCode = (req.InstitutionCode ?? string.Empty).Trim().ToLowerInvariant();
-        var accountNumber = req.AccountNumber?.Trim() ?? string.Empty;
-        var duplicate = await _db.Accounts.AsNoTracking()
-            .AnyAsync(a => a.PortfolioId == req.PortfolioId
-                && a.InstitutionCode == institutionCode
-                && a.AccountNumber == accountNumber, ct);
-        if (duplicate)
+        if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.InstitutionCode)
+            || Account.NormalizeAccountNumber(req.AccountNumber).Length == 0)
+        {
+            await Send.ResponseAsync(default!, StatusCodes.Status400BadRequest, ct);
+            return;
+        }
+
+        // Matched the way imports match accounts: "1234-5678" and "12345678" are the same account.
+        var institutionCode = req.InstitutionCode.Trim().ToLowerInvariant();
+        var accountNumber = req.AccountNumber.Trim();
+        var normalized = Account.NormalizeAccountNumber(accountNumber);
+        var numbers = await _db.Accounts.AsNoTracking()
+            .Where(a => a.PortfolioId == req.PortfolioId && a.InstitutionCode == institutionCode)
+            .Select(a => a.AccountNumber)
+            .ToListAsync(ct);
+        if (numbers.Any(n => Account.NormalizeAccountNumber(n) == normalized))
         {
             await Send.ResponseAsync(default!, StatusCodes.Status409Conflict, ct);
             return;

@@ -16,12 +16,14 @@ import {
   OpeningPositionsResponse,
   SetOpeningBalanceRequest,
 } from './models/coverage.models';
+import { DataHealthReport, ImpliedContributionPreview } from './models/health.models';
 import { HoldingRow } from './models/holdings.models';
 import {
   ImportHistory,
   ImportParser,
   ImportUndoSummary,
   PortfolioImportResult,
+  StatementAssignment,
   ReprocessResult,
 } from './models/imports.models';
 import { LedgerEntry } from './models/ledger.models';
@@ -60,11 +62,14 @@ function dateRangeParams(from?: string, to?: string): HttpParams {
  * Wraps a File in the multipart form-data body the import endpoints expect. Pass `sourceSystem`
  * to force a specific parser; omit it to let the backend auto-detect the format.
  */
-function fileForm(file: File, sourceSystem?: string): FormData {
+function fileForm(file: File, sourceSystem?: string, extra: Record<string, string> = {}): FormData {
   const form = new FormData();
   form.append('file', file, file.name);
   if (sourceSystem) {
     form.append('sourceSystem', sourceSystem);
+  }
+  for (const [name, value] of Object.entries(extra)) {
+    form.append(name, value);
   }
   return form;
 }
@@ -132,17 +137,22 @@ export class PortfolioApiService {
 
   /**
    * POST /api/portfolios/{portfolioId}/imports
-   * Multi-account broker file (e.g. QFX carrying account metadata).
-   * `sourceSystem` forces a specific parser; omit to auto-detect.
+   * Any supported broker file: each statement finds its account by number, or (with no number) by matching
+   * transactions. When that isn't clear the result is NeedsAccountSelection — send the file again with
+   * `assignments`. `sourceSystem` forces a specific parser; omit to auto-detect.
    */
   importPortfolioFile(
     portfolioId: string,
     file: File,
     sourceSystem?: string,
+    assignments?: StatementAssignment[],
   ): Observable<PortfolioImportResult> {
+    const extra: Record<string, string> = assignments?.length
+      ? { assignments: JSON.stringify(assignments) }
+      : {};
     return this.http.post<PortfolioImportResult>(
       `${API_BASE}/portfolios/${portfolioId}/imports`,
-      fileForm(file, sourceSystem),
+      fileForm(file, sourceSystem, extra),
     );
   }
 
@@ -156,10 +166,12 @@ export class PortfolioApiService {
     accountId: string,
     file: File,
     sourceSystem?: string,
+    ignoreRoutingCheck = false,
   ): Observable<PortfolioImportResult> {
+    const extra: Record<string, string> = ignoreRoutingCheck ? { ignoreRoutingCheck: 'true' } : {};
     return this.http.post<PortfolioImportResult>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/imports`,
-      fileForm(file, sourceSystem),
+      fileForm(file, sourceSystem, extra),
     );
   }
 
@@ -289,6 +301,28 @@ export class PortfolioApiService {
   }
 
   // ---- History & data quality ---------------------------------------------
+
+  /** GET /api/portfolios/{portfolioId}/health — every account's data health findings. */
+  getPortfolioHealth(portfolioId: string): Observable<DataHealthReport> {
+    return this.http.get<DataHealthReport>(`${API_BASE}/portfolios/${portfolioId}/health`);
+  }
+
+  /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/health */
+  getAccountHealth(portfolioId: string, accountId: string): Observable<DataHealthReport> {
+    return this.http.get<DataHealthReport>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/health`,
+    );
+  }
+
+  /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/implied-contributions — how they were derived. */
+  getImpliedContributions(
+    portfolioId: string,
+    accountId: string,
+  ): Observable<ImpliedContributionPreview> {
+    return this.http.get<ImpliedContributionPreview>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/implied-contributions`,
+    );
+  }
 
   /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/history-coverage */
   getHistoryCoverage(
