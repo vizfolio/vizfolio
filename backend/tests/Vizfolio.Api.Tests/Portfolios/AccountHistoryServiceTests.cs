@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Vizfolio.Api.Tests.Extracts;
+using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Application.Portfolios;
 using Vizfolio.Domain.Portfolios;
 
@@ -17,7 +18,7 @@ public sealed class AccountHistoryServiceTests
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var otherPortfolioId = await SeedPortfolioAsync(ctx, name: "Other");
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.GetCoverageAsync(otherPortfolioId, accountId, CancellationToken.None);
 
         result.ShouldBeNull();
@@ -29,7 +30,7 @@ public sealed class AccountHistoryServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -40,46 +41,44 @@ public sealed class AccountHistoryServiceTests
     }
 
     [Fact]
-    public async Task GetCoverageAsync_flags_gap_when_transactions_precede_earliest_snapshot()
+    public async Task GetCoverageAsync_reports_no_gap_when_a_later_statement_gives_the_starting_position()
     {
+        // A partial history (e.g. an 18-month QFX): trades start before the only statement. Rolling the statement
+        // back over the trades gives the starting position, so no manual opening balance is needed.
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 15));
-        await SeedSnapshotAsync(ctx, holding, new DateOnly(2026, 6, 1), source: AccountHoldingSnapshotSource.BrokerPosition);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 15), quantity: 4m);
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2026, 6, 1), source: AccountHoldingSnapshotSource.BrokerPosition, quantity: 10m);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
 
         result.ShouldNotBeNull();
         result.FirstTransactionDate.ShouldBe(new DateOnly(2025, 6, 15));
         result.EarliestSnapshotDate.ShouldBe(new DateOnly(2026, 6, 1));
-        result.HasHistoryGap.ShouldBeTrue();
+        result.HasHistoryGap.ShouldBeFalse(); // 6 shares held before the history, derived from the statement
         result.SuggestedOpeningDate.ShouldBe(new DateOnly(2025, 6, 14));
         result.BrokerPositionSnapshotCount.ShouldBe(1);
         result.OpeningBalanceSnapshotCount.ShouldBe(0);
     }
 
     [Fact]
-    public async Task GetCoverageAsync_still_flags_gap_when_only_snapshot_has_no_market_value()
+    public async Task GetCoverageAsync_flags_gap_when_the_ledger_and_the_broker_disagree()
     {
+        // The ledger buys 10 shares but the statement shows 1: rolled back, the account would have held −9 before
+        // its history — impossible, so the starting position can't be derived and the gap stays flagged.
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 15));
-        // A quantity-only opening balance (no market value) yields no usable balance, so the
-        // gap must stay open — consistent with the performance starting balance.
-        await SeedSnapshotAsync(
-            ctx, holding, new DateOnly(2025, 6, 14),
-            source: AccountHoldingSnapshotSource.OpeningBalance, marketValue: null);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 15), quantity: 10m);
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2026, 6, 1), source: AccountHoldingSnapshotSource.BrokerPosition, quantity: 1m);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
 
         result.ShouldNotBeNull();
         result.HasHistoryGap.ShouldBeTrue();
-        result.EarliestSnapshotDate.ShouldBeNull(); // no *valued* snapshot exists
-        result.OpeningBalanceSnapshotCount.ShouldBe(1);
     }
 
     [Fact]
@@ -91,7 +90,7 @@ public sealed class AccountHistoryServiceTests
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 6, 15), source: AccountHoldingSnapshotSource.OpeningBalance);
         await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 15));
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -109,7 +108,7 @@ public sealed class AccountHistoryServiceTests
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 6, 30), source: AccountHoldingSnapshotSource.Statement);
         await SeedSnapshotAsync(ctx, holding, new DateOnly(2026, 6, 1), source: AccountHoldingSnapshotSource.BrokerPosition);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
 
         result.ShouldNotBeNull();
@@ -127,7 +126,7 @@ public sealed class AccountHistoryServiceTests
         var (_, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var otherPortfolioId = await SeedPortfolioAsync(ctx, name: "Other");
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.SetOpeningBalanceAsync(
             otherPortfolioId, accountId, SingleHoldingCommand("VOO"), CancellationToken.None);
 
@@ -140,7 +139,7 @@ public sealed class AccountHistoryServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.SetOpeningBalanceAsync(
             portfolioId,
             accountId,
@@ -179,7 +178,7 @@ public sealed class AccountHistoryServiceTests
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var existingHoldingId = await SeedHoldingAsync(ctx, accountId, symbol: "VOO");
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.SetOpeningBalanceAsync(
             portfolioId,
             accountId,
@@ -199,7 +198,7 @@ public sealed class AccountHistoryServiceTests
         var holdingId = await SeedHoldingAsync(ctx, accountId, symbol: "VOO");
         await SeedSnapshotAsync(ctx, holdingId, new DateOnly(2025, 1, 1), source: AccountHoldingSnapshotSource.OpeningBalance, marketValue: 4000m);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.SetOpeningBalanceAsync(
             portfolioId,
             accountId,
@@ -230,7 +229,7 @@ public sealed class AccountHistoryServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.SetOpeningBalanceAsync(
             portfolioId,
             accountId,
@@ -257,7 +256,7 @@ public sealed class AccountHistoryServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         await service.SetOpeningBalanceAsync(
             portfolioId,
             accountId,
@@ -280,7 +279,7 @@ public sealed class AccountHistoryServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var result = await service.SetOpeningBalanceAsync(
             portfolioId,
             accountId,
@@ -311,10 +310,11 @@ public sealed class AccountHistoryServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holdingId = await SeedHoldingAsync(ctx, accountId, symbol: "VOO");
-        await SeedTransactionAsync(ctx, accountId, holdingId, new DateOnly(2025, 6, 15));
-        await SeedSnapshotAsync(ctx, holdingId, new DateOnly(2026, 6, 1), source: AccountHoldingSnapshotSource.BrokerPosition);
+        // The ledger and the statement disagree (10 bought, 1 held), so the opening can't be derived…
+        await SeedTransactionAsync(ctx, accountId, holdingId, new DateOnly(2025, 6, 15), quantity: 10m);
+        await SeedSnapshotAsync(ctx, holdingId, new DateOnly(2026, 6, 1), source: AccountHoldingSnapshotSource.BrokerPosition, quantity: 1m);
 
-        var service = new AccountHistoryService(ctx.Db);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
         var before = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
         before!.HasHistoryGap.ShouldBeTrue();
 
@@ -330,10 +330,34 @@ public sealed class AccountHistoryServiceTests
                 }),
             CancellationToken.None);
 
+        // …until the user states it: a stored opening position is authoritative.
         var after = await service.GetCoverageAsync(portfolioId, accountId, CancellationToken.None);
         after!.HasHistoryGap.ShouldBeFalse();
         after.EarliestSnapshotDate.ShouldBe(new DateOnly(2025, 6, 14));
         after.OpeningBalanceSnapshotCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task SetOpeningBalanceAsync_records_cash_on_the_accounts_cash_holding()
+    {
+        // "$CASH" addresses the account's cash: it gets one Cash holding (not an unclassified "$CASH" security).
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var service = new AccountHistoryService(ctx.Db, new AccountValuationLoader(ctx.Db, new ValuationOptions()));
+
+        await service.SetOpeningBalanceAsync(
+            portfolioId,
+            accountId,
+            new OpeningBalanceCommand(
+                new DateOnly(2025, 1, 1),
+                "USD",
+                new[] { new OpeningBalanceHolding("$cash", Units: 250m, MarketValue: 250m, UnitPrice: 1m, CostBasis: null, CurrencyCode: null, Cusip: null) }),
+            CancellationToken.None);
+
+        var holding = await ctx.Db.AccountHoldings.SingleAsync();
+        holding.Kind.ShouldBe(AccountHoldingKind.Cash);
+        holding.Symbol.ShouldBe(AccountHistoryService.CashSymbol);
+        (await ctx.Db.AccountHoldingSnapshots.SingleAsync()).MarketValue.ShouldBe(250m);
     }
 
     // ---------- helpers ----------
@@ -378,9 +402,10 @@ public sealed class AccountHistoryServiceTests
         Guid holdingId,
         DateOnly asOf,
         AccountHoldingSnapshotSource source,
-        decimal? marketValue = 1000m)
+        decimal? marketValue = 1000m,
+        decimal quantity = 1m)
     {
-        var snapshot = new AccountHoldingSnapshot(holdingId, asOf, quantity: 1m, source);
+        var snapshot = new AccountHoldingSnapshot(holdingId, asOf, quantity, source);
         snapshot.SetValuation(costBasis: null, marketValue, unitPrice: null, currencyCode: "USD");
         ctx.Db.AccountHoldingSnapshots.Add(snapshot);
         await ctx.Db.SaveChangesAsync();
@@ -390,7 +415,8 @@ public sealed class AccountHistoryServiceTests
         TestDbContext ctx,
         Guid accountId,
         Guid holdingId,
-        DateOnly tradeDate)
+        DateOnly tradeDate,
+        decimal? quantity = null)
     {
         var tx = new AccountTransaction(
             accountId,
@@ -400,6 +426,7 @@ public sealed class AccountHistoryServiceTests
             tradeDate,
             amount: -100m);
         tx.LinkToHolding(holdingId);
+        tx.SetTradeDetails(quantity, price: null, fees: null, settlementDate: null);
         ctx.Db.AccountTransactions.Add(tx);
         await ctx.Db.SaveChangesAsync();
     }

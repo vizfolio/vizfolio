@@ -13,11 +13,21 @@ import {
 import {
   HistoryCoverageResponse,
   OpeningBalanceResponse,
+  OpeningPositionsResponse,
   SetOpeningBalanceRequest,
 } from './models/coverage.models';
+import { DataHealthReport, ImpliedContributionPreview } from './models/health.models';
 import { HoldingRow } from './models/holdings.models';
-import { ImportParser, PortfolioImportResult } from './models/imports.models';
+import {
+  ImportHistory,
+  ImportParser,
+  ImportUndoSummary,
+  PortfolioImportResult,
+  StatementAssignment,
+  ReprocessResult,
+} from './models/imports.models';
 import { LedgerEntry } from './models/ledger.models';
+import { PriceProvider, PriceRefreshState, PriceStatus } from './models/prices.models';
 import {
   AccountSummary,
   PortfolioPerformance,
@@ -52,11 +62,14 @@ function dateRangeParams(from?: string, to?: string): HttpParams {
  * Wraps a File in the multipart form-data body the import endpoints expect. Pass `sourceSystem`
  * to force a specific parser; omit it to let the backend auto-detect the format.
  */
-function fileForm(file: File, sourceSystem?: string): FormData {
+function fileForm(file: File, sourceSystem?: string, extra: Record<string, string> = {}): FormData {
   const form = new FormData();
   form.append('file', file, file.name);
   if (sourceSystem) {
     form.append('sourceSystem', sourceSystem);
+  }
+  for (const [name, value] of Object.entries(extra)) {
+    form.append(name, value);
   }
   return form;
 }
@@ -124,17 +137,22 @@ export class PortfolioApiService {
 
   /**
    * POST /api/portfolios/{portfolioId}/imports
-   * Multi-account broker file (e.g. QFX carrying account metadata).
-   * `sourceSystem` forces a specific parser; omit to auto-detect.
+   * Any supported broker file: each statement finds its account by number, or (with no number) by matching
+   * transactions. When that isn't clear the result is NeedsAccountSelection — send the file again with
+   * `assignments`. `sourceSystem` forces a specific parser; omit to auto-detect.
    */
   importPortfolioFile(
     portfolioId: string,
     file: File,
     sourceSystem?: string,
+    assignments?: StatementAssignment[],
   ): Observable<PortfolioImportResult> {
+    const extra: Record<string, string> = assignments?.length
+      ? { assignments: JSON.stringify(assignments) }
+      : {};
     return this.http.post<PortfolioImportResult>(
       `${API_BASE}/portfolios/${portfolioId}/imports`,
-      fileForm(file, sourceSystem),
+      fileForm(file, sourceSystem, extra),
     );
   }
 
@@ -148,11 +166,71 @@ export class PortfolioApiService {
     accountId: string,
     file: File,
     sourceSystem?: string,
+    ignoreRoutingCheck = false,
   ): Observable<PortfolioImportResult> {
+    const extra: Record<string, string> = ignoreRoutingCheck ? { ignoreRoutingCheck: 'true' } : {};
     return this.http.post<PortfolioImportResult>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/imports`,
-      fileForm(file, sourceSystem),
+      fileForm(file, sourceSystem, extra),
     );
+  }
+
+  /** GET /api/portfolios/{portfolioId}/imports — the portfolio's imports, newest first. */
+  getImports(portfolioId: string): Observable<ImportHistory> {
+    return this.http.get<ImportHistory>(`${API_BASE}/portfolios/${portfolioId}/imports`);
+  }
+
+  /**
+   * URL of GET .../imports/{importBatchId}/file — the uploaded file as stored, served as an attachment under its
+   * original name. A plain link (not an HttpClient call), so the browser downloads it.
+   */
+  importFileUrl(portfolioId: string, importBatchId: string): string {
+    return `${API_BASE}/portfolios/${portfolioId}/imports/${importBatchId}/file`;
+  }
+
+  /** GET .../imports/{importBatchId}/undo-preview — what undoing would remove or revert (dry run). */
+  getImportUndoPreview(portfolioId: string, importBatchId: string): Observable<ImportUndoSummary> {
+    return this.http.get<ImportUndoSummary>(
+      `${API_BASE}/portfolios/${portfolioId}/imports/${importBatchId}/undo-preview`,
+    );
+  }
+
+  /** POST .../imports/{importBatchId}/undo — reverses the import (409 if already undone). */
+  undoImport(portfolioId: string, importBatchId: string): Observable<ImportUndoSummary> {
+    return this.http.post<ImportUndoSummary>(
+      `${API_BASE}/portfolios/${portfolioId}/imports/${importBatchId}/undo`,
+      null,
+    );
+  }
+
+  /**
+   * POST /api/imports/reprocess — re-reads every stored import file with the current parsers, adding rows they
+   * used to drop and updating rows they now read differently. All portfolios.
+   */
+  reprocessImports(): Observable<ReprocessResult> {
+    return this.http.post<ReprocessResult>(`${API_BASE}/imports/reprocess`, {});
+  }
+
+  // ---- Prices --------------------------------------------------------------
+
+  /** GET /api/prices/status — the background refresh and each price series' coverage. */
+  getPriceStatus(): Observable<PriceStatus> {
+    return this.http.get<PriceStatus>(`${API_BASE}/prices/status`);
+  }
+
+  /** POST /api/prices/refresh — queue a fetch for every holding (returns at once, 202). */
+  refreshPrices(): Observable<PriceRefreshState> {
+    return this.http.post<PriceRefreshState>(`${API_BASE}/prices/refresh`, {});
+  }
+
+  /** GET /api/settings/price-providers — providers in the order they're tried. */
+  getPriceProviders(): Observable<PriceProvider[]> {
+    return this.http.get<PriceProvider[]>(`${API_BASE}/settings/price-providers`);
+  }
+
+  /** PUT /api/settings/price-providers/{provider} — save an API key; a blank key removes the saved one. */
+  setPriceProviderKey(provider: string, apiKey: string | null): Observable<PriceProvider> {
+    return this.http.put<PriceProvider>(`${API_BASE}/settings/price-providers/${provider}`, { apiKey });
   }
 
   // ---- Performance ---------------------------------------------------------
@@ -224,6 +302,28 @@ export class PortfolioApiService {
 
   // ---- History & data quality ---------------------------------------------
 
+  /** GET /api/portfolios/{portfolioId}/health — every account's data health findings. */
+  getPortfolioHealth(portfolioId: string): Observable<DataHealthReport> {
+    return this.http.get<DataHealthReport>(`${API_BASE}/portfolios/${portfolioId}/health`);
+  }
+
+  /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/health */
+  getAccountHealth(portfolioId: string, accountId: string): Observable<DataHealthReport> {
+    return this.http.get<DataHealthReport>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/health`,
+    );
+  }
+
+  /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/implied-contributions — how they were derived. */
+  getImpliedContributions(
+    portfolioId: string,
+    accountId: string,
+  ): Observable<ImpliedContributionPreview> {
+    return this.http.get<ImpliedContributionPreview>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/implied-contributions`,
+    );
+  }
+
   /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/history-coverage */
   getHistoryCoverage(
     portfolioId: string,
@@ -231,6 +331,16 @@ export class PortfolioApiService {
   ): Observable<HistoryCoverageResponse> {
     return this.http.get<HistoryCoverageResponse>(
       `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/history-coverage`,
+    );
+  }
+
+  /** GET /api/portfolios/{portfolioId}/accounts/{accountId}/opening-positions */
+  getOpeningPositions(
+    portfolioId: string,
+    accountId: string,
+  ): Observable<OpeningPositionsResponse> {
+    return this.http.get<OpeningPositionsResponse>(
+      `${API_BASE}/portfolios/${portfolioId}/accounts/${accountId}/opening-positions`,
     );
   }
 

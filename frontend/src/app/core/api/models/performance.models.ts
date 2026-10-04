@@ -36,6 +36,24 @@ export interface PerformanceBalance {
   snapshotAsOf: string | null;
   holdingsCovered: number;
   holdingsMissingSnapshot: number;
+  /** Up to 10 holdings that couldn't be valued (a null symbol is the account's cash) and why. */
+  missing?: PerformanceMissing[];
+}
+
+export type PerformanceMissingCause =
+  | 'NoPrice'
+  | 'StalePrice'
+  | 'NegativePosition'
+  | 'MaterialMismatch'
+  | 'BeforeHistory'
+  /** No (recent) price yet, but a background price fetch for the account is queued or running. */
+  | 'PricesPending';
+
+export interface PerformanceMissing {
+  accountId: string;
+  accountHoldingId: string | null;
+  symbol: string | null;
+  cause: PerformanceMissingCause | string;
 }
 
 /** Cash flows in/out over the period. Sign convention: deposits +, withdrawals -. */
@@ -46,20 +64,62 @@ export interface PerformanceContributions {
   count: number;
 }
 
-/** A single return figure; `rate` is null when it cannot be computed. */
+/**
+ * A single return figure; `rate` is null when it cannot be computed (`reason` says why).
+ * `annualizedRate` is the per-year equivalent of a period rate when the period is a year or more.
+ * `fallbackReason` is set when the preferred method couldn't be used and `method` names the
+ * approximation used instead (e.g. 'ModifiedDietz' because a day couldn't be valued — the cause).
+ */
 export interface PerformanceReturn {
   rate: number | null;
+  /** 'XIRR' (money-weighted), 'DailyValuedTWR' (time-weighted) or 'ModifiedDietz' (approximation). */
   method: string;
   basis: 'Period' | 'Annualized' | string;
   reason: string | null;
+  annualizedRate: number | null;
+  fallbackReason: string | null;
 }
 
+/**
+ * `moneyWeighted` is the headline "Your return" (XIRR — your personal rate of return);
+ * `timeWeighted` is the "Investment return" (how the investments did, regardless of when money was
+ * added).
+ */
 export interface PerformanceReturns {
   timeWeighted: PerformanceReturn;
   moneyWeighted: PerformanceReturn;
 }
 
 /** GET /api/portfolios/{id}/performance (and account-scoped variant). */
+/** Spacing of the value-over-period series, chosen by the API from the period's length. */
+export type PerformanceSeriesInterval = 'Weekly' | 'Monthly' | 'Quarterly';
+
+/**
+ * One chart point: the balance at the close of `date` (null when a holding couldn't be valued —
+ * drawn as a gap), the deposits / withdrawals (negative) since the previous point, the cumulative
+ * time-weighted return from the period's start (decimal rate; the last point equals
+ * `returns.timeWeighted`, the investment return — not the money-weighted headline) and the
+ * cumulative investment gain (value − starting balance − net contributions to date).
+ * Return and gain are null where they can't be computed.
+ */
+export interface PerformanceSeriesPoint {
+  date: string;
+  value: number | null;
+  deposits: number;
+  withdrawals: number;
+  cumulativeReturn: number | null;
+  investmentGain: number | null;
+}
+
+/**
+ * Value / returns over the period. The first point is the opening (starting balance, the day before `from`);
+ * the last is `to` (ending balance).
+ */
+export interface PerformanceSeries {
+  interval: PerformanceSeriesInterval;
+  points: PerformanceSeriesPoint[];
+}
+
 export interface PortfolioPerformance {
   from: string;
   to: string;
@@ -68,4 +128,5 @@ export interface PortfolioPerformance {
   contributions: PerformanceContributions;
   returns: PerformanceReturns;
   currencyCode: string;
+  series: PerformanceSeries;
 }

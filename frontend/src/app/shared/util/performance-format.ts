@@ -1,4 +1,9 @@
-import { PortfolioPerformance } from '../../core/api/models/performance.models';
+import {
+  PerformanceReturn,
+  PerformanceSeriesInterval,
+  PortfolioPerformance,
+} from '../../core/api/models/performance.models';
+import { returnReasonText } from './reason-text';
 
 /** Formats a number as currency for the given ISO code (falls back to plain if invalid). */
 export function formatCurrency(value: number, currencyCode: string): string {
@@ -46,6 +51,24 @@ export function formatPercent(rate: number | null): string {
   return `${sign}${pct.toFixed(1)}%`;
 }
 
+/**
+ * The line under a return figure: what span it covers ("a year", "over the period", or the
+ * annualized equivalent "+10.2% a year"), "approximate" when it fell back to Modified Dietz, or
+ * why it couldn't be computed.
+ */
+export function returnDetail(r: PerformanceReturn): string | null {
+  if (r.rate === null) {
+    return returnReasonText(r.reason);
+  }
+  const span =
+    r.basis === 'Annualized'
+      ? 'a year'
+      : r.annualizedRate !== null && r.annualizedRate !== undefined
+        ? `${formatPercent(r.annualizedRate)} a year`
+        : 'over the period';
+  return r.fallbackReason ? `${span} · approximate` : span;
+}
+
 /** Up/down/neutral from a signed number. */
 export function trendOf(value: number | null): 'up' | 'down' | 'neutral' {
   if (value === null || value === 0 || Number.isNaN(value)) {
@@ -54,59 +77,81 @@ export function trendOf(value: number | null): 'up' | 'down' | 'neutral' {
   return value > 0 ? 'up' : 'down';
 }
 
-export interface SyntheticSeries {
+export interface ValueSeries {
   labels: string[];
-  value: number[];
+  /** Balance per point; null where a holding couldn't be valued (a gap in the line). */
+  value: (number | null)[];
   deposits: number[];
+  /** Withdrawals as positive magnitudes, for bars. */
   withdrawals: number[];
+  /** Short description of the spacing, e.g. "Month-end values". */
+  note: string;
+}
+
+const INTERVAL_NOTE: Record<PerformanceSeriesInterval, string> = {
+  Weekly: 'Weekly values',
+  Monthly: 'Month-end values',
+  Quarterly: 'Quarter-end values',
+};
+
+/** Formats a `YYYY-MM-DD` point date for the chart axis, to suit the series spacing. */
+export function formatSeriesLabel(date: string, interval: PerformanceSeriesInterval): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (interval === 'Quarterly') {
+    return `Q${Math.floor(d.getUTCMonth() / 3) + 1} ${String(d.getUTCFullYear()).slice(-2)}`;
+  }
+  const options: Intl.DateTimeFormatOptions =
+    interval === 'Weekly'
+      ? { month: 'short', day: 'numeric', timeZone: 'UTC' }
+      : { month: 'short', year: '2-digit', timeZone: 'UTC' };
+  return d.toLocaleDateString('en-US', options);
+}
+
+/** Maps the API's value-over-period series onto chart-ready arrays. */
+export function buildValueSeries(perf: PortfolioPerformance): ValueSeries {
+  const series = perf.series ?? { interval: 'Monthly', points: [] };
+  const points = series.points;
+  return {
+    labels: points.map((p) => formatSeriesLabel(p.date, series.interval)),
+    value: points.map((p) => (p.value === null ? null : Math.round(p.value))),
+    deposits: points.map((p) => Math.round(p.deposits)),
+    withdrawals: points.map((p) => Math.round(Math.abs(p.withdrawals))),
+    note: INTERVAL_NOTE[series.interval],
+  };
+}
+
+export interface ReturnSeries {
+  labels: string[];
+  /** Cumulative return in percent (0.114 -> 11.4); null where it can't be computed (a gap). */
+  returnPct: (number | null)[];
+  /** Cumulative investment gain in currency; null where it can't be computed (a gap). */
+  gain: (number | null)[];
+  note: string;
+}
+
+/** Maps the API series onto chart-ready cumulative return (%) and investment gain arrays. */
+export function buildReturnSeries(perf: PortfolioPerformance): ReturnSeries {
+  const series = perf.series ?? { interval: 'Monthly', points: [] };
+  const points = series.points;
+  return {
+    labels: points.map((p) => formatSeriesLabel(p.date, series.interval)),
+    returnPct: points.map((p) =>
+      p.cumulativeReturn === null ? null : Math.round(p.cumulativeReturn * 10000) / 100,
+    ),
+    gain: points.map((p) => (p.investmentGain === null ? null : Math.round(p.investmentGain))),
+    note: INTERVAL_NOTE[series.interval],
+  };
 }
 
 /**
- * TODO(perf-timeseries): the performance API returns period aggregates, not a time series.
- * Until a time-series endpoint exists, we approximate a monthly value curve by linearly
- * interpolating between the period's starting and ending balance, and spread the period's
- * total deposits/withdrawals across the months. Purely illustrative for the shell.
+ * True when a value couldn't be computed only because prices are still downloading in the background (missing cause
+ * `PricesPending`) — the view says "updating" and refreshes rather than calling the value incomplete.
  */
-export function buildSyntheticSeries(perf: PortfolioPerformance): SyntheticSeries {
-  const start = new Date(`${perf.from}T00:00:00Z`);
-  const end = new Date(`${perf.to}T00:00:00Z`);
-  const months = Math.max(
-    2,
-    Math.min(
-      13,
-      (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
-        (end.getUTCMonth() - start.getUTCMonth()) +
-        1,
-    ),
-  );
+export function hasPendingPrices(balance: { missing?: { cause: string }[] } | null | undefined): boolean {
+  return balance?.missing?.some((m) => m.cause === 'PricesPending') ?? false;
+}
 
-  const startVal = perf.startingBalance.value;
-  const endVal = perf.endingBalance.value;
-  const labels: string[] = [];
-  const value: number[] = [];
-  const deposits: number[] = [];
-  const withdrawals: number[] = [];
-
-  const depositPerMonth = perf.contributions.deposits / months;
-  const withdrawalPerMonth = perf.contributions.withdrawals / months;
-
-  for (let i = 0; i < months; i++) {
-    const point = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1),
-    );
-    labels.push(
-      point.toLocaleDateString('en-US', {
-        month: 'short',
-        year: '2-digit',
-        timeZone: 'UTC',
-      }),
-    );
-    const t = months === 1 ? 1 : i / (months - 1);
-    value.push(Math.round(startVal + (endVal - startVal) * t));
-    deposits.push(Math.round(depositPerMonth));
-    // Withdrawals are stored negative; show magnitude on the chart.
-    withdrawals.push(Math.round(Math.abs(withdrawalPerMonth)));
-  }
-
-  return { labels, value, deposits, withdrawals };
+/** True when either end of a performance result is waiting on prices. */
+export function performanceAwaitsPrices(perf: PortfolioPerformance | null): boolean {
+  return perf !== null && (hasPendingPrices(perf.startingBalance) || hasPendingPrices(perf.endingBalance));
 }

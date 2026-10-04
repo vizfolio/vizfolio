@@ -41,6 +41,25 @@ public sealed class AccountHoldingSnapshot
 
     public DateTimeOffset RecordedAt { get; private set; }
 
+    /// <summary>The upload that recorded this snapshot (null for user-entered and pre-batch snapshots).</summary>
+    public Guid? ImportBatchId { get; private set; }
+
+    /// <summary>The date the broker's unit price is from (OFX <c>DTPRICEASOF</c>), when it differs from <see cref="AsOf"/>.</summary>
+    public DateOnly? PriceAsOf { get; private set; }
+
+    public void TagImportBatch(Guid importBatchId)
+    {
+        if (importBatchId == Guid.Empty)
+            throw new ArgumentException("Import batch ID is required.", nameof(importBatchId));
+
+        ImportBatchId = importBatchId;
+    }
+
+    public void SetPriceAsOf(DateOnly? priceAsOf)
+    {
+        PriceAsOf = priceAsOf;
+    }
+
     public void SetValuation(
         decimal? costBasis,
         decimal? marketValue,

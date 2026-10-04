@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Vizfolio.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Vizfolio.Application\Vizfolio.Application.csproj" />
     <ProjectReference Include="..\Vizfolio.Domain\Vizfolio.Domain.csproj" />
   </ItemGroup>

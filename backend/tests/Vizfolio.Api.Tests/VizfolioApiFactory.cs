@@ -8,6 +8,7 @@ using Vizfolio.Api.Tests.Extracts.Fakes;
 using Vizfolio.Api.Tests.PortfolioImports.Fakes;
 using Vizfolio.Application.Extracts.Abstractions;
 using Vizfolio.Application.PortfolioImports.Abstractions;
+using Vizfolio.Application.Pricing.Abstractions;
 using Vizfolio.Infrastructure.Persistence;
 
 namespace Vizfolio.Api.Tests;
@@ -36,7 +37,10 @@ public sealed class VizfolioApiFactory : WebApplicationFactory<Program>
                 ["Database:AutoMigrate"] = "true",
                 ["ConnectionStrings:Default"] = _connectionString,
                 ["Extracts:Schedule:Enabled"] = "false",
-                ["Extracts:Schedule:RunOnStartup"] = "false"
+                ["Extracts:Schedule:RunOnStartup"] = "false",
+                // No background price fetching in endpoint tests: it would write to the shared test DB mid-test.
+                ["PriceHistory:RefreshOnImport"] = "false",
+                ["PriceHistory:Schedule:Enabled"] = "false"
             });
         });
 
@@ -55,6 +59,10 @@ public sealed class VizfolioApiFactory : WebApplicationFactory<Program>
             // provider-specific parsers, but the endpoint tests need a format that carries no
             // account metadata (which QFX always does) to exercise account-scoped imports.
             services.AddScoped<IPortfolioFileParser, CsvLedgerTestParser>();
+
+            // Never fetch real prices from endpoint tests: queued refreshes are dropped.
+            services.RemoveAll<IPriceRefreshQueue>();
+            services.AddSingleton<IPriceRefreshQueue, NoPriceRefresh>();
         });
     }
 
@@ -66,5 +74,13 @@ public sealed class VizfolioApiFactory : WebApplicationFactory<Program>
             try { File.Delete(_dbPath); }
             catch { }
         }
+    }
+}
+
+/// <summary>Drops price refresh requests, so endpoint tests never call a real price provider.</summary>
+internal sealed class NoPriceRefresh : IPriceRefreshQueue
+{
+    public void Enqueue(PriceRefreshRequest request)
+    {
     }
 }

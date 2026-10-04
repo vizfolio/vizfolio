@@ -1,0 +1,88 @@
+<section class="summary" aria-label="Import result">
+  @if (heading()) {
+    <p class="heading">{{ heading() }}</p>
+  }
+  @if (undoneNotice(); as notice) {
+    <p class="notice" role="status">{{ notice }}</p>
+  } @else {
+    @if (alreadyImported(); as note) {
+      <p class="note" role="status">{{ note }}</p>
+    }
+
+    <ul class="accounts">
+      @for (line of lines(); track line.result.accountId) {
+        <li class="account">
+          <p class="account-name">
+            {{ line.name }}
+            @if (line.result.created) {
+              <span class="new-badge">new</span>
+            }
+          </p>
+          @if (line.routing) {
+            <p class="detail">{{ line.routing }}</p>
+          }
+          <p class="detail counts">
+            @if (line.range) {
+              {{ line.range }}:
+            }
+            {{ line.result.inserted }} added, {{ line.result.skipped }} already there
+            @if (line.result.updated > 0) {
+              , {{ line.result.updated }} updated
+            }
+            @if (line.result.snapshotsInserted > 0) {
+              , {{ line.result.snapshotsInserted }} statement positions
+            }
+            @if (line.result.failed > 0) {
+              , <span class="failed">{{ line.result.failed }} failed</span>
+            }
+          </p>
+          @if (line.result.failures.length > 0) {
+            <details class="failures">
+              <summary>Why {{ line.result.failures.length === 1 ? 'a row' : 'some rows' }} failed</summary>
+              <ul>
+                @for (failure of line.result.failures; track failure.key) {
+                  <li>{{ failure.key }}: {{ failure.reason }}</li>
+                }
+              </ul>
+            </details>
+          }
+          @if (impliedNote(line); as note) {
+            <p class="detail">{{ note }}</p>
+          }
+          @if (isNew()) {
+            @if (line.performance === undefined || awaitsPrices(line.performance ?? null)) {
+              <p class="detail" role="status">Fetching prices…</p>
+            } @else if (line.performance; as perf) {
+              <p class="headline">
+                Value {{ formatMoney(perf.endingBalance.value, perf.currencyCode) }}
+                · {{ yourReturnLabel }} {{ formatPercent(perf.returns.moneyWeighted.rate) }}
+                @if (returnDetail(perf.returns.moneyWeighted); as detail) {
+                  <span class="headline-detail">({{ detail }})</span>
+                }
+              </p>
+            }
+          }
+        </li>
+      }
+    </ul>
+
+    <app-import-warnings [warnings]="result().warnings" />
+
+    @if (isNew() && result().importBatchId; as batchId) {
+      @if (confirmingUndo()) {
+        <app-undo-import-confirm
+          [portfolioId]="portfolioId()"
+          [importBatchId]="batchId"
+          [fileName]="fileName() ?? 'this file'"
+          (undone)="onUndone($event)"
+          (cancelled)="confirmingUndo.set(false)"
+        />
+      } @else {
+        <p class="undo">
+          Wrong file?
+          <button type="button" class="btn btn--ghost btn--sm" (click)="confirmingUndo.set(true)">Undo this import</button>
+        </p>
+      }
+    }
+  }
+</section>

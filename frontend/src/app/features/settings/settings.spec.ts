@@ -28,9 +28,20 @@ class MockApi {
   all: Observable<ImportAllResponse> = of({
     securities: importResult(),
     funds: importResult(),
+    moneyMarketFunds: importResult(),
     relinked: 3,
   });
   relink: Observable<RelinkLedgerResponse> = of({ linked: 7 });
+  reprocess = of({
+    batches: 2,
+    inserted: 4,
+    updated: 9,
+    snapshotsInserted: 0,
+    perBatch: [
+      { importBatchId: 'b1', fileName: 'a.qfx', inserted: 4, updated: 9, snapshotsInserted: 0, skipped: null },
+      { importBatchId: 'b2', fileName: 'old.csv', inserted: 0, updated: 0, snapshotsInserted: 0, skipped: 'No parser for CSV is registered any more.' },
+    ],
+  });
 
   securitiesArg: unknown = null;
   fundsArg: unknown = null;
@@ -48,6 +59,15 @@ class MockApi {
   }
   relinkLedger() {
     return this.relink;
+  }
+  getPriceProviders() {
+    return of([]);
+  }
+  getPriceStatus() {
+    return of({ refresh: { running: false, pending: false }, providersAvailable: 1, series: [] });
+  }
+  reprocessImports() {
+    return this.reprocess;
   }
 }
 
@@ -102,5 +122,14 @@ describe('Settings', () => {
     const cmp = setup(new MockApi());
     cmp.runRelink();
     expect(cmp.relink().result.linked).toBe(7);
+  });
+
+  it('reprocesses stored imports and lists files it could not re-read', () => {
+    const cmp = setup(new MockApi());
+    cmp.runReprocess();
+    expect(cmp.reprocess().result.updated).toBe(9);
+    expect(cmp.skippedFiles(cmp.reprocess().result)).toEqual([
+      { fileName: 'old.csv', reason: 'No parser for CSV is registered any more.' },
+    ]);
   });
 });

@@ -37,13 +37,25 @@ public static class TransactionFingerprint
             quantity.HasValue
                 ? quantity.Value.ToString(QuantityFormat, CultureInfo.InvariantCulture)
                 : string.Empty,
-            amount.ToString(AmountFormat, CultureInfo.InvariantCulture));
+            DirectionalAmount(quantity, amount).ToString(AmountFormat, CultureInfo.InvariantCulture));
 
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         var sb = new StringBuilder(32);
         for (var i = 0; i < 16; i++) sb.Append(bytes[i].ToString("x2"));
         return sb.ToString();
     }
+
+    /// <summary>
+    /// A row that moves shares already says which way through its quantity's sign (buy/reinvest +,
+    /// sell −), and brokers disagree on the sign of its cash amount — QFX reports a reinvestment's total
+    /// as positive where the Vanguard report has it negative; old Vanguard purchases are positive too.
+    /// So for share rows the amount's magnitude is compared; for cash-only rows (no quantity) the sign is
+    /// all that separates a deposit from a withdrawal, so it's kept. Trade-off: an in-kind transfer in and
+    /// a purchase of the same quantity and amount on the same day would now look alike — rare enough to
+    /// accept against every overlapping reinvestment importing twice.
+    /// </summary>
+    private static decimal DirectionalAmount(decimal? quantity, decimal amount)
+        => quantity is { } q && q != 0m ? Math.Abs(amount) : amount;
 
     public static string Compute(Guid accountId, ParsedTransaction tx) =>
         Compute(accountId, tx.TradeDate, tx.Ticker, tx.Quantity, tx.Amount);

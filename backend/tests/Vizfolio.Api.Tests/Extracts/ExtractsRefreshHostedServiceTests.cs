@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Vizfolio.Application.Extracts.Abstractions;
+using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.Extracts.Models;
 using Vizfolio.Infrastructure.Extracts;
 using Vizfolio.Infrastructure.Extracts.Hosted;
@@ -12,7 +13,7 @@ namespace Vizfolio.Api.Tests.Extracts;
 public sealed class ExtractsRefreshHostedServiceTests
 {
     [Fact]
-    public async Task Runs_securities_then_funds_then_relink_in_order_on_startup()
+    public async Task Runs_securities_then_funds_then_money_market_registry_then_relinks_in_order_on_startup()
     {
         var log = new List<string>();
         var sp = BuildScope(log);
@@ -26,12 +27,12 @@ public sealed class ExtractsRefreshHostedServiceTests
 
         using var cts = new CancellationTokenSource();
         var run = service.StartAsync(cts.Token);
-        await WaitForAsync(() => log.Count >= 3);
+        await WaitForAsync(() => log.Count >= 5);
         await cts.CancelAsync();
         await service.StopAsync(CancellationToken.None);
         await run;
 
-        log.Take(3).ShouldBe(["securities", "funds", "relink"]);
+        log.Take(5).ShouldBe(["securities", "funds", "money-market", "relink", "ledger-relink"]);
     }
 
     [Fact]
@@ -82,6 +83,8 @@ public sealed class ExtractsRefreshHostedServiceTests
         services.AddScoped<ISecuritiesImporter>(_ => new RecordingSecuritiesImporter(log));
         services.AddScoped<IFundsImporter>(_ => new RecordingFundsImporter(log));
         services.AddScoped<IHoldingRelinker>(_ => new RecordingRelinker(log));
+        services.AddScoped<IMoneyMarketFundsImporter>(_ => new RecordingMoneyMarketImporter(log));
+        services.AddScoped<ILedgerRelinker>(_ => new RecordingLedgerRelinker(log));
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
@@ -122,6 +125,24 @@ public sealed class ExtractsRefreshHostedServiceTests
         public Task<int> RelinkAsync(CancellationToken cancellationToken = default)
         {
             log.Add("relink");
+            return Task.FromResult(0);
+        }
+    }
+
+    private sealed class RecordingMoneyMarketImporter(List<string> log) : IMoneyMarketFundsImporter
+    {
+        public Task<ImportResult> ImportAsync(CancellationToken cancellationToken = default)
+        {
+            log.Add("money-market");
+            return Task.FromResult(ImportResult.Empty(TimeSpan.Zero));
+        }
+    }
+
+    private sealed class RecordingLedgerRelinker(List<string> log) : ILedgerRelinker
+    {
+        public Task<int> RelinkAsync(CancellationToken cancellationToken = default)
+        {
+            log.Add("ledger-relink");
             return Task.FromResult(0);
         }
     }

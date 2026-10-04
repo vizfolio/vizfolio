@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Vizfolio.Application.Extracts.Abstractions;
+using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Application.Extracts.Models;
 
 namespace Vizfolio.Infrastructure.Extracts.Hosted;
@@ -90,11 +91,14 @@ public sealed class ExtractsRefreshHostedService : BackgroundService
             _logger.LogInformation("Beginning scheduled extracts refresh.");
             var secResult = await securities.ImportAsync(new SecuritiesImportOptions(), cancellationToken);
             var fundResult = await funds.ImportAsync(new FundsImportOptions(), cancellationToken);
+            await scope.ServiceProvider.GetRequiredService<IMoneyMarketFundsImporter>().ImportAsync(cancellationToken);
             var relinked = await relinker.RelinkAsync(cancellationToken);
+            // New reference data may recognise tickers that account holdings were created without.
+            var ledgerRelinked = await scope.ServiceProvider.GetRequiredService<ILedgerRelinker>().RelinkAsync(cancellationToken);
 
             _logger.LogInformation(
-                "Extracts refresh complete. Securities: {SecUp}/{SecTotal} upserted. Funds: {FundUp}/{FundTotal} upserted. Re-linked: {Relinked}.",
-                secResult.Upserted, secResult.Considered, fundResult.Upserted, fundResult.Considered, relinked);
+                "Extracts refresh complete. Securities: {SecUp}/{SecTotal} upserted. Funds: {FundUp}/{FundTotal} upserted. Re-linked: {Relinked} fund holdings, {LedgerRelinked} ledger rows.",
+                secResult.Upserted, secResult.Considered, fundResult.Upserted, fundResult.Considered, relinked, ledgerRelinked);
         }
     }
 }

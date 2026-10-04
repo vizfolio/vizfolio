@@ -14,9 +14,16 @@ public sealed class AccountHoldingResolver
     private readonly Dictionary<string, Guid> _fundIdByTicker = new(StringComparer.Ordinal);
     private readonly Dictionary<(Guid SecurityId, string? Symbol), AccountHolding> _holdingBySecurity = new();
     private readonly Dictionary<(Guid FundId, string? Symbol), AccountHolding> _holdingByFund = new();
+    private readonly Dictionary<string, AccountHolding> _unclassifiedBySymbol = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AccountHolding> _unclassifiedByCusip = new(StringComparer.Ordinal);
+
+    private readonly List<AccountHolding> _created = [];
 
     private Guid _accountId;
     private bool _primed;
+
+    /// <summary>Holdings this resolver created (not yet saved), e.g. so an import can record that it created them.</summary>
+    public IReadOnlyList<AccountHolding> Created => _created;
 
     public AccountHoldingResolver(IAppDbContext db, ILogger logger)
     {
@@ -43,6 +50,8 @@ public sealed class AccountHoldingResolver
                 _holdingBySecurity.TryAdd((holding.SecurityId.Value, holding.Symbol), holding);
             if (holding.FundId.HasValue)
                 _holdingByFund.TryAdd((holding.FundId.Value, holding.Symbol), holding);
+            if (holding.Kind == AccountHoldingKind.Other)
+                RegisterUnclassified(holding);
         }
 
         if (tickerSet.Count == 0) return;
@@ -80,21 +89,49 @@ public sealed class AccountHoldingResolver
         }
     }
 
+    /// <summary>
+    /// The holding for a ticker that reference data (a Security or a fund share class) recognises, or null when
+    /// it doesn't. An unclassified holding already carrying the ticker is promoted rather than duplicated.
+    /// </summary>
     public AccountHolding? ResolveByTicker(string ticker, string? cusip, string? currencyCode)
     {
         EnsurePrimed();
 
         if (_securityIdByTicker.TryGetValue(ticker, out var securityId))
-            return GetOrCreateForSecurity(securityId, ticker, cusip, currencyCode);
+            return PromoteOrGetForSecurity(securityId, ticker, cusip, currencyCode);
         if (_fundIdByTicker.TryGetValue(ticker, out var fundId))
-            return GetOrCreateForFund(fundId, ticker, cusip, currencyCode);
+            return PromoteOrGetForFund(fundId, ticker, cusip, currencyCode);
         return null;
+    }
+
+    /// <summary>
+    /// The holding for a row's security, creating one when needed so that no share-bearing row is left out of
+    /// valuation: a ticker reference data recognises resolves as usual; anything else gets an unclassified
+    /// (<see cref="AccountHoldingKind.Other"/>) holding keyed by its ticker — or by CUSIP when there is no
+    /// ticker — which a later relink promotes once reference data catches up. Null only when the row identifies
+    /// no security at all.
+    /// </summary>
+    public AccountHolding? ResolveOrCreate(string? ticker, string? cusip, string? currencyCode)
+    {
+        EnsurePrimed();
+
+        var symbol = Normalize(ticker);
+        var normalizedCusip = Normalize(cusip);
+
+        if (symbol is not null)
+            return ResolveByTicker(symbol, normalizedCusip, currencyCode)
+                ?? GetOrCreateUnclassified(symbol, normalizedCusip, currencyCode);
+
+        if (normalizedCusip is null) return null;
+        return _unclassifiedByCusip.TryGetValue(normalizedCusip, out var byCusip)
+            ? byCusip
+            : GetOrCreateUnclassified(symbol: null, normalizedCusip, currencyCode);
     }
 
     public AccountHolding GetOrCreateForSecurity(Guid securityId, string? symbol, string? cusip, string? currencyCode)
     {
         EnsurePrimed();
-        var key = (securityId, NormalizeSymbol(symbol));
+        var key = (securityId, Normalize(symbol));
         if (_holdingBySecurity.TryGetValue(key, out var existing)) return existing;
 
         var holding = new AccountHolding(_accountId, AccountHoldingKind.Security);
@@ -102,6 +139,7 @@ public sealed class AccountHoldingResolver
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
+        _created.Add(holding);
         _holdingBySecurity[key] = holding;
         return holding;
     }
@@ -109,7 +147,7 @@ public sealed class AccountHoldingResolver
     public AccountHolding GetOrCreateForFund(Guid fundId, string? symbol, string? cusip, string? currencyCode)
     {
         EnsurePrimed();
-        var key = (fundId, NormalizeSymbol(symbol));
+        var key = (fundId, Normalize(symbol));
         if (_holdingByFund.TryGetValue(key, out var existing)) return existing;
 
         var holding = new AccountHolding(_accountId, AccountHoldingKind.Fund);
@@ -117,12 +155,67 @@ public sealed class AccountHoldingResolver
         holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
         holding.SetCurrency(currencyCode);
         _db.AccountHoldings.Add(holding);
+        _created.Add(holding);
         _holdingByFund[key] = holding;
         return holding;
     }
 
-    private static string? NormalizeSymbol(string? symbol) =>
-        string.IsNullOrWhiteSpace(symbol) ? null : symbol.Trim().ToUpperInvariant();
+    // A classified holding for the security wins; otherwise an unclassified one with the same ticker is promoted
+    // in place (keeping its rows and snapshots); otherwise a new holding is created.
+    private AccountHolding PromoteOrGetForSecurity(Guid securityId, string ticker, string? cusip, string? currencyCode)
+    {
+        var key = (securityId, Normalize(ticker));
+        if (_holdingBySecurity.ContainsKey(key) || !_unclassifiedBySymbol.Remove(key.Item2!, out var unclassified))
+            return GetOrCreateForSecurity(securityId, ticker, cusip, currencyCode);
+
+        unclassified.PromoteToSecurity(securityId);
+        ForgetCusip(unclassified);
+        _holdingBySecurity[key] = unclassified;
+        return unclassified;
+    }
+
+    private AccountHolding PromoteOrGetForFund(Guid fundId, string ticker, string? cusip, string? currencyCode)
+    {
+        var key = (fundId, Normalize(ticker));
+        if (_holdingByFund.ContainsKey(key) || !_unclassifiedBySymbol.Remove(key.Item2!, out var unclassified))
+            return GetOrCreateForFund(fundId, ticker, cusip, currencyCode);
+
+        unclassified.PromoteToFund(fundId);
+        ForgetCusip(unclassified);
+        _holdingByFund[key] = unclassified;
+        return unclassified;
+    }
+
+    private AccountHolding GetOrCreateUnclassified(string? symbol, string? cusip, string? currencyCode)
+    {
+        if (symbol is not null && _unclassifiedBySymbol.TryGetValue(symbol, out var existing)) return existing;
+
+        var holding = new AccountHolding(_accountId, AccountHoldingKind.Other);
+        holding.SetIdentifiers(symbol, name: null, isin: null, cusip);
+        holding.SetCurrency(currencyCode);
+        _db.AccountHoldings.Add(holding);
+        _created.Add(holding);
+        RegisterUnclassified(holding);
+        _logger.LogInformation(
+            "Created unclassified holding {Symbol} ({Cusip}) in account {AccountId}: no reference data matched it.",
+            symbol, cusip, _accountId);
+        return holding;
+    }
+
+    private void RegisterUnclassified(AccountHolding holding)
+    {
+        if (holding.Symbol is not null) _unclassifiedBySymbol.TryAdd(holding.Symbol, holding);
+        else if (holding.Cusip is not null) _unclassifiedByCusip.TryAdd(holding.Cusip, holding);
+    }
+
+    private void ForgetCusip(AccountHolding holding)
+    {
+        if (holding.Cusip is not null && _unclassifiedByCusip.TryGetValue(holding.Cusip, out var h) && h == holding)
+            _unclassifiedByCusip.Remove(holding.Cusip);
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToUpperInvariant();
 
     private void EnsurePrimed()
     {

@@ -1,6 +1,6 @@
-using System.Globalization;
 using ClosedXML.Excel;
 using Vizfolio.Application.PortfolioImports.Abstractions;
+using Vizfolio.Application.PortfolioImports.Brokers;
 using Vizfolio.Application.PortfolioImports.Models;
 using Vizfolio.Domain.Portfolios;
 
@@ -68,10 +68,14 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
             var headerRow = FindHeaderRow(worksheet);
             if (headerRow is null) continue;
 
-            var transactions = ReadTransactions(worksheet, headerRow);
+            var warnings = new ImportWarningCollector();
+            var transactions = ReadTransactions(worksheet, headerRow, warnings);
+            // The report names no account, only the broker: the import finds the account from the transactions, and a
+            // new one created for it starts out at Vanguard.
             var statement = new ParsedAccountStatement(
-                InstitutionCode: null, AccountNumber: null, Transactions: transactions, Positions: [], AsOf: null);
-            return Task.FromResult(new ParsedPortfolioFile(SourceSystem, [statement]));
+                InstitutionCode: VanguardBrokerProfile.InstitutionCode, AccountNumber: null,
+                Transactions: transactions, Positions: [], AsOf: null);
+            return Task.FromResult(new ParsedPortfolioFile(SourceSystem, [statement]) { Warnings = warnings.ToList() });
         }
 
         throw new InvalidDataException("Vanguard report: could not locate the transaction header row.");
@@ -88,7 +92,7 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         return null;
     }
 
-    private static List<ParsedTransaction> ReadTransactions(IXLWorksheet worksheet, IXLRow headerRow)
+    private static List<ParsedTransaction> ReadTransactions(IXLWorksheet worksheet, IXLRow headerRow, ImportWarningCollector warnings)
     {
         var columns = MapColumns(headerRow);
         var settlementCol = Col(columns, "settlement date");
@@ -113,13 +117,21 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
 
             var rawType = CellText(worksheet, rowNumber, typeCol);
             var reportedAmount = CellDecimal(worksheet, rowNumber, amountCol) ?? 0m;
-            var (type, amount) = NormalizeType(rawType, reportedAmount);
+            var quantity = CellDecimal(worksheet, rowNumber, quantityCol);
+            var (type, amount, mapped) = NormalizeType(rawType, reportedAmount, quantity);
+            if (!mapped)
+                warnings.Add(ImportWarningCodes.UnmappedLabel,
+                    $"\"{rawType}\" isn't a Vanguard label Vizfolio knows; those rows were imported as Other (their cash is counted, any shares are applied).",
+                    $"row {rowNumber}");
 
             // Trade date is the economic date but is occasionally blank (e.g. distributions, transfers);
-            // fall back to the always-present settlement date.
+            // fall back to the always-present settlement date. A row with neither is skipped, not the file.
             var settlementDate = CellDate(worksheet, rowNumber, settlementCol);
-            var tradeDate = CellDate(worksheet, rowNumber, tradeCol) ?? settlementDate
-                ?? throw new InvalidDataException($"Row {rowNumber}: no trade or settlement date.");
+            if ((CellDate(worksheet, rowNumber, tradeCol) ?? settlementDate) is not { } tradeDate)
+            {
+                warnings.Add(ImportWarningCodes.RowFailed, "A row with no readable trade or settlement date was skipped.", $"row {rowNumber}");
+                continue;
+            }
 
             var fees = CellDecimal(worksheet, rowNumber, feesCol); // "Free"/blank -> null
 
@@ -130,44 +142,75 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
                 SettlementDate: settlementDate,
                 Ticker: NullIfBlank(CellText(worksheet, rowNumber, symbolCol)),
                 Cusip: null,
-                Quantity: CellDecimal(worksheet, rowNumber, quantityCol),
+                Quantity: quantity,
                 Price: CellDecimal(worksheet, rowNumber, priceCol),
                 Amount: amount,
                 Fees: fees,
                 CurrencyCode: null,
                 Memo: NullIfBlank(CellText(worksheet, rowNumber, nameCol)),
-                SourceType: NullIfBlank(rawType)));
+                SourceType: NullIfBlank(rawType),
+                // "Sweep in/out" moves money between cash and the settlement fund — the fund is the account's cash.
+                IsSettlementFund: IsSweep(rawType)));
         }
 
         return transactions;
     }
 
+    private static bool IsSweep(string rawType)
+        => rawType.TrimStart().StartsWith("sweep", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
-    /// Maps Vanguard's raw type label to a <see cref="TransactionType"/> and fixes the amount sign.
+    /// Maps Vanguard's raw type label to a <see cref="TransactionType"/> and fixes the amount sign. <c>Mapped</c> is
+    /// false for a label this parser doesn't know (stored as Other, with an import warning).
     /// The reported amount reflects settlement-fund mechanics, so for external cash flows we set the sign
     /// from the label: money in is positive, an outgoing "TRANSFER TO" is negative. Everything else keeps
     /// the reported sign (needed for the signed-amount dedup fingerprint). Sweeps map to Other so internal
     /// money-market cash never counts toward contributions.
     /// </summary>
-    private static (TransactionType Type, decimal Amount) NormalizeType(string rawType, decimal reportedAmount)
+    private static (TransactionType Type, decimal Amount, bool Mapped) NormalizeType(
+        string rawType, decimal reportedAmount, decimal? quantity)
+    {
+        var (type, amount) = NormalizeKnownType(rawType, reportedAmount, quantity);
+        var mapped = type != TransactionType.Other || IsSweep(rawType) || rawType.Trim().Equals("conversion", StringComparison.OrdinalIgnoreCase);
+        return (type, amount, mapped);
+    }
+
+    private static (TransactionType Type, decimal Amount) NormalizeKnownType(
+        string rawType, decimal reportedAmount, decimal? quantity)
     {
         var t = rawType.Trim().ToLowerInvariant();
+
+        // Older reports label a share-class conversion (e.g. Investor → Admiral) plain "Conversion", with no
+        // direction; the quantity's sign gives it. Like "Share Conversion", it's an exchange inside the
+        // account: it moves shares, not contributions.
+        if (t is "conversion")
+        {
+            if (quantity < 0m) return (TransactionType.Sell, reportedAmount);
+            if (quantity > 0m) return (TransactionType.Buy, reportedAmount);
+            return (TransactionType.Other, reportedAmount);
+        }
 
         // External cash in. "Contribution" is an IRA contribution — economically a deposit; the raw label
         // is preserved in SourceType so the IRA-specific meaning isn't lost.
         if (t is "funds received" or "contribution")
             return (TransactionType.Deposit, Math.Abs(reportedAmount));
-        if (t is "transfer (incoming)")
+        // Transfers between accounts, and IRA (e.g. Traditional → Roth) conversions, move money/shares
+        // across the account boundary, so they are signed Transfers that count toward contributions.
+        if (t is "transfer (incoming)" or "conversion (incoming)" || t.StartsWith("transfer from", StringComparison.Ordinal))
             return (TransactionType.Transfer, Math.Abs(reportedAmount));
-        if (t.StartsWith("transfer to", StringComparison.Ordinal))
+        if (t is "conversion (outgoing)" || t.StartsWith("transfer to", StringComparison.Ordinal))
             return (TransactionType.Transfer, -Math.Abs(reportedAmount));
 
         var type = t switch
         {
-            "buy" or "buy (exchange)" => TransactionType.Buy,
-            "sell" or "sell (exchange)" => TransactionType.Sell,
+            // A share-class conversion (e.g. Investor → Admiral) swaps one fund for another inside the
+            // account — an exchange, like "Buy/Sell (exchange)": it moves shares, not contributions.
+            "buy" or "buy (exchange)" or "share conversion (incoming)" => TransactionType.Buy,
+            "sell" or "sell (exchange)" or "share conversion (outgoing)" => TransactionType.Sell,
             "dividend" => TransactionType.Dividend,
             "reinvestment" => TransactionType.Reinvest,
+            // Distribution reinvestments are labelled by kind, e.g. "Reinvestment (LT gain)" / "(ST gain)".
+            _ when t.StartsWith("reinvestment", StringComparison.Ordinal) => TransactionType.Reinvest,
             "interest" => TransactionType.Interest,
             "fee" => TransactionType.Fee,
             _ when t.StartsWith("capital gain", StringComparison.Ordinal) => TransactionType.CapitalGain,
@@ -205,8 +248,7 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         if (cell.IsEmpty()) return null;
         if (cell.DataType == XLDataType.DateTime) return DateOnly.FromDateTime(cell.GetDateTime());
 
-        var s = cell.GetString().Trim();
-        return DateOnly.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
+        return ReportValues.ParseDate(cell.GetString());
     }
 
     private static decimal? CellDecimal(IXLWorksheet ws, int row, int? col)
@@ -216,14 +258,9 @@ public sealed class VanguardTransactionHistoryReportParser : IPortfolioFileParse
         if (cell.IsEmpty()) return null;
         if (cell.DataType == XLDataType.Number) return cell.GetValue<decimal>();
 
-        var s = cell.GetString().Trim();
-        if (string.IsNullOrEmpty(s) || s.Equals("Free", StringComparison.OrdinalIgnoreCase)) return null;
-
-        // Strip currency formatting; accounting-style "(123)" is negative.
-        s = s.Replace("$", string.Empty).Replace(",", string.Empty)
-             .Replace("(", "-").Replace(")", string.Empty).Trim();
-        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
+        // Currency formatting, accounting-style "(123)" negatives, and "Free" commissions.
+        return ReportValues.ParseMoney(cell.GetString());
     }
 
-    private static string? NullIfBlank(string? raw) => string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    private static string? NullIfBlank(string? raw) => ReportValues.NullIfBlank(raw);
 }

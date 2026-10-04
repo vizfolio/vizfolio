@@ -4,13 +4,11 @@ import { provideRouter } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
 
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
-import {
-  ImportParser,
-  PortfolioImportResult,
-  PortfolioImportStatus,
-} from '../../core/api/models/imports.models';
+import { DataHealthReport } from '../../core/api/models/health.models';
+import { ImportParser } from '../../core/api/models/imports.models';
 import {
   AccountSummary,
+  PortfolioPerformance,
   PortfolioSummary,
 } from '../../core/api/models/performance.models';
 import { Accounts } from './accounts';
@@ -32,41 +30,39 @@ function account(id: string, name: string): AccountSummary {
   };
 }
 
-const IMPORT_RESULT: PortfolioImportResult = {
-  status: PortfolioImportStatus.Success,
-  sourceSystem: 'QFX',
-  accounts: [
-    {
-      accountId: 'a2',
-      created: true,
-      institutionCode: 'vanguard.com',
-      accountNumber: 'E2E-AAA',
-      considered: 5,
-      inserted: 5,
-      skipped: 0,
-      failed: 0,
-      failures: [],
-    },
-  ],
-  duration: 'PT0.2S',
-};
-
 const PARSERS: ImportParser[] = [
   { sourceSystem: 'QFX', displayName: 'OFX / QFX statement', fileExtensions: ['.qfx', '.ofx'] },
   { sourceSystem: 'VANGUARD', displayName: 'Vanguard transaction report', fileExtensions: ['.xlsx', '.xls'] },
 ];
 
+/** Just the parts of a performance response the accounts list reads. */
+function performance(value: number, rate: number | null): PortfolioPerformance {
+  return {
+    endingBalance: { value },
+    returns: { moneyWeighted: { rate } },
+    currencyCode: 'USD',
+  } as unknown as PortfolioPerformance;
+}
+
+const HEALTH: DataHealthReport = {
+  status: 'NeedsAttention',
+  currencyCode: 'USD',
+  accounts: [{ accountId: 'a1', name: 'Brokerage', status: 'NeedsAttention', blocking: 1, info: 0 }],
+  findings: [],
+};
+
 class MockApi {
   portfolios: Observable<PortfolioSummary[]> = of([portfolio('p1')]);
   accountsList: AccountSummary[] = [account('a1', 'Brokerage')];
   createResult: Observable<AccountSummary> = of(account('aNew', 'New Account'));
-  importResult: Observable<PortfolioImportResult> = of(IMPORT_RESULT);
   createBody: unknown = null;
-  importedFile: File | null = null;
-  sourceSystem: string | undefined;
+  performanceFrom: string | undefined;
 
   getPortfolios() {
     return this.portfolios;
+  }
+  getImports() {
+    return of({ imports: [], transactionsImportedBeforeHistory: 0 });
   }
   getImportParsers() {
     return of(PARSERS);
@@ -78,10 +74,12 @@ class MockApi {
     this.createBody = body;
     return this.createResult;
   }
-  importPortfolioFile(_pid: string, file: File, sourceSystem?: string) {
-    this.importedFile = file;
-    this.sourceSystem = sourceSystem;
-    return this.importResult;
+  getAccountPerformance(_pid: string, _aid: string, from?: string) {
+    this.performanceFrom = from;
+    return of(performance(12345.6, 0.081));
+  }
+  getPortfolioHealth() {
+    return of(HEALTH);
   }
 }
 
@@ -150,42 +148,6 @@ describe('Accounts', () => {
     expect(cmp.submitting()).toBe(false);
   });
 
-  it('shows an import result and reloads accounts on success', () => {
-    const api = new MockApi();
-    const { cmp } = setup(api);
-
-    // The server would have created a2 during import; reflect that in the reload.
-    api.accountsList = [account('a1', 'Brokerage'), account('a2', 'Imported')];
-    const file = new File(['data'], 'multi.qfx');
-    cmp.onFileSelected(file);
-
-    expect(api.importedFile).toBe(file);
-    expect(api.sourceSystem).toBeUndefined(); // auto-detect by default
-    expect(cmp.importResult()?.accounts.length).toBe(1);
-    expect(cmp.accounts().length).toBe(2);
-  });
-
-  it('forwards the chosen format as the source-system override', () => {
-    const api = new MockApi();
-    const { cmp } = setup(api);
-
-    cmp.sourceSystem.set('VANGUARD');
-    cmp.onFileSelected(new File(['data'], 'report.xlsx'));
-
-    expect(api.sourceSystem).toBe('VANGUARD');
-  });
-
-  it('maps an unsupported-format import error to guidance', () => {
-    const api = new MockApi();
-    api.importResult = throwError(() => new HttpErrorResponse({ status: 415 }));
-    const { cmp } = setup(api);
-
-    cmp.onFileSelected(new File(['data'], 'notes.txt'));
-
-    expect(cmp.importError()).toContain('Unsupported file type');
-    expect(cmp.importResult()).toBeNull();
-  });
-
   it('prompts to pick a portfolio when none is active', () => {
     const api = new MockApi();
     api.portfolios = of([]);
@@ -195,5 +157,40 @@ describe('Accounts', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain(
       'No portfolio selected',
     );
+  });
+
+  it("shows each account's value, this year's return and a data health dot linking to its health tab", () => {
+    const api = new MockApi();
+    const { fixture } = setup(api);
+
+    const row = (fixture.nativeElement as HTMLElement).querySelector('tbody tr')!;
+    expect(row.textContent).toContain('$12,345.60');
+    expect(row.textContent).toContain('+8.1%');
+    expect(api.performanceFrom).toMatch(/^\d{4}-01-01$/);
+    const dot = row.querySelector('a.health-link') as HTMLAnchorElement;
+    expect(dot.getAttribute('href')).toBe('/accounts/a1?tab=health');
+    expect(dot.textContent).toContain('Data needs attention');
+  });
+
+  it('guides a first import when the portfolio has no accounts', () => {
+    const api = new MockApi();
+    api.accountsList = [];
+    const { fixture } = setup(api);
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('app-import-onboarding')).not.toBeNull();
+    expect(el.querySelector('app-import-drop-zone')).not.toBeNull();
+  });
+
+  it('refreshes the list and the history after an import', () => {
+    const api = new MockApi();
+    const { cmp } = setup(api);
+
+    api.accountsList = [account('a1', 'Brokerage'), account('a2', 'Imported')];
+    const before = cmp.historyKey();
+    cmp.onImportsChanged();
+
+    expect(cmp.accounts().length).toBe(2);
+    expect(cmp.historyKey()).toBe(before + 1);
   });
 });

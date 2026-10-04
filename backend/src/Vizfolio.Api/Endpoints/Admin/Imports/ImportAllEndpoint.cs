@@ -2,30 +2,37 @@ using FastEndpoints;
 using Microsoft.AspNetCore.Http;
 using Vizfolio.Application.Extracts.Abstractions;
 using Vizfolio.Application.Extracts.Models;
+using Vizfolio.Application.PortfolioImports.Abstractions;
 using Vizfolio.Infrastructure.Extracts.Hosted;
 
 namespace Vizfolio.Api.Endpoints.Admin.Imports;
 
 public sealed record ImportAllRequest(bool Force);
 
-public sealed record ImportAllResponse(ImportResult Securities, ImportResult Funds, int Relinked);
+public sealed record ImportAllResponse(ImportResult Securities, ImportResult Funds, ImportResult MoneyMarketFunds, int Relinked);
 
 public sealed class ImportAllEndpoint : Endpoint<ImportAllRequest, ImportAllResponse>
 {
     private readonly ISecuritiesImporter _securities;
     private readonly IFundsImporter _funds;
+    private readonly IMoneyMarketFundsImporter _moneyMarketFunds;
     private readonly IHoldingRelinker _relinker;
+    private readonly ILedgerRelinker _ledgerRelinker;
     private readonly ImportRunGate _gate;
 
     public ImportAllEndpoint(
         ISecuritiesImporter securities,
         IFundsImporter funds,
+        IMoneyMarketFundsImporter moneyMarketFunds,
         IHoldingRelinker relinker,
+        ILedgerRelinker ledgerRelinker,
         ImportRunGate gate)
     {
         _securities = securities;
         _funds = funds;
+        _moneyMarketFunds = moneyMarketFunds;
         _relinker = relinker;
+        _ledgerRelinker = ledgerRelinker;
         _gate = gate;
     }
 
@@ -58,7 +65,7 @@ public sealed class ImportAllEndpoint : Endpoint<ImportAllRequest, ImportAllResp
         if (!_gate.TryAcquire(out var handle))
         {
             var empty = ImportResult.Empty(TimeSpan.Zero);
-            await Send.ResponseAsync(new ImportAllResponse(empty, empty, 0), StatusCodes.Status409Conflict, ct);
+            await Send.ResponseAsync(new ImportAllResponse(empty, empty, empty, 0), StatusCodes.Status409Conflict, ct);
             return;
         }
 
@@ -67,8 +74,11 @@ public sealed class ImportAllEndpoint : Endpoint<ImportAllRequest, ImportAllResp
             var force = req?.Force ?? false;
             var secResult = await _securities.ImportAsync(new SecuritiesImportOptions(Force: force), ct);
             var fundResult = await _funds.ImportAsync(new FundsImportOptions(Force: force), ct);
+            var moneyMarketResult = await _moneyMarketFunds.ImportAsync(ct);
             var relinked = await _relinker.RelinkAsync(ct);
-            await Send.OkAsync(new ImportAllResponse(secResult, fundResult, relinked), ct);
+            // New reference data may recognise tickers that account holdings were created without.
+            await _ledgerRelinker.RelinkAsync(ct);
+            await Send.OkAsync(new ImportAllResponse(secResult, fundResult, moneyMarketResult, relinked), ct);
         }
     }
 }

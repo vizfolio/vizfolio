@@ -1,30 +1,28 @@
 using Microsoft.EntityFrameworkCore;
 using Vizfolio.Application.Abstractions;
-using Vizfolio.Domain.Portfolios;
+using Vizfolio.Application.Portfolios.Valuation;
+using Vizfolio.Application.Pricing.Abstractions;
 
 namespace Vizfolio.Application.Portfolios;
 
 public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 {
-    private const string DefaultCurrencyCode = "USD";
-
-    private static readonly TransactionType[] ContributionTypes =
-    {
-        TransactionType.Deposit,
-        TransactionType.Withdrawal,
-        TransactionType.Transfer,
-    };
-
     private readonly IAppDbContext _db;
+    private readonly AccountValuationLoader _valuationLoader;
     private readonly ITimeWeightedReturnCalculator _twrCalculator;
     private readonly IMoneyWeightedReturnCalculator _mwrCalculator;
+    private readonly IPriceRefreshStatus? _priceRefresh;
 
     public PortfolioPerformanceService(
         IAppDbContext db,
+        AccountValuationLoader valuationLoader,
         ITimeWeightedReturnCalculator twrCalculator,
-        IMoneyWeightedReturnCalculator mwrCalculator)
+        IMoneyWeightedReturnCalculator mwrCalculator,
+        IPriceRefreshStatus? priceRefresh = null)
     {
+        _priceRefresh = priceRefresh;
         _db = db;
+        _valuationLoader = valuationLoader;
         _twrCalculator = twrCalculator;
         _mwrCalculator = mwrCalculator;
     }
@@ -70,77 +68,56 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         DateOnly? toInput,
         CancellationToken cancellationToken)
     {
-        var resolvedTo = toInput ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var to = toInput ?? DateOnly.FromDateTime(DateTime.UtcNow);
 
-        if (accountIds.Count == 0)
+        var hasData = accountIds.Count > 0
+                      && (await _db.AccountHoldings.AsNoTracking().AnyAsync(h => accountIds.Contains(h.AccountId), cancellationToken)
+                          || await _db.AccountTransactions.AsNoTracking().AnyAsync(t => accountIds.Contains(t.AccountId), cancellationToken));
+        if (!hasData)
         {
-            var resolvedFromEmpty = fromInput ?? resolvedTo;
-            if (resolvedFromEmpty > resolvedTo) return null;
-            return Empty(resolvedFromEmpty, resolvedTo);
+            var resolvedFromEmpty = fromInput ?? to;
+            if (resolvedFromEmpty > to) return null;
+            return Empty(resolvedFromEmpty, to);
         }
 
-        var holdingIds = await _db.AccountHoldings
-            .AsNoTracking()
-            .Where(h => accountIds.Contains(h.AccountId))
-            .Select(h => h.AccountHoldingId)
-            .ToListAsync(cancellationToken);
-        if (holdingIds.Count == 0)
-        {
-            var resolvedFromNoHoldings = fromInput ?? resolvedTo;
-            if (resolvedFromNoHoldings > resolvedTo) return null;
-            return Empty(resolvedFromNoHoldings, resolvedTo);
-        }
-
-        var from = fromInput ?? await ResolveDefaultFromAsync(
-            holdingIds, accountIds, resolvedTo, cancellationToken);
-        var to = resolvedTo;
-
+        var from = fromInput ?? await ResolveDefaultFromAsync(accountIds, to, cancellationToken);
         if (from > to) return null;
 
-        var snapshots = await _db.AccountHoldingSnapshots
-            .AsNoTracking()
-            .Where(s => holdingIds.Contains(s.AccountHoldingId) && s.AsOf <= to)
-            .Select(s => new SnapshotProjection(s.AccountHoldingId, s.AsOf, s.MarketValue, s.CurrencyCode))
-            .ToListAsync(cancellationToken);
+        // One valuation engine per account values every holding and the account's cash at any date — see
+        // docs/price-history-valuation.md §11. Balances, flows and the series all come from it.
+        var valuation = await _valuationLoader.LoadAsync(accountIds, to, cancellationToken);
+        var engines = valuation.Engines.Values.ToList();
+        // The time-weighted return and every chart point value the same dates repeatedly (each flow date's eve, for
+        // every point after it), so each date is valued once.
+        var balances = new Dictionary<DateOnly, PerformanceBalanceResult>();
+        PerformanceBalanceResult ValueAt(DateOnly date)
+        {
+            if (!balances.TryGetValue(date, out var balance)) balances[date] = balance = BalanceAt(valuation, date);
+            return balance;
+        }
 
-        var holdingsActiveInRange = await _db.AccountTransactions
-            .AsNoTracking()
-            .Where(t => t.AccountHoldingId != null
-                        && holdingIds.Contains(t.AccountHoldingId!.Value)
-                        && t.TradeDate >= from
-                        && t.TradeDate <= to)
-            .Select(t => t.AccountHoldingId!.Value)
+        var ending = ValueAt(to);
+        // The period opens at the *start* of `from` — the close of the previous day — because cash flows
+        // dated `from` are counted inside the period. Valuing at the close of `from` would count a
+        // first-day purchase twice: once in the starting balance and again as its contribution.
+        var starting = ValueAt(from.AddDays(-1));
+
+        var flows = engines.SelectMany(e => e.FlowsBetween(from, to)).OrderBy(f => f.Date).ToList();
+        var cashFlows = flows.Select(f => new CashFlow(f.Date, f.Amount)).ToList();
+        var contributions = SummarizeContributions(cashFlows);
+
+        var interiorDates = valuation.Snapshots
+            .Where(s => s.AsOf > from && s.AsOf < to)
+            .Select(s => s.AsOf)
             .Distinct()
-            .ToListAsync(cancellationToken);
-
-        var contributionRows = await _db.AccountTransactions
-            .AsNoTracking()
-            .Where(t => accountIds.Contains(t.AccountId)
-                        && ContributionTypes.Contains(t.Type)
-                        && t.TradeDate >= from
-                        && t.TradeDate <= to)
-            .Select(t => new { t.TradeDate, t.Amount, t.Type })
-            .ToListAsync(cancellationToken);
-
-        var snapshotsByHolding = snapshots
-            .GroupBy(s => s.AccountHoldingId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.AsOf).ToList());
-
-        var relevantHoldings = new HashSet<Guid>(snapshotsByHolding.Keys);
-        foreach (var id in holdingsActiveInRange) relevantHoldings.Add(id);
-
-        var currency = ResolveReportingCurrency(snapshots);
-
-        var ending = ComputeBalance(relevantHoldings, snapshotsByHolding, to);
-        var starting = ComputeBalance(relevantHoldings, snapshotsByHolding, from);
-
-        var contributions = SummarizeContributions(contributionRows.Select(r => new CashFlow(r.TradeDate, r.Amount)).ToList());
-        var cashFlows = contributionRows
-            .Select(r => new CashFlow(r.TradeDate, r.Amount))
-            .OrderBy(f => f.Date)
+            .OrderBy(d => d)
             .ToList();
-
-        var intermediateBalances = BuildIntermediateBalances(relevantHoldings, snapshotsByHolding, from, to);
+        var intermediateBalances = interiorDates
+            .Select(ValueAt)
+            .Zip(interiorDates)
+            .Where(x => x.First.IsComplete && x.First.HoldingsCovered > 0)
+            .Select(x => new BalancePoint(x.Second, x.First.Value))
+            .ToList();
 
         var context = new PerformanceComputationContext(
             From: from,
@@ -150,17 +127,46 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             EndingBalance: ending.Value,
             EndingIsComplete: ending.IsComplete,
             CashFlows: cashFlows,
-            IntermediateBalances: intermediateBalances);
+            IntermediateBalances: intermediateBalances,
+            ValueAt: ValueAt);
 
-        var returns = new PerformanceReturnsResult(
-            TimeWeighted: _twrCalculator.Compute(context),
-            MoneyWeighted: _mwrCalculator.Compute(context));
+        // An in-kind transfer that couldn't be valued (no price on the day) leaves the flows unknown, so no return
+        // can be computed honestly.
+        var unvaluedTransfer = flows.Any(f => !f.IsValued);
+        var timeWeighted = _twrCalculator.Compute(context);
+        var moneyWeighted = _mwrCalculator.Compute(context);
+        if (unvaluedTransfer)
+        {
+            timeWeighted = timeWeighted with { Rate = null, Reason = UnvaluedTransfer };
+            moneyWeighted = moneyWeighted with { Rate = null, Reason = UnvaluedTransfer };
+        }
 
-        return new PortfolioPerformanceResult(from, to, starting, ending, contributions, returns, currency);
+        var returns = new PerformanceReturnsResult(timeWeighted, moneyWeighted);
+
+        // Value / returns-over-time charts, valued by the same engines so they always agree with the
+        // balances. Each point's cumulative return is the time-weighted strategy run over [from, point] — for the
+        // daily-valued TWR, the running chain of sub-period returns — so the last point equals Returns.TimeWeighted.
+        var series = PerformanceSeriesBuilder.Build(
+            from,
+            to,
+            ValueAt,
+            cashFlows,
+            (date, balance) => unvaluedTransfer ? null : _twrCalculator.Compute(context with
+            {
+                To = date,
+                EndingBalance = balance.Value,
+                EndingIsComplete = balance.IsComplete,
+                CashFlows = cashFlows.Where(f => f.Date <= date).ToList(),
+                IntermediateBalances = intermediateBalances.Where(b => b.Date < date).ToList(),
+            }).Rate);
+
+        return new PortfolioPerformanceResult(
+            from, to, starting, ending, contributions, returns, valuation.ReportingCurrency, series);
     }
 
+    private const string UnvaluedTransfer = "UnvaluedTransfer";
+
     private async Task<DateOnly> ResolveDefaultFromAsync(
-        IReadOnlyList<Guid> holdingIds,
         IReadOnlyList<Guid> accountIds,
         DateOnly fallback,
         CancellationToken cancellationToken)
@@ -175,72 +181,46 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
 
         var earliestSnapshot = await _db.AccountHoldingSnapshots
             .AsNoTracking()
-            .Where(s => holdingIds.Contains(s.AccountHoldingId))
+            .Where(s => _db.AccountHoldings.Any(h => h.AccountHoldingId == s.AccountHoldingId && accountIds.Contains(h.AccountId)))
             .OrderBy(s => s.AsOf)
             .Select(s => (DateOnly?)s.AsOf)
             .FirstOrDefaultAsync(cancellationToken);
         return earliestSnapshot ?? fallback;
     }
 
-    private static PerformanceBalanceResult ComputeBalance(
-        HashSet<Guid> relevantHoldings,
-        Dictionary<Guid, List<SnapshotProjection>> snapshotsByHolding,
-        DateOnly asOf)
+    /// <summary>The value of every loaded account at the close of <paramref name="date"/>.</summary>
+    private PerformanceBalanceResult BalanceAt(LoadedValuation valuation, DateOnly date)
     {
         decimal sum = 0m;
         DateOnly? maxAsOf = null;
         int covered = 0;
-        int missing = 0;
+        var missing = new List<MissingValuation>();
+        var missingCount = 0;
 
-        foreach (var holdingId in relevantHoldings)
+        foreach (var account in valuation.Engines)
         {
-            SnapshotProjection? latest = null;
-            if (snapshotsByHolding.TryGetValue(holdingId, out var list))
+            var value = account.Value.ValueAt(date);
+            sum += value.Value;
+            foreach (var component in value.Components)
             {
-                foreach (var s in list)
+                switch (component.Status)
                 {
-                    if (s.AsOf <= asOf) { latest = s; break; }
+                    case HoldingValuationStatus.Covered:
+                        covered++;
+                        if (component.SnapshotAsOf is { } d && (maxAsOf is null || d > maxAsOf.Value)) maxAsOf = d;
+                        break;
+                    case HoldingValuationStatus.Missing:
+                        missingCount++;
+                        if (missing.Count < PerformanceBalanceResult.MaxMissingDetails)
+                            missing.Add(new MissingValuation(
+                                account.Key, component.HoldingId, component.Symbol,
+                                MissingCauseNames.Of(component.Cause, _priceRefresh?.IsPending(account.Key) == true)));
+                        break;
                 }
             }
-
-            if (latest is not null && latest.MarketValue.HasValue)
-            {
-                sum += latest.MarketValue.Value;
-                covered++;
-                if (maxAsOf is null || latest.AsOf > maxAsOf.Value)
-                    maxAsOf = latest.AsOf;
-            }
-            else
-            {
-                missing++;
-            }
         }
 
-        return new PerformanceBalanceResult(sum, missing == 0, maxAsOf, covered, missing);
-    }
-
-    private static List<BalancePoint> BuildIntermediateBalances(
-        HashSet<Guid> relevantHoldings,
-        Dictionary<Guid, List<SnapshotProjection>> snapshotsByHolding,
-        DateOnly from,
-        DateOnly to)
-    {
-        var interiorDates = snapshotsByHolding.Values
-            .SelectMany(list => list)
-            .Where(s => s.AsOf > from && s.AsOf < to)
-            .Select(s => s.AsOf)
-            .Distinct()
-            .OrderBy(d => d)
-            .ToList();
-
-        var points = new List<BalancePoint>();
-        foreach (var date in interiorDates)
-        {
-            var balance = ComputeBalance(relevantHoldings, snapshotsByHolding, date);
-            if (balance.IsComplete && balance.HoldingsCovered > 0)
-                points.Add(new BalancePoint(date, balance.Value));
-        }
-        return points;
+        return new PerformanceBalanceResult(sum, missingCount == 0, maxAsOf, covered, missingCount) { Missing = missing };
     }
 
     private static PerformanceContributionsResult SummarizeContributions(IReadOnlyList<CashFlow> flows)
@@ -255,34 +235,14 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         return new PerformanceContributionsResult(net, deposits, withdrawals, flows.Count);
     }
 
-    private static string ResolveReportingCurrency(IReadOnlyCollection<SnapshotProjection> snapshots)
-    {
-        if (snapshots.Count == 0) return DefaultCurrencyCode;
-
-        var mode = snapshots
-            .Where(s => !string.IsNullOrWhiteSpace(s.CurrencyCode))
-            .GroupBy(s => s.CurrencyCode!)
-            .OrderByDescending(g => g.Count())
-            .ThenBy(g => g.Key, StringComparer.Ordinal)
-            .Select(g => g.Key)
-            .FirstOrDefault();
-
-        return mode ?? DefaultCurrencyCode;
-    }
-
     private static PortfolioPerformanceResult Empty(DateOnly from, DateOnly to)
     {
         var zero = new PerformanceBalanceResult(0m, true, null, 0, 0);
         var noContrib = new PerformanceContributionsResult(0m, 0m, 0m, 0);
         var noReturns = new PerformanceReturnsResult(
-            TimeWeighted: new ReturnResult(null, "ModifiedDietz", "Period", "NoData"),
+            TimeWeighted: new ReturnResult(null, DailyValuedTimeWeightedReturnCalculator.MethodName, "Period", "NoData"),
             MoneyWeighted: new ReturnResult(null, "XIRR", "Annualized", "NoData"));
-        return new PortfolioPerformanceResult(from, to, zero, zero, noContrib, noReturns, DefaultCurrencyCode);
+        return new PortfolioPerformanceResult(
+            from, to, zero, zero, noContrib, noReturns, AccountValuationLoader.DefaultCurrencyCode, PerformanceSeriesResult.Empty);
     }
-
-    private sealed record SnapshotProjection(
-        Guid AccountHoldingId,
-        DateOnly AsOf,
-        decimal? MarketValue,
-        string? CurrencyCode);
 }

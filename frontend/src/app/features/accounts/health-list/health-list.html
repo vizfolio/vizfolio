@@ -1,0 +1,97 @@
+<div class="health">
+  @if (report().findings.length === 0) {
+    <p class="healthy" role="status">Everything checks out: every holding is valued and your history matches your statements.</p>
+  }
+
+  @if (blocking().length > 0) {
+    <section aria-labelledby="health-blocking">
+      <h3 class="group-title" id="health-blocking">Needs attention</h3>
+      <p class="group-hint">These leave some values or returns blank or approximate.</p>
+      <ul class="findings">
+        @for (finding of blocking(); track $index) {
+          <ng-container *ngTemplateOutlet="row; context: { $implicit: finding }" />
+        }
+      </ul>
+    </section>
+  }
+
+  @if (info().length > 0) {
+    <section aria-labelledby="health-info">
+      <h3 class="group-title" id="health-info">Worth knowing</h3>
+      <ul class="findings">
+        @for (finding of info(); track $index) {
+          <ng-container *ngTemplateOutlet="row; context: { $implicit: finding }" />
+        }
+      </ul>
+    </section>
+  }
+</div>
+
+<ng-template #row let-finding>
+  <li class="finding finding--{{ finding.severity }}">
+    <p class="message">
+      @if (accountLabel(finding); as account) {
+        <span class="account">{{ account }}:</span>
+      }
+      {{ finding.message }}
+    </p>
+    @if (finding.details.samples.length > 0) {
+      <p class="samples">For example: {{ finding.details.samples.join(', ') }}</p>
+    }
+    @switch (finding.action.kind) {
+      @case ('None') {}
+      @case ('AddPriceProviderKey') {
+        <a class="btn btn--ghost btn--sm" routerLink="/settings">{{ finding.action.label }}</a>
+      }
+      @case ('FetchPrices') {
+        <button type="button" class="btn btn--ghost btn--sm" [disabled]="fetchQueued()" (click)="act(finding)">
+          {{ fetchQueued() ? 'Fetching prices…' : finding.action.label }}
+        </button>
+      }
+      @case ('ReviewImpliedContributions') {
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm"
+          [attr.aria-expanded]="impliedFor(finding) !== null"
+          (click)="act(finding)"
+        >
+          {{ impliedFor(finding) ? 'Hide details' : finding.action.label }}
+        </button>
+        @if (impliedFor(finding); as review) {
+          @switch (review.status) {
+            @case ('loading') {
+              <p class="samples" role="status">Loading…</p>
+            }
+            @case ('error') {
+              <p class="samples" role="alert">Couldn't load the details.</p>
+            }
+            @default {
+              <table class="implied">
+                <caption class="visually-hidden">Implied contributions by year</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Year</th>
+                    <th scope="col" class="num">Purchases</th>
+                    <th scope="col" class="num">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (year of review.preview?.byYear ?? []; track year.year) {
+                    <tr>
+                      <td>{{ year.year }}</td>
+                      <td class="num">{{ year.count }}</td>
+                      <td class="num">{{ formatMoney(year.amount, report().currencyCode) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+          }
+        }
+      }
+      @default {
+        <button type="button" class="btn btn--ghost btn--sm" (click)="act(finding)">{{ finding.action.label }}</button>
+      }
+    }
+  </li>
+</ng-template>

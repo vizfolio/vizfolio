@@ -65,6 +65,22 @@ public sealed class PerFileFundsExtractSource : IFundsExtractSource, IDisposable
         return await JsonSerializer.DeserializeAsync<FundSnapshotExtract>(gzip, ExtractsJson.Options, cancellationToken);
     }
 
+    public async Task<MoneyMarketRegistryExtract?> GetMoneyMarketRegistryAsync(CancellationToken cancellationToken = default)
+    {
+        using var lease = await AcquireAsync(cancellationToken);
+        using var response = await _http.GetAsync(
+            _options.Sources.Funds.MoneyMarketUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("No money market registry at {Url} yet; skipping it.", _options.Sources.Funds.MoneyMarketUrl);
+            return null;
+        }
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await JsonSerializer.DeserializeAsync<MoneyMarketRegistryExtract>(stream, ExtractsJson.Options, cancellationToken);
+    }
+
     private async Task<RateLimitLease> AcquireAsync(CancellationToken cancellationToken)
     {
         var lease = await _limiter.AcquireAsync(1, cancellationToken);

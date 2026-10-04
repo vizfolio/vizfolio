@@ -118,3 +118,69 @@ h4 {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/*
+ * Shared buttons. Older components still carry their own copies (component styles win over these); new components
+ * rely on these instead of re-declaring them.
+ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn--sm {
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.85rem;
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  border-color: transparent;
+  color: var(--color-primary-contrast);
+}
+
+.btn--primary:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.btn--ghost:not(:disabled):hover {
+  background: var(--color-surface-2);
+}
+
+/* Outlined rather than filled: --color-negative is light in the dark theme, so text on it wouldn't contrast. */
+.btn--danger {
+  background: var(--color-surface);
+  border-color: var(--color-negative);
+  color: var(--color-negative);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

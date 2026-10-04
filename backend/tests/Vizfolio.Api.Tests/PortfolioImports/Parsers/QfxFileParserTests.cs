@@ -293,7 +293,7 @@ NEWFILEUID:NONE
           <BUYSTOCK>
             <INVBUY>
               <INVTRAN><FITID>A-BUY-1</FITID><DTTRADE>20260115</DTTRADE></INVTRAN>
-              <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+              <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
               <UNITS>1</UNITS><UNITPRICE>100.00</UNITPRICE><TOTAL>-100.00</TOTAL>
             </INVBUY>
             <BUYTYPE>BUY</BUYTYPE>
@@ -339,7 +339,7 @@ NEWFILEUID:NONE
         first.InstitutionCode.ShouldBe("vanguard.com");
         first.Transactions.Count.ShouldBe(1);
         first.Transactions[0].ExternalId.ShouldBe("A-BUY-1");
-        first.Transactions[0].Ticker.ShouldBe("VTSAX");
+        first.Transactions[0].Ticker.ShouldBe("ZXTAX");
 
         var second = parsed.Statements.Single(s => s.AccountNumber == "22222");
         second.InstitutionCode.ShouldBe("vanguard.com");
@@ -436,7 +436,7 @@ NEWFILEUID:NONE
         </POSSTOCK>
         <POSMF>
           <INVPOS>
-            <SECID><UNIQUEID>VTSAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+            <SECID><UNIQUEID>ZXTAX</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
             <HELDINACCT>CASH</HELDINACCT>
             <POSTYPE>LONG</POSTYPE>
             <UNITS>50.123</UNITS>
@@ -468,10 +468,10 @@ NEWFILEUID:NONE
         voo.CostBasis.ShouldBe(5000.00m);
         voo.CurrencyCode.ShouldBe("USD");
 
-        var vtsax = statement.Positions.Single(p => p.Ticker == "VTSAX");
-        vtsax.Units.ShouldBe(50.123m);
-        vtsax.CostBasis.ShouldBeNull();
-        vtsax.CurrencyCode.ShouldBeNull();
+        var fundPosition = statement.Positions.Single(p => p.Ticker == "ZXTAX");
+        fundPosition.Units.ShouldBe(50.123m);
+        fundPosition.CostBasis.ShouldBeNull();
+        fundPosition.CurrencyCode.ShouldBeNull();
     }
 
     [Fact]
@@ -588,6 +588,49 @@ NEWFILEUID:NONE
         withdrawal.Type.ShouldBe(TransactionType.Withdrawal);
         withdrawal.Amount.ShouldBe(-1000.00m);
         withdrawal.TradeDate.ShouldBe(new DateOnly(2026, 4, 20));
+    }
+
+    [Theory]
+    [InlineData("OUT", "25", -25)]  // a transfer out with positive units must never add shares
+    [InlineData("OUT", "-25", -25)]
+    [InlineData("IN", "-25", 25)]
+    [InlineData("IN", "25", 25)]
+    public async Task ParseAsync_signs_in_kind_transfer_units_by_their_direction(string action, string units, decimal expected)
+    {
+        var qfx = $"""
+<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <INVSTMTMSGSRSV1><INVSTMTTRNRS><TRNUID>1</TRNUID>
+    <INVSTMTRS>
+      <DTASOF>20260601120000</DTASOF>
+      <CURDEF>USD</CURDEF>
+      <INVACCTFROM><BROKERID>fidelity.com</BROKERID><ACCTID>X1234</ACCTID></INVACCTFROM>
+      <INVTRANLIST>
+        <DTSTART>20260101000000</DTSTART><DTEND>20260601120000</DTEND>
+        <TRANSFER>
+          <INVTRAN><FITID>ACAT-1</FITID><DTTRADE>20260210</DTTRADE></INVTRAN>
+          <SECID><UNIQUEID>VOO</UNIQUEID><UNIQUEIDTYPE>TICKER</UNIQUEIDTYPE></SECID>
+          <SUBACCTSEC>CASH</SUBACCTSEC>
+          <UNITS>{units}</UNITS>
+          <TFERACTION>{action}</TFERACTION>
+          <POSTYPE>LONG</POSTYPE>
+          <UNITPRICE>480.00</UNITPRICE>
+        </TRANSFER>
+      </INVTRANLIST>
+    </INVSTMTRS>
+  </INVSTMTTRNRS></INVSTMTMSGSRSV1>
+</OFX>
+""";
+        var parser = new QfxFileParser();
+
+        var parsed = await parser.ParseAsync(StringStream(qfx), "acat.qfx", CancellationToken.None);
+
+        var transfer = parsed.Statements.Single().Transactions.Single();
+        transfer.Type.ShouldBe(TransactionType.Transfer);
+        transfer.Quantity.ShouldBe(expected);
+        transfer.Amount.ShouldBe(0m);       // OFX transfers carry no amount; valuation prices them on the day
+        transfer.Price.ShouldBe(480.00m);   // …falling back to the broker's unit price when there's no close
     }
 
     private static MemoryStream StringStream(string content) =>

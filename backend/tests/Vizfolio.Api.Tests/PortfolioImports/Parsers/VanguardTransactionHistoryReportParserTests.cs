@@ -18,19 +18,26 @@ public sealed class VanguardTransactionHistoryReportParserTests
     // Synthetic sample data. Column order matches Headers; null = blank cell.
     private static readonly string?[][] SampleRows =
     [
-        ["3/15/2011", "3/12/2011", "VTWG", "VANGUARD RUSSELL 2000 GROWTH INDEX FD ETF SHS", "Buy", "CASH", "5.0000", "$71.4300", "Free", "-$357.1500"],
-        ["8/9/2018", "8/8/2018", "VTSAX", "Vanguard Total Stock Market Index Fund Admiral Shares", "Buy (exchange)", "CASH", "2.3100", "$80.1000", null, "-$185.0300"],
-        ["11/5/2014", null, "VMMXX", "Vanguard Cash Reserves Federal Money Market Fund", "Capital gain (ST)", null, "1.2500", null, null, "$1.2500"],
-        ["6/20/2021", "6/20/2021", "VTIAX", "Vanguard Total International Stock Index Fund Admiral Shares", "Dividend", "CASH", null, null, null, "$512.4400"],
+        ["3/15/2011", "3/12/2011", "ZXSG", "EXAMPLE SMALL CAP GROWTH INDEX ETF", "Buy", "CASH", "5.0000", "$71.4300", "Free", "-$357.1500"],
+        ["8/9/2018", "8/8/2018", "ZXTAX", "Example Total Stock Index Fund Admiral Shares", "Buy (exchange)", "CASH", "2.3100", "$80.1000", null, "-$185.0300"],
+        ["11/5/2014", null, "ZXCXX", "Example Cash Reserves Money Market Fund", "Capital gain (ST)", null, "1.2500", null, null, "$1.2500"],
+        ["6/20/2021", "6/20/2021", "ZXIAX", "Example International Index Fund Admiral Shares", "Dividend", "CASH", null, null, null, "$512.4400"],
         ["2/7/2016", "2/7/2016", null, "CASH", "Fee", "CASH", null, null, null, "-$15.0000"],
         ["5/12/2017", "5/12/2017", null, "To: MY CREDIT UNION", "Funds Received", "CASH", null, null, null, "$250.0000"],
-        ["3/30/2022", "3/30/2022", "VMFXX", "Vanguard Federal Money Market Fund (Settlement Fund)", "Reinvestment", "CASH", null, null, null, "-$7.8800"],
-        ["8/9/2018", "8/8/2018", "VMMXX", "Vanguard Cash Reserves Federal Money Market Fund", "Sell (exchange)", "CASH", "-185.0300", "$1.0000", null, "$185.0300"],
-        ["1/17/2023", "1/17/2023", "VMFXX", "Vanguard Federal Money Market Fund (Settlement Fund)", "Sweep in", "CASH", null, null, null, "-$420.7700"],
-        ["1/25/2023", "1/25/2023", "VMFXX", "Vanguard Federal Money Market Fund (Settlement Fund)", "Sweep out", "CASH", null, null, null, "$455.1200"],
+        ["3/30/2022", "3/30/2022", "ZXMXX", "Example Money Market Fund (Settlement Fund)", "Reinvestment", "CASH", null, null, null, "-$7.8800"],
+        ["8/9/2018", "8/8/2018", "ZXCXX", "Example Cash Reserves Money Market Fund", "Sell (exchange)", "CASH", "-185.0300", "$1.0000", null, "$185.0300"],
+        ["1/17/2023", "1/17/2023", "ZXMXX", "Example Money Market Fund (Settlement Fund)", "Sweep in", "CASH", null, null, null, "-$420.7700"],
+        ["1/25/2023", "1/25/2023", "ZXMXX", "Example Money Market Fund (Settlement Fund)", "Sweep out", "CASH", null, null, null, "$455.1200"],
         ["9/3/2014", "9/3/2014", null, "CASH", "Transfer (incoming)", "CASH", null, null, null, "$275.5000"],
-        ["9/1/2014", null, "VMMXX", "Vanguard Cash Reserves Federal Money Market Fund", "TRANSFER TO 987654", null, "-275.1000", null, null, "$275.1000"],
+        ["9/1/2014", null, "ZXCXX", "Example Cash Reserves Money Market Fund", "TRANSFER TO 987654", null, "-275.1000", null, null, "$275.1000"],
         ["4/22/2025", "4/22/2025", null, "To: MY CREDIT UNION", "Contribution", "CASH", null, null, null, "$150.0000"],
+        ["6/15/2017", "6/15/2017", "ZXBMX", "Example Bond Index Fund Investor Shares", "TRANSFER FROM 111222333", null, "100.0000", null, null, "$1,000.0000"],
+        ["3/10/2018", "3/10/2018", "ZXBMX", "Example Bond Index Fund Investor Shares", "Share Conversion (outgoing)", null, "-120.0000", null, null, "-$1,300.0000"],
+        ["3/10/2018", "3/10/2018", "ZXBAX", "Example Bond Index Fund Admiral Shares", "Share Conversion (incoming)", null, "120.0000", null, null, "$1,300.0000"],
+        ["11/20/2018", "11/20/2018", "ZXBAX", "Example Bond Index Fund Admiral Shares", "Conversion (outgoing)", null, "-125.0000", null, null, "-$1,400.0000"],
+        ["1/7/2019", "1/7/2019", "ZXBAX", "Example Bond Index Fund Admiral Shares", "Conversion (incoming)", null, "125.0000", null, null, "$1,400.0000"],
+        ["6/15/2015", "6/15/2015", "ZXTMX", "Example Total Stock Index Fund Investor Shares", "Conversion", null, "-200.0000", null, null, "-$8,000.0000"],
+        ["6/15/2015", "6/15/2015", "ZXTAX", "Example Total Stock Index Fund Admiral Shares", "Conversion", null, "200.0000", null, null, "$8,000.0000"],
     ];
 
     [Fact]
@@ -80,14 +87,14 @@ public sealed class VanguardTransactionHistoryReportParserTests
 
         buy.Type.ShouldBe(TransactionType.Buy);
         buy.SourceType.ShouldBe("Buy");
-        buy.Ticker.ShouldBe("VTWG");
+        buy.Ticker.ShouldBe("ZXSG");
         buy.TradeDate.ShouldBe(new DateOnly(2011, 3, 12));
         buy.SettlementDate.ShouldBe(new DateOnly(2011, 3, 15));
         buy.Quantity.ShouldBe(5.0m);
         buy.Price.ShouldBe(71.43m);
         buy.Amount.ShouldBe(-357.15m);
         buy.Fees.ShouldBeNull(); // "Free"
-        buy.Memo!.ShouldContain("RUSSELL");
+        buy.Memo!.ShouldContain("SMALL CAP GROWTH");
     }
 
     [Fact]
@@ -167,13 +174,153 @@ public sealed class VanguardTransactionHistoryReportParserTests
         contribution.Amount.ShouldBe(150m);
     }
 
+    [Fact]
+    public async Task ParseAsync_maps_a_transfer_from_another_account_to_an_incoming_transfer()
+    {
+        var incoming = (await ParseSampleAsync())[13];
+
+        incoming.Type.ShouldBe(TransactionType.Transfer);
+        incoming.SourceType.ShouldBe("TRANSFER FROM 111222333");
+        incoming.Quantity.ShouldBe(100m);
+        incoming.Amount.ShouldBe(1000m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_a_share_class_conversion_to_an_exchange_that_moves_shares_but_not_contributions()
+    {
+        var txs = await ParseSampleAsync();
+
+        var outgoing = txs[14];
+        outgoing.Type.ShouldBe(TransactionType.Sell);
+        outgoing.SourceType.ShouldBe("Share Conversion (outgoing)");
+        outgoing.Quantity.ShouldBe(-120m);
+
+        var incoming = txs[15];
+        incoming.Type.ShouldBe(TransactionType.Buy);
+        incoming.Ticker.ShouldBe("ZXBAX");
+        incoming.Quantity.ShouldBe(120m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_ira_conversions_to_signed_transfers_across_the_account_boundary()
+    {
+        var txs = await ParseSampleAsync();
+
+        // e.g. Traditional IRA → Roth: money leaves this account.
+        var outgoing = txs[16];
+        outgoing.Type.ShouldBe(TransactionType.Transfer);
+        outgoing.SourceType.ShouldBe("Conversion (outgoing)");
+        outgoing.Amount.ShouldBe(-1400m);
+
+        // ...and arrives in the Roth.
+        var incoming = txs[17];
+        incoming.Type.ShouldBe(TransactionType.Transfer);
+        incoming.Amount.ShouldBe(1400m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_maps_an_undirected_conversion_by_its_quantity_sign_to_an_exchange()
+    {
+        // Older reports label an Investor → Admiral share-class conversion plain "Conversion".
+        var txs = await ParseSampleAsync();
+
+        var outgoing = txs[18];
+        outgoing.Type.ShouldBe(TransactionType.Sell);
+        outgoing.SourceType.ShouldBe("Conversion");
+        outgoing.Quantity.ShouldBe(-200m);
+
+        var incoming = txs[19];
+        incoming.Type.ShouldBe(TransactionType.Buy);
+        incoming.Ticker.ShouldBe("ZXTAX");
+        incoming.Quantity.ShouldBe(200m);
+    }
+
+    [Theory]
+    [InlineData("Reinvestment (LT gain)")]
+    [InlineData("Reinvestment (ST gain)")]
+    public async Task ParseAsync_maps_labelled_distribution_reinvestments_to_reinvest(string label)
+    {
+        // Regression (F8): these carry the shares bought with a capital-gain distribution. Mapped to Other they
+        // moved no shares, leaving the position short of the broker's statement.
+        var parser = new VanguardTransactionHistoryReportParser();
+        await using var stream = BuildReport(
+        [
+            ["12/20/2024", "12/20/2024", "ZXBAX", "Example Bond Index Fund Admiral Shares", label, "CASH", "2.0000", "$12.5000", null, "-$25.0000"],
+        ]);
+
+        var row = (await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None)).Statements[0].Transactions.Single();
+
+        row.Type.ShouldBe(TransactionType.Reinvest);
+        row.SourceType.ShouldBe(label);
+        row.Quantity.ShouldBe(2m);
+    }
+
+    [Fact]
+    public async Task ParseAsync_warns_about_a_label_it_doesnt_know_and_keeps_the_row_as_other()
+    {
+        var parser = new VanguardTransactionHistoryReportParser();
+        await using var stream = BuildReport(
+        [
+            ["3/7/2019", "3/7/2019", "EXFND", "Example Index Fund", "Corporate action", "CASH", "1.0000", null, null, "$0.0000"],
+            ["3/8/2019", "3/8/2019", "EXFND", "Example Index Fund", "Corporate action", "CASH", "2.0000", null, null, "$0.0000"],
+            ["3/9/2019", "3/9/2019", "ZXMXX", "Example Money Market Fund (Settlement Fund)", "Sweep in", "CASH", null, null, null, "-$5.0000"],
+        ]);
+
+        var file = await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None);
+
+        file.Statements[0].Transactions.Count.ShouldBe(3);
+        file.Statements[0].Transactions[0].Type.ShouldBe(TransactionType.Other);
+        // Sweeps are deliberately Other: no warning for them.
+        var warning = file.Warnings.ShouldHaveSingleItem();
+        warning.Code.ShouldBe(ImportWarningCodes.UnmappedLabel);
+        warning.Count.ShouldBe(2);
+        warning.Message.ShouldContain("Corporate action");
+        warning.Samples.ShouldBe(["row 5", "row 6"]);
+    }
+
+    [Fact]
+    public async Task ParseAsync_skips_a_row_with_no_date_with_a_warning_instead_of_failing_the_file()
+    {
+        var parser = new VanguardTransactionHistoryReportParser();
+        await using var stream = BuildReport(
+        [
+            [null, null, "EXFND", "Example Index Fund", "Buy", "CASH", "1.0000", "$100.0000", null, "-$100.0000"],
+            ["3/8/2019", "3/8/2019", "EXFND", "Example Index Fund", "Buy", "CASH", "1.0000", "$100.0000", null, "-$100.0000"],
+        ]);
+
+        var file = await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None);
+
+        file.Statements[0].Transactions.ShouldHaveSingleItem().TradeDate.ShouldBe(new DateOnly(2019, 3, 8));
+        file.Warnings.ShouldHaveSingleItem().Code.ShouldBe(ImportWarningCodes.RowFailed);
+    }
+
+    [Fact]
+    public async Task ParseAsync_marks_sweeps_as_settlement_fund_movements()
+    {
+        var rows = await ParseSampleAsync();
+
+        rows.Where(r => r.SourceType!.StartsWith("Sweep")).ShouldAllBe(r => r.IsSettlementFund);
+        rows.Where(r => !r.SourceType!.StartsWith("Sweep")).ShouldAllBe(r => !r.IsSettlementFund);
+    }
+
+    [Fact]
+    public async Task ParseAsync_names_the_broker_but_no_account_so_the_import_routes_by_transactions()
+    {
+        var parser = new VanguardTransactionHistoryReportParser();
+        await using var stream = BuildReport(SampleRows);
+
+        var parsed = await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None);
+
+        parsed.Statements[0].InstitutionCode.ShouldBe("vanguard.com");
+        parsed.Statements[0].AccountNumber.ShouldBeNull();
+    }
+
     private static async Task<IReadOnlyList<ParsedTransaction>> ParseSampleAsync()
     {
         var parser = new VanguardTransactionHistoryReportParser();
         await using var stream = BuildReport(SampleRows);
         var parsed = await parser.ParseAsync(stream, "report.xlsx", CancellationToken.None);
         parsed.Statements.Count.ShouldBe(1);
-        parsed.Statements[0].InstitutionCode.ShouldBeNull();
         return parsed.Statements[0].Transactions;
     }
 

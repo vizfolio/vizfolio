@@ -27,30 +27,27 @@
         <p class="dash-notice" role="status">{{ message }}</p>
       }
 
-      <div class="stat-grid">
-        <app-stat-card
-          label="Portfolio value"
-          [value]="valueLabel()"
-          [incomplete]="valueIncomplete()"
+      @if (needsFirstImport() && portfolioId(); as pid) {
+        <div class="onboarding-card">
+          <h2>Import your history</h2>
+          <app-import-onboarding />
+          <app-import-drop-zone [portfolioId]="pid" (changed)="onFirstImport()" />
+        </div>
+      }
+
+      @if (displayPerformance(); as p) {
+        <app-performance-headline
+          [performance]="p"
+          balanceLabel="Portfolio value"
+          [showGrossFlows]="false"
+          [healthLink]="['/accounts']"
         />
-        <app-stat-card label="Deposits" [value]="depositsLabel()" trend="up" />
-        <app-stat-card label="Withdrawals" [value]="withdrawalsLabel()" trend="down" />
-        <app-stat-card
-          label="Net contributions"
-          [value]="netLabel()"
-          [trend]="netTrend()"
-        />
-        <app-stat-card
-          label="Return (time-weighted)"
-          [value]="returnLabel()"
-          [trend]="returnTrend()"
-        />
-      </div>
+      }
 
       <div class="chart-card">
         <div class="chart-head">
-          <h2>Performance</h2>
-          <span class="chart-note">Illustrative — real time series coming soon</span>
+          <h2>Value over time</h2>
+          <span class="chart-note">{{ chartNote() }}</span>
         </div>
         <div class="chart-body">
           <app-perf-chart
@@ -60,6 +57,10 @@
           />
         </div>
       </div>
+
+      @if (displayPerformance(); as p) {
+        <app-returns-chart [performance]="p" [headingLevel]="2" />
+      }
     }
   }
 </section>

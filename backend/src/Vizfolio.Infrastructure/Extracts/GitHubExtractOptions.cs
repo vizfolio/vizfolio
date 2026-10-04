@@ -33,6 +33,10 @@ public sealed class FundsSourceOptions
     public string ManifestUrl { get; set; } =
         "https://raw.githubusercontent.com/vizfolio/fund-extracts/refs/heads/master/funds.json";
 
+    /// <summary>Every money market fund (tickers + stable-price facts from Form N-MFP). Used in PerFile mode.</summary>
+    public string MoneyMarketUrl { get; set; } =
+        "https://raw.githubusercontent.com/vizfolio/fund-extracts/refs/heads/master/money_market_funds.json";
+
     public string SnapshotUrlTemplate { get; set; } =
         "https://raw.githubusercontent.com/vizfolio/fund-extracts/refs/heads/master/snapshots/{seriesId}/{period}.json.gz";
 

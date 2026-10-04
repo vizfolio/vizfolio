@@ -33,10 +33,25 @@
   font-size: 0.85rem;
 }
 
+.missing p,
+.missing ul {
+  margin: 0;
+}
+
+.missing ul {
+  padding-left: var(--space-5);
+}
+
 .loading {
   color: var(--color-text-muted);
 }
 
 .error {
   color: var(--color-negative);
+}
+
+.pending {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }

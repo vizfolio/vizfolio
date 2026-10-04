@@ -16,10 +16,11 @@ const PERF: PortfolioPerformance = {
   endingBalance: { value: 1500, isComplete: false, snapshotAsOf: '2025-12-31', holdingsCovered: 2, holdingsMissingSnapshot: 1 },
   contributions: { net: 300, deposits: 400, withdrawals: -100, count: 5 },
   returns: {
-    timeWeighted: { rate: 0.15, method: 'ModifiedDietz', basis: 'Period', reason: null },
-    moneyWeighted: { rate: null, method: 'XIRR', basis: 'Annualized', reason: 'NoSignChange' },
+    timeWeighted: { rate: 0.15, method: 'DailyValuedTWR', basis: 'Period', reason: null, annualizedRate: null, fallbackReason: null },
+    moneyWeighted: { rate: null, method: 'XIRR', basis: 'Annualized', reason: 'NoSignChange', annualizedRate: null, fallbackReason: null },
   },
   currencyCode: 'USD',
+  series: { interval: 'Monthly', points: [] },
 };
 
 class MockApi {
@@ -57,6 +58,14 @@ describe('Performance page', () => {
     expect(cmp.status()).toBe('ready');
     expect(cmp.portfolioName()).toBe('Retirement');
     expect((fixture.nativeElement as HTMLElement).querySelector('app-performance-summary')).toBeTruthy();
+    expect((fixture.nativeElement as HTMLElement).querySelector('app-returns-chart')).toBeTruthy();
+  });
+
+  it('shows only net contributions at portfolio scope, where internal transfers inflate the gross figures', () => {
+    const { fixture } = setup(new MockApi());
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Net contributions');
+    expect(text).not.toContain('$400 in');
   });
 
   it('refetches when the date range changes', () => {

@@ -1,0 +1,28 @@
+<div class="confirm" role="group" aria-labelledby="undo-confirm-title">
+  <h3 class="confirm-title" id="undo-confirm-title" tabindex="-1" #heading>
+    Undo the import of {{ fileName() }}?
+  </h3>
+  @if (error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  } @else if (preview()) {
+    <ul class="preview">
+      @for (line of lines(); track line) {
+        <li>{{ line }}</li>
+      }
+    </ul>
+    <p class="hint">The import stays listed as undone, and the file can be imported again later.</p>
+  } @else {
+    <p class="hint" role="status">Working out what this would change…</p>
+  }
+  <div class="confirm-actions">
+    <button
+      type="button"
+      class="btn btn--danger"
+      [disabled]="!preview() || !!error() || undoing()"
+      (click)="confirm()"
+    >
+      {{ undoing() ? 'Undoing…' : 'Undo import' }}
+    </button>
+    <button type="button" class="btn btn--ghost" [disabled]="undoing()" (click)="cancel()">Cancel</button>
+  </div>
+</div>

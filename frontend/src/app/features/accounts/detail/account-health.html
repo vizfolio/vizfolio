@@ -1,0 +1,48 @@
+<div class="account-health">
+  @switch (status()) {
+    @case ('loading') {
+      <p class="loading" role="status">Checking this account's data…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Couldn't check this account's data.</p>
+    }
+    @default {
+      @if (report(); as r) {
+        <app-health-list
+          [portfolioId]="portfolioId()"
+          [report]="r"
+          (navigate)="navigate.emit($event.kind)"
+          (pricesRequested)="recheck()"
+        />
+      }
+
+      @if (coverage(); as c) {
+        <details class="coverage">
+          <summary>History coverage</summary>
+          <dl class="coverage-grid">
+            <div>
+              <dt>First transaction</dt>
+              <dd>{{ orDash(c.firstTransactionDate) }}</dd>
+            </div>
+            <div>
+              <dt>Earliest statement</dt>
+              <dd>{{ orDash(c.earliestSnapshotDate) }}</dd>
+            </div>
+            <div>
+              <dt>Starting positions as of</dt>
+              <dd>{{ orDash(c.suggestedOpeningDate) }}</dd>
+            </div>
+            <div>
+              <dt>Statements</dt>
+              <dd>{{ c.statementSnapshotCount + c.brokerPositionSnapshotCount }}</dd>
+            </div>
+            <div>
+              <dt>Starting positions entered by hand</dt>
+              <dd>{{ c.openingBalanceSnapshotCount }}</dd>
+            </div>
+          </dl>
+        </details>
+      }
+    }
+  }
+</div>

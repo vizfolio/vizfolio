@@ -6,6 +6,8 @@ import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { PortfolioPerformance } from '../../../core/api/models/performance.models';
 import { DateField } from '../../../shared/ui/date-field/date-field';
 import { PerformanceSummary } from '../../../shared/ui/performance-summary/performance-summary';
+import { pollWhilePending } from '../../../shared/util/poll';
+import { performanceAwaitsPrices } from '../../../shared/util/performance-format';
 
 type Status = 'loading' | 'ready' | 'error';
 
@@ -39,8 +41,10 @@ export class AccountPerformance {
       .pipe(
         switchMap(({ portfolioId, accountId, from, to }) => {
           this.status.set('loading');
-          return this.api
-            .getAccountPerformance(portfolioId, accountId, from || undefined, to || undefined)
+          return pollWhilePending(
+            () => this.api.getAccountPerformance(portfolioId, accountId, from || undefined, to || undefined),
+            performanceAwaitsPrices,
+          )
             .pipe(
               catchError(() => {
                 this.status.set('error');

@@ -5,14 +5,18 @@ import { catchError, of, switchMap } from 'rxjs';
 import { HoldingRow } from '../../../core/api/models/holdings.models';
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import { DataColumn, DataTable } from '../../../shared/ui/data-table/data-table';
+import { causeText } from '../../../shared/util/reason-text';
 import {
   formatMoney,
   formatQuantity,
 } from '../../../shared/util/performance-format';
+import { pollWhilePending } from '../../../shared/util/poll';
+
+const awaitsPrices = (rows: HoldingRow[] | null) => rows?.some((h) => h.missingCause === 'PricesPending') ?? false;
 
 type Status = 'loading' | 'ready' | 'error';
 
-/** Holdings tab: an account's positions, each valued from its latest snapshot. */
+/** Holdings tab: an account's positions, valued by the same rules as its performance. */
 @Component({
   selector: 'app-account-holdings',
   imports: [DataTable],
@@ -42,7 +46,23 @@ export class AccountHoldings {
   );
 
   protected readonly missingCount = computed(
-    () => this.holdings().filter((h) => !h.hasSnapshot).length,
+    () => this.holdings().filter((h) => h.status === 'Missing' && h.missingCause !== 'PricesPending').length,
+  );
+
+  /** One line per reason a holding couldn't be valued: "ZXFND, ZXBND: no price available". */
+  protected readonly missingLines = computed(() => {
+    const byCause = new Map<string, string[]>();
+    for (const h of this.holdings()) {
+      if (h.status !== 'Missing' || h.missingCause === 'PricesPending') continue;
+      const cause = h.missingCause ?? 'NoPrice';
+      byCause.set(cause, [...(byCause.get(cause) ?? []), h.symbol ?? h.name ?? 'a holding']);
+    }
+    return [...byCause].map(([cause, symbols]) => `${symbols.join(', ')}: ${causeText(cause)}`);
+  });
+
+  /** Positions waiting on prices that are still downloading (the list refreshes until they arrive). */
+  protected readonly pendingCount = computed(
+    () => this.holdings().filter((h) => h.missingCause === 'PricesPending').length,
   );
 
   protected readonly columns: DataColumn<HoldingRow>[] = [
@@ -79,10 +99,10 @@ export class AccountHoldings {
       format: (_v, row) => formatMoney(row.gainLoss, row.currencyCode ?? 'USD'),
     },
     {
-      key: 'snapshotAsOf',
-      header: 'As of',
+      key: 'priceAsOf',
+      header: 'Priced as of',
       align: 'end',
-      format: (_v, row) => row.snapshotAsOf ?? '—',
+      format: (_v, row) => row.priceAsOf ?? '—',
     },
   ];
 
@@ -96,7 +116,7 @@ export class AccountHoldings {
       .pipe(
         switchMap(({ portfolioId, accountId }) => {
           this.status.set('loading');
-          return this.api.getAccountHoldings(portfolioId, accountId).pipe(
+          return pollWhilePending(() => this.api.getAccountHoldings(portfolioId, accountId), awaitsPrices).pipe(
             catchError(() => {
               this.status.set('error');
               return of<HoldingRow[] | null>(null);

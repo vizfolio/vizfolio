@@ -2,7 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Vizfolio.Api.Tests.Extracts;
 using Vizfolio.Application.Portfolios;
+using Vizfolio.Application.Portfolios.Valuation;
 using Vizfolio.Domain.Portfolios;
+using Vizfolio.Domain.Pricing;
+
+using static Vizfolio.Api.Tests.Portfolios.PortfolioSeed;
 
 namespace Vizfolio.Api.Tests.Portfolios;
 
@@ -33,12 +37,14 @@ public sealed class PortfolioPerformanceServiceTests
     }
 
     [Fact]
-    public async Task No_snapshot_before_from_produces_incomplete_zero_starting_balance()
+    public async Task Holding_bought_after_from_is_zero_and_complete_at_from()
     {
+        // The holding is acquired mid-window (after From), so it was genuinely not held at From: its
+        // true starting value is $0 and complete — it must not be counted as a missing snapshot (§7).
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -500m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -500m, quantity: 5m);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 900m);
 
         var service = NewService(ctx);
@@ -46,10 +52,10 @@ public sealed class PortfolioPerformanceServiceTests
 
         result.ShouldNotBeNull();
         result.StartingBalance.Value.ShouldBe(0m);
-        result.StartingBalance.IsComplete.ShouldBeFalse();
+        result.StartingBalance.IsComplete.ShouldBeTrue();
         result.StartingBalance.SnapshotAsOf.ShouldBeNull();
         result.StartingBalance.HoldingsCovered.ShouldBe(0);
-        result.StartingBalance.HoldingsMissingSnapshot.ShouldBe(1);
+        result.StartingBalance.HoldingsMissingSnapshot.ShouldBe(0);
     }
 
     [Fact]
@@ -130,13 +136,16 @@ public sealed class PortfolioPerformanceServiceTests
     }
 
     [Fact]
-    public async Task Holding_active_in_range_without_prior_snapshot_is_missing_for_starting_balance()
+    public async Task Holding_held_at_from_without_valuation_is_missing_for_starting_balance()
     {
+        // The holding is bought *before* From (held at From) but has no valued snapshot or price at/before
+        // From, so its starting value is genuinely unknown → missing/incomplete (the honest-null case).
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -100m);
-        await SeedSnapshotAsync(ctx, holding, To, marketValue: 150m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 1), TransactionType.Buy, amount: -100m, quantity: 10m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 1), TransactionType.Deposit, 100m); // funds the purchase
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 150m, quantity: 10m);
 
         var service = NewService(ctx);
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
@@ -306,7 +315,8 @@ public sealed class PortfolioPerformanceServiceTests
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Buy, amount: -500m);
+        // Held at From (bought before the window) but unvalued there → incomplete starting balance.
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 1), TransactionType.Buy, amount: -500m, quantity: 10m);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 900m);
 
         var service = NewService(ctx);
@@ -322,13 +332,14 @@ public sealed class PortfolioPerformanceServiceTests
     [Fact]
     public async Task Returns_are_computed_when_starting_and_ending_snapshots_both_exist()
     {
-        // Opening snapshot at From ($1000), ending snapshot at To ($1100), no cash flows.
-        // Modified Dietz: R = 100 / 1000 = 10% period.
+        // Opening snapshot at the close of the day before From ($1000) — the period's start — and an
+        // ending snapshot at To ($1100), no cash flows.
+        // Time-weighted (daily-valued): no flows, so one sub-period: 1100 / 1000 − 1 = 10% period.
         // XIRR: 10% annualized (365-day period).
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedSnapshotAsync(ctx, holding, From, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedSnapshotAsync(ctx, holding, From.AddDays(-1), marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 1100m);
 
         var service = NewService(ctx);
@@ -340,8 +351,9 @@ public sealed class PortfolioPerformanceServiceTests
 
         result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
         Math.Abs(result.Returns.TimeWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.0001m);
-        result.Returns.TimeWeighted.Method.ShouldBe("ModifiedDietz");
+        result.Returns.TimeWeighted.Method.ShouldBe("DailyValuedTWR");
         result.Returns.TimeWeighted.Basis.ShouldBe("Period");
+        result.Returns.TimeWeighted.FallbackReason.ShouldBeNull();
 
         result.Returns.MoneyWeighted.Rate.ShouldNotBeNull();
         Math.Abs(result.Returns.MoneyWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.001m);
@@ -362,6 +374,7 @@ public sealed class PortfolioPerformanceServiceTests
 
         var service = new PortfolioPerformanceService(
             ctx.Db,
+            new AccountValuationLoader(ctx.Db, new ValuationOptions()),
             new ChainedSubPeriodTimeWeightedReturnCalculator(),
             new XirrMoneyWeightedReturnCalculator());
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
@@ -375,17 +388,18 @@ public sealed class PortfolioPerformanceServiceTests
     [Fact]
     public async Task Chained_TWRR_uses_interior_snapshots_when_they_exist()
     {
-        // Boundary at From ($1000), interior at day 180 ($1100), boundary at To ($1300).
+        // Opening boundary at the start of From ($1000), interior at day 180 ($1100), boundary at To ($1300).
         // sub1 = 1.10, sub2 = 1300/1100. Total = 1.30 - 1 = 0.30.
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
         var holding = await SeedHoldingAsync(ctx, accountId);
-        await SeedSnapshotAsync(ctx, holding, From, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedSnapshotAsync(ctx, holding, From.AddDays(-1), marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
         await SeedSnapshotAsync(ctx, holding, From.AddDays(180), marketValue: 1100m);
         await SeedSnapshotAsync(ctx, holding, To, marketValue: 1300m);
 
         var service = new PortfolioPerformanceService(
             ctx.Db,
+            new AccountValuationLoader(ctx.Db, new ValuationOptions()),
             new ChainedSubPeriodTimeWeightedReturnCalculator(),
             new XirrMoneyWeightedReturnCalculator());
         var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
@@ -395,76 +409,663 @@ public sealed class PortfolioPerformanceServiceTests
         Math.Abs(result.Returns.TimeWeighted.Rate!.Value - 0.30m).ShouldBeLessThan(0.0001m);
     }
 
+    // ---------- PriceHistory valuation scenarios (docs/price-history-valuation.md §8 checklist) ----------
+
+    [Fact]
+    public async Task Mid_history_window_values_from_price_history_and_returns_a_sensible_rate()
+    {
+        // §2 repro: full ledger with a $0 opening balance at inception and one far-end snapshot. Without
+        // PriceHistory a mid-history `from` reuses the stale $0 and the TWR explodes. With a price at
+        // `from`, the starting balance is the honest quantity × price and the return is sensible.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "VOO");
+
+        var inception = new DateOnly(2024, 1, 2);
+        await SeedSnapshotAsync(ctx, holding, inception.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, inception, TransactionType.Deposit, 8000m); // funds the purchase
+        await SeedTransactionAsync(ctx, accountId, holding, inception, TransactionType.Buy, amount: -8000m, quantity: 10m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 11000m, quantity: 10m);
+
+        // Raw prices: 900 at the start of the mid-history `from`, 1100 at `to` → BMV 9000, EMV 11000, TWR ≈ 22%.
+        await SeedPriceAsync(ctx, "VOO", From.AddDays(-1), close: 900m);
+        await SeedPriceAsync(ctx, "VOO", To, close: 1100m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.Value.ShouldBe(9000m);
+        result.StartingBalance.IsComplete.ShouldBeTrue();
+        result.EndingBalance.Value.ShouldBe(11000m);
+        result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        result.Returns.TimeWeighted.Rate!.Value.ShouldBeInRange(0.20m, 0.25m); // not tens of thousands
+    }
+
+    [Fact]
+    public async Task Held_holding_with_no_price_and_no_boundary_snapshot_stays_incomplete()
+    {
+        // Held at `from` (bought before the window) but neither priced nor snapshotted there → honest null.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "NOPX");
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 1), TransactionType.Buy, amount: -1000m, quantity: 10m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1500m);
+        await SeedPriceAsync(ctx, "NOPX", To, close: 150m); // price only at the far end, none near `from`
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.IsComplete.ShouldBeFalse();
+        result.StartingBalance.HoldingsMissingSnapshot.ShouldBe(1);
+        result.Returns.TimeWeighted.Rate.ShouldBeNull();
+        result.Returns.TimeWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+    }
+
+    [Fact]
+    public async Task Staggered_account_inceptions_report_starting_balance_complete()
+    {
+        // §7: accounts started 2011, 2011, 2014. At the portfolio-wide `from` (2011) the 2014 account's
+        // holding was not held → $0 and complete, so the starting balance is complete overall.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolioId = await SeedPortfolioAsync(ctx);
+        var acct2011a = await SeedAccountAsync(ctx, portfolioId, "A-2011");
+        var acct2011b = await SeedAccountAsync(ctx, portfolioId, "B-2011");
+        var acct2014 = await SeedAccountAsync(ctx, portfolioId, "C-2014");
+
+        await SeedOpeningAndBuy(ctx, acct2011a, new DateOnly(2011, 1, 3), quantity: 10m);
+        await SeedOpeningAndBuy(ctx, acct2011b, new DateOnly(2011, 1, 3), quantity: 5m);
+        await SeedOpeningAndBuy(ctx, acct2014, new DateOnly(2014, 1, 3), quantity: 8m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForPortfolioAsync(portfolioId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.From.ShouldBe(new DateOnly(2011, 1, 3)); // earliest transaction across accounts
+        result.StartingBalance.IsComplete.ShouldBeTrue();
+        result.StartingBalance.HoldingsMissingSnapshot.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Since_inception_boundary_snapshots_are_unchanged_by_price_wiring()
+    {
+        // Regression guard: with no PriceHistory, a boundary-snapshot-only holding values exactly as before
+        // (opening $1000 → ending $1100 = 10% period), and prices for an unrelated series don't leak in.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "AAA");
+        await SeedSnapshotAsync(ctx, holding, From.AddDays(-1), marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1100m);
+        await SeedPriceAsync(ctx, "ZZZ", From.AddDays(-1), close: 999m); // unrelated series — must be ignored
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, From, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.Value.ShouldBe(1000m);
+        result.EndingBalance.Value.ShouldBe(1100m);
+        result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        Math.Abs(result.Returns.TimeWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.0001m);
+    }
+
+    [Fact]
+    public async Task Split_with_matching_corporate_action_values_the_adjusted_quantity()
+    {
+        // 4-for-1 split: 10 shares → 40. Raw price 30 on the valuation date → market value 40 × 30 = 1200.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "SPLIT");
+
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 1), TransactionType.Buy, amount: -4000m, quantity: 10m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 1), TransactionType.Deposit, 4000m); // funds the purchase
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 1), TransactionType.Split, amount: 0m);
+        await SeedSplitAsync(ctx, "SPLIT", new DateOnly(2025, 6, 1), numerator: 4m, denominator: 1m);
+
+        var valuationDate = new DateOnly(2025, 7, 1);
+        await SeedPriceAsync(ctx, "SPLIT", valuationDate, close: 30m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(
+            portfolioId, accountId, new DateOnly(2024, 1, 1), valuationDate, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(1200m);
+        result.EndingBalance.HoldingsCovered.ShouldBe(1);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Ledger_missing_early_history_does_not_override_a_zero_broker_snapshot()
+    {
+        // Regression: a closed fund whose ledger lacks its original purchase. Rolling the ledger from zero
+        // gives −10 shares (more transferred out than recorded in) and priced that to a negative balance.
+        // The broker snapshot says 0 shares / $0, which must win.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXBMX");
+
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2016, 1, 4), TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2016, 1, 4), TransactionType.Deposit, 1000m); // funds the purchase
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2018, 6, 1), TransactionType.Transfer, amount: -1100m, quantity: -110m);
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2018, 6, 30), marketValue: 0m);
+        await SeedPriceAsync(ctx, "ZXBMX", To, close: 10m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(0m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Quantity_rolls_forward_from_the_latest_broker_snapshot_not_from_zero()
+    {
+        // The ledger only covers trades after the snapshot (e.g. an 18-month QFX), so the broker's 100
+        // shares anchor the position and the later 10-share buy is added on top: 110 × $50.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ANCH");
+
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 1, 31), marketValue: 4000m, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 3, 3), TransactionType.Buy, amount: -450m, quantity: 10m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2025, 3, 3), TransactionType.Deposit, 450m); // funds the purchase
+        await SeedPriceAsync(ctx, "ANCH", To, close: 50m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2025, 1, 31), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(5500m);
+    }
+
+    [Fact]
+    public async Task Broker_snapshot_newer_than_the_latest_price_is_used_as_is()
+    {
+        // Prices stop a month before the broker's statement and nothing traded since: the statement's
+        // market value is the freshest truth and matches what the Holdings view shows.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "STALE");
+
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 1), TransactionType.Buy, amount: -1000m, quantity: 10m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 1), TransactionType.Deposit, 1000m); // funds the purchase
+        await SeedPriceAsync(ctx, "STALE", To.AddDays(-30), close: 120m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1275m, quantity: 10m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 1), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(1275m);
+        result.EndingBalance.SnapshotAsOf.ShouldBe(To);
+    }
+
+    [Fact]
+    public async Task Unpriced_position_sold_to_zero_after_its_snapshot_is_worth_zero_not_the_stale_snapshot()
+    {
+        // Traditional IRA → Roth: an opening balance of 100 shares / $1,000 on the buy date, reinvested
+        // dividends, then everything converted out. No price history is loaded, so valuation falls back to
+        // the snapshot — which must not resurrect the old $1,000 once the shares are gone.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXBMX");
+
+        var opening = new DateOnly(2016, 2, 1);
+        await SeedCashAsync(ctx, accountId, opening, TransactionType.Deposit, 1000m); // funds the purchase
+        await SeedTransactionAsync(ctx, accountId, holding, opening, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedSnapshotAsync(ctx, holding, opening, marketValue: 1000m, source: AccountHoldingSnapshotSource.OpeningBalance, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2016, 3, 31), TransactionType.Dividend, amount: 20m, quantity: 2m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2018, 11, 20), TransactionType.Transfer, amount: -1050m, quantity: -102m);
+
+        // The period opens the day after the snapshot, so its starting balance is the snapshot's $1,000.
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, opening.AddDays(1), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.Value.ShouldBe(1000m);
+        result.EndingBalance.Value.ShouldBe(0m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Unpriced_position_that_changed_since_its_snapshot_is_revalued_at_the_snapshots_unit_price()
+    {
+        // 100 shares worth $4,000 ($40/share) at the snapshot, then 25 sold for $1,100; with no price series the
+        // remaining 75 shares are carried at the last known $40 ($3,000), and the sale's proceeds stay in the
+        // account as cash.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "NOPX");
+
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2025, 1, 31), marketValue: 4000m, quantity: 100m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 6, 2), TransactionType.Sell, amount: 1100m, quantity: -25m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2025, 1, 31), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(4100m); // 3,000 of shares + 1,100 cash
+    }
+
+    [Fact]
+    public async Task A_purchase_on_the_first_day_is_a_flow_not_part_of_the_starting_balance()
+    {
+        // Regression: the period used to open at the *close* of `from`, so a purchase that day was counted
+        // twice — in the starting balance and again as its (e.g. implied) contribution. It opens at the
+        // close of the previous day: $0 here, with the $1,000 funding the purchase as the only flow.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "FIRST");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedPriceAsync(ctx, "FIRST", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "FIRST", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.From.ShouldBe(firstDay);
+        result.StartingBalance.Value.ShouldBe(0m);
+        result.Contributions.Net.ShouldBe(1000m);
+        result.EndingBalance.Value.ShouldBe(1100m);
+        result.Returns.TimeWeighted.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m); // not ~ -45% or +110%
+    }
+
+    [Fact]
+    public async Task Value_series_agrees_with_the_balances_and_carries_the_contributions()
+    {
+        // Priced holding bought with a deposit: the chart's first point is the starting balance, its last
+        // is the ending balance, and its flows add up to the period's net contributions.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "SERIES");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedPriceAsync(ctx, "SERIES", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "SERIES", new DateOnly(2025, 6, 30), close: 12m);
+        await SeedPriceAsync(ctx, "SERIES", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var points = result.Series.Points;
+        result.Series.Interval.ShouldBe(PerformanceSeriesInterval.Monthly);
+        points[0].Value.ShouldBe(result.StartingBalance.Value);
+        points[^1].Date.ShouldBe(To);
+        points[^1].Value.ShouldBe(result.EndingBalance.Value);
+        points.Single(p => p.Date == new DateOnly(2025, 6, 30)).Value.ShouldBe(1200m); // 100 × $12
+        points.Sum(p => p.Deposits + p.Withdrawals).ShouldBe(result.Contributions.Net);
+    }
+
+    [Fact]
+    public async Task Returns_series_ends_at_the_headline_return_and_the_period_investment_gain()
+    {
+        // The returns chart must agree with the headline cards: its last cumulative return is the
+        // time-weighted return, and its last gain is ending − starting − net contributions.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "RETSERIES");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedPriceAsync(ctx, "RETSERIES", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "RETSERIES", new DateOnly(2025, 6, 30), close: 12m);
+        await SeedPriceAsync(ctx, "RETSERIES", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var points = result.Series.Points;
+        result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
+        points[0].CumulativeReturn.ShouldBe(0m);
+        points[^1].CumulativeReturn.ShouldBe(result.Returns.TimeWeighted.Rate);
+        points[^1].InvestmentGain.ShouldBe(
+            result.EndingBalance.Value - result.StartingBalance.Value - result.Contributions.Net);
+        points.Single(p => p.Date == new DateOnly(2025, 6, 30)).InvestmentGain.ShouldBe(200m); // 1200 − 0 − 1000
+    }
+
+    [Fact]
+    public async Task Time_weighted_return_ignores_when_money_was_added_and_the_series_is_its_running_chain()
+    {
+        // $1000 buys 100 shares at $10 (Mar 3); the price is $12 on Jun 30 (+20%). $1200 more buys 100 shares at
+        // $12 on Jul 1; the price ends at $11. Investments: 1.20 × (2200 / 2400) − 1 = +10% (time-weighted). The
+        // second $1200 lost money, so the money-weighted return is lower — and the two answer different questions.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXTIME");
+        var firstDay = new DateOnly(2025, 3, 3);
+        var secondDay = new DateOnly(2025, 7, 1);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedCashAsync(ctx, accountId, secondDay, TransactionType.Deposit, 1200m);
+        await SeedTransactionAsync(ctx, accountId, holding, secondDay, TransactionType.Buy, amount: -1200m, quantity: 100m);
+        await SeedPriceAsync(ctx, "ZXTIME", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "ZXTIME", new DateOnly(2025, 6, 30), close: 12m);
+        await SeedPriceAsync(ctx, "ZXTIME", secondDay, close: 12m);
+        await SeedPriceAsync(ctx, "ZXTIME", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var twr = result.Returns.TimeWeighted;
+        twr.Method.ShouldBe("DailyValuedTWR");
+        twr.Rate!.Value.ShouldBe(0.10m, tolerance: 0.000001m);
+        result.Returns.MoneyWeighted.Rate!.Value.ShouldBeLessThan(0.10m);
+
+        var points = result.Series.Points;
+        points.Single(p => p.Date == new DateOnly(2025, 6, 30)).CumulativeReturn!.Value.ShouldBe(0.20m, tolerance: 0.000001m);
+        points[^1].CumulativeReturn.ShouldBe(twr.Rate);
+    }
+
+    [Fact]
+    public async Task A_deposit_whose_eve_cant_be_valued_falls_back_to_Modified_Dietz_with_the_cause()
+    {
+        // No close within the price-age limit around the Aug 1 deposit, so the account can't be valued on its eve and
+        // the chain can't be split there. The figure is the labelled Modified Dietz approximation, not a guess.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXGAP");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2025, 8, 1), TransactionType.Deposit, 500m);
+        await SeedPriceAsync(ctx, "ZXGAP", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "ZXGAP", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var twr = result.Returns.TimeWeighted;
+        twr.Method.ShouldBe("ModifiedDietz");
+        twr.FallbackReason.ShouldBe("StalePrice");
+        twr.Rate.ShouldNotBeNull();
+        result.Series.Points[^1].CumulativeReturn.ShouldBe(twr.Rate);
+    }
+
+    [Fact]
+    public async Task A_held_position_is_missing_not_zero_when_its_only_earlier_snapshot_says_nothing_was_held()
+    {
+        // Regression (F2): a $0 opening balance at inception, then a purchase, and no price until months later.
+        // In between, the "nothing held" snapshot carries no price information, so the position is an honest
+        // unknown — not a silent $0 reported as complete.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "GAP");
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2024, 12, 31), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 1, 2), TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2025, 1, 2), TransactionType.Deposit, 1000m); // funds the purchase
+        await SeedPriceAsync(ctx, "GAP", new DateOnly(2025, 9, 2), close: 12m);
+        await SeedPriceAsync(ctx, "GAP", To, close: 13m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2025, 7, 1), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.IsComplete.ShouldBeFalse();
+        result.StartingBalance.HoldingsMissingSnapshot.ShouldBe(1);
+        result.Returns.TimeWeighted.Rate.ShouldBeNull();
+        result.Returns.TimeWeighted.Reason.ShouldBe("IncompleteStartingBalance");
+        result.EndingBalance.Value.ShouldBe(1300m); // priced once the series starts
+    }
+
+    [Fact]
+    public async Task A_money_market_fund_bought_before_its_price_history_starts_is_valued_at_one_dollar_a_share()
+    {
+        // A Treasury money market fund bought years before the price provider's history begins: its SEC filing says it keeps
+        // a stable $1.00 a share, so 2020 is valued (not $0, not missing).
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        await SeedMoneyMarketFundAsync(ctx, "ZXUXX", seeksStablePrice: true, stablePrice: 1m);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXUXX");
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2017, 2, 28), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2017, 3, 1), TransactionType.Deposit, 50_000m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2017, 3, 1), TransactionType.Buy, amount: -50_000m, quantity: 50_000m);
+        await SeedPriceAsync(ctx, "ZXUXX", new DateOnly(2021, 6, 1), close: 1m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(
+            portfolioId, accountId, new DateOnly(2020, 1, 1), new DateOnly(2020, 12, 31), CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.Value.ShouldBe(50_000m);
+        result.StartingBalance.IsComplete.ShouldBeTrue();
+        result.EndingBalance.Value.ShouldBe(50_000m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+        result.Returns.TimeWeighted.Rate.ShouldBe(0m);
+    }
+
+    [Fact]
+    public async Task An_unlisted_fund_whose_prices_are_all_one_dollar_is_treated_as_stable_nav()
+    {
+        // Not on the known money-market list, but 20+ closes of exactly $1.00 identify it as one.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "MMKTX");
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2019, 3, 1), TransactionType.Buy, amount: -500m, quantity: 500m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2019, 3, 1), TransactionType.Deposit, 500m); // funds the purchase
+        for (var day = 0; day < StablePrices.MinObservations; day++)
+            await SeedPriceAsync(ctx, "MMKTX", new DateOnly(2021, 6, 1).AddDays(day), close: 1m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(
+            portfolioId, accountId, new DateOnly(2019, 3, 1), new DateOnly(2020, 6, 30), CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(500m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_holding_held_but_untouched_in_the_window_is_valued_even_when_its_only_snapshot_is_later()
+    {
+        // Regression (F6): bought before the window, no activity inside it, and the only broker snapshot comes
+        // after `to` (e.g. a year-ago window and a recent QFX). It was held throughout, so it counts at both ends.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "QUIET");
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 3), TransactionType.Buy, amount: -400m, quantity: 10m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 3), TransactionType.Deposit, 400m); // funds the purchase
+        await SeedPriceAsync(ctx, "QUIET", new DateOnly(2025, 3, 31), close: 50m);
+        await SeedPriceAsync(ctx, "QUIET", new DateOnly(2025, 6, 30), close: 55m);
+        await SeedSnapshotAsync(ctx, holding, new DateOnly(2026, 9, 30), marketValue: 700m, quantity: 10m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(
+            portfolioId, accountId, new DateOnly(2025, 4, 1), new DateOnly(2025, 6, 30), CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.StartingBalance.Value.ShouldBe(500m);
+        result.EndingBalance.Value.ShouldBe(550m);
+        result.Returns.TimeWeighted.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+    }
+
+    [Fact]
+    public async Task A_close_older_than_the_price_age_limit_is_not_used_to_value_a_position()
+    {
+        // Prices stop in mid-2024 (a delisted or merged ticker): valuing the position at To with that close
+        // would be a guess, so the ending balance is incomplete instead.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "GONE");
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 3), TransactionType.Buy, amount: -400m, quantity: 10m);
+        await SeedPriceAsync(ctx, "GONE", new DateOnly(2024, 6, 28), close: 41m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.IsComplete.ShouldBeFalse();
+        result.EndingBalance.HoldingsMissingSnapshot.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_close_within_the_price_age_limit_is_used()
+    {
+        // A weekend or holiday gap is normal: a close a few days before the valuation date still counts.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "RECENT");
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 3), TransactionType.Buy, amount: -400m, quantity: 10m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 3), TransactionType.Deposit, 400m); // funds the purchase
+        await SeedPriceAsync(ctx, "RECENT", To.AddDays(-4), close: 45m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.EndingBalance.Value.ShouldBe(450m);
+        result.EndingBalance.IsComplete.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task An_in_kind_transfer_in_is_a_contribution_valued_at_the_days_price()
+    {
+        // An ACAT into a new broker: the QFX reports 20 shares and no amount. Without valuing it, the whole
+        // position would read as investment gain.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ACAT");
+        var transferDay = new DateOnly(2025, 2, 3);
+        await SeedTransactionAsync(ctx, accountId, holding, transferDay, TransactionType.Transfer, amount: 0m, quantity: 20m);
+        await SeedPriceAsync(ctx, "ACAT", transferDay, close: 50m);
+        await SeedPriceAsync(ctx, "ACAT", To, close: 55m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Contributions.Net.ShouldBe(1000m);
+        result.EndingBalance.Value.ShouldBe(1100m);
+        result.Returns.TimeWeighted.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+    }
+
+    [Fact]
+    public async Task An_in_kind_transfer_that_cant_be_priced_leaves_the_return_unknown_with_a_reason()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "NOPX");
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2025, 2, 3), TransactionType.Transfer, amount: 0m, quantity: 20m);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1100m, quantity: 20m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Returns.TimeWeighted.Rate.ShouldBeNull();
+        result.Returns.TimeWeighted.Reason.ShouldBe("UnvaluedTransfer");
+        result.Returns.MoneyWeighted.Reason.ShouldBe("UnvaluedTransfer");
+    }
+
+    [Fact]
+    public async Task A_missing_balance_says_which_holding_and_why()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "GONE");
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 3), TransactionType.Deposit, 400m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 3), TransactionType.Buy, amount: -400m, quantity: 10m);
+        await SeedPriceAsync(ctx, "GONE", new DateOnly(2024, 6, 28), close: 41m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+
+        var missing = result!.EndingBalance.Missing.ShouldHaveSingleItem();
+        missing.Symbol.ShouldBe("GONE");
+        missing.Cause.ShouldBe("StalePrice");
+        missing.AccountId.ShouldBe(accountId);
+    }
+
+    [Fact]
+    public async Task A_missing_price_while_prices_are_being_fetched_for_the_account_is_reported_as_pending()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "NEWX");
+        await SeedCashAsync(ctx, accountId, new DateOnly(2024, 6, 3), TransactionType.Deposit, 400m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2024, 6, 3), TransactionType.Buy, amount: -400m, quantity: 10m);
+
+        var pending = new PortfolioPerformanceService(
+            ctx.Db,
+            new AccountValuationLoader(ctx.Db, new ValuationOptions()),
+            new ModifiedDietzTimeWeightedReturnCalculator(),
+            new XirrMoneyWeightedReturnCalculator(),
+            new PendingFor(accountId));
+        var result = await pending.ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+        var settled = await NewService(ctx).ComputeForAccountAsync(portfolioId, accountId, new DateOnly(2024, 6, 3), To, CancellationToken.None);
+
+        result!.EndingBalance.Missing.ShouldHaveSingleItem().Cause.ShouldBe(MissingCauseNames.PricesPending);
+        settled!.EndingBalance.Missing.ShouldHaveSingleItem().Cause.ShouldBe("NoPrice");
+    }
+
+    private sealed class PendingFor(Guid accountId) : Vizfolio.Application.Pricing.Abstractions.IPriceRefreshStatus
+    {
+        public bool IsPending(Guid id) => id == accountId;
+
+        public Vizfolio.Application.Pricing.Abstractions.PriceRefreshState Current =>
+            new(true, false, null, null, null, null, null, null);
+    }
+
+    [Fact]
+    public async Task A_floating_nav_money_market_fund_is_not_assumed_to_be_worth_one_dollar()
+    {
+        // An institutional prime fund floats (its N-MFP says it doesn't seek a stable price): with no close, its
+        // value is unknown rather than a guessed $1.00 a share.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        await SeedMoneyMarketFundAsync(ctx, "FLOATX", seeksStablePrice: false, stablePrice: null);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "FLOATX");
+        await SeedCashAsync(ctx, accountId, new DateOnly(2019, 7, 1), TransactionType.Deposit, 5_000m);
+        await SeedTransactionAsync(ctx, accountId, holding, new DateOnly(2019, 7, 1), TransactionType.Buy, amount: -5_000m, quantity: 5_000m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(
+            portfolioId, accountId, new DateOnly(2019, 7, 1), new DateOnly(2020, 12, 31), CancellationToken.None);
+
+        result!.EndingBalance.IsComplete.ShouldBeFalse();
+        result.EndingBalance.Missing.ShouldHaveSingleItem().Symbol.ShouldBe("FLOATX");
+    }
+
+    private static async Task SeedMoneyMarketFundAsync(TestDbContext ctx, string ticker, bool seeksStablePrice, decimal? stablePrice)
+    {
+        var fund = new Vizfolio.Domain.Funds.MoneyMarketFund($"S{Guid.NewGuid():N}"[..10]);
+        fund.Update($"{ticker} Money Market Fund", null, "Government", seeksStablePrice, stablePrice, false,
+            new DateOnly(2026, 8, 31), Guid.NewGuid().ToString("N")[..20], [ticker]);
+        ctx.Db.MoneyMarketFunds.Add(fund);
+        await ctx.Db.SaveChangesAsync();
+    }
+
     private static PortfolioPerformanceService NewService(TestDbContext ctx) =>
         new(ctx.Db,
-            new ModifiedDietzTimeWeightedReturnCalculator(),
+            new AccountValuationLoader(ctx.Db, new ValuationOptions()),
+            new DailyValuedTimeWeightedReturnCalculator(),
             new XirrMoneyWeightedReturnCalculator());
 
-    // ---------- seeding helpers ----------
-
-    private static async Task<Guid> SeedPortfolioAsync(TestDbContext ctx, string name = "Test Portfolio")
+    // ---------- seeding helpers (shared ones in PortfolioSeed) ----------
+    private static async Task SeedOpeningAndBuy(
+        TestDbContext ctx, Guid accountId, DateOnly inception, decimal quantity)
     {
-        var portfolio = new Portfolio(name);
-        ctx.Db.Portfolios.Add(portfolio);
-        await ctx.Db.SaveChangesAsync();
-        return portfolio.PortfolioId;
-    }
-
-    private static async Task<Guid> SeedAccountAsync(TestDbContext ctx, Guid portfolioId, string accountNumber)
-    {
-        var account = new Account(portfolioId, $"acct {accountNumber}", "vanguard.com", accountNumber);
-        ctx.Db.Accounts.Add(account);
-        await ctx.Db.SaveChangesAsync();
-        return account.AccountId;
-    }
-
-    private static async Task<(Guid PortfolioId, Guid AccountId)> SeedPortfolioWithAccountAsync(TestDbContext ctx)
-    {
-        var portfolioId = await SeedPortfolioAsync(ctx);
-        var accountId = await SeedAccountAsync(ctx, portfolioId, "1111");
-        return (portfolioId, accountId);
-    }
-
-    private static async Task<Guid> SeedHoldingAsync(TestDbContext ctx, Guid accountId)
-    {
-        var holding = new AccountHolding(accountId, AccountHoldingKind.Other);
-        holding.SetIdentifiers($"SYM{Guid.NewGuid():N}"[..8], name: null, isin: null, cusip: null);
-        ctx.Db.AccountHoldings.Add(holding);
-        await ctx.Db.SaveChangesAsync();
-        return holding.AccountHoldingId;
-    }
-
-    private static async Task SeedSnapshotAsync(
-        TestDbContext ctx,
-        Guid holdingId,
-        DateOnly asOf,
-        decimal? marketValue,
-        string? currency = "USD",
-        AccountHoldingSnapshotSource source = AccountHoldingSnapshotSource.BrokerPosition)
-    {
-        var snapshot = new AccountHoldingSnapshot(holdingId, asOf, quantity: 1m, source);
-        snapshot.SetValuation(costBasis: null, marketValue, unitPrice: null, currency);
-        ctx.Db.AccountHoldingSnapshots.Add(snapshot);
-        await ctx.Db.SaveChangesAsync();
-    }
-
-    private static async Task SeedTransactionAsync(
-        TestDbContext ctx,
-        Guid accountId,
-        Guid holdingId,
-        DateOnly tradeDate,
-        TransactionType type,
-        decimal amount)
-    {
-        var tx = new AccountTransaction(
-            accountId,
-            sourceSystem: "TEST",
-            externalId: Guid.NewGuid().ToString("N"),
-            type,
-            tradeDate,
-            amount);
-        tx.LinkToHolding(holdingId);
-        ctx.Db.AccountTransactions.Add(tx);
-        await ctx.Db.SaveChangesAsync();
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, $"S{Guid.NewGuid():N}"[..6]);
+        await SeedSnapshotAsync(ctx, holding, inception.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedTransactionAsync(ctx, accountId, holding, inception, TransactionType.Buy, amount: -1000m, quantity: quantity);
+        await SeedSnapshotAsync(ctx, holding, To, marketValue: 1000m);
     }
 }

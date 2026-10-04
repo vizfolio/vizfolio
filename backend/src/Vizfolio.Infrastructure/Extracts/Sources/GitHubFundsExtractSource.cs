@@ -47,6 +47,18 @@ public sealed class GitHubFundsExtractSource : IFundsExtractSource, IDisposable
         return await JsonSerializer.DeserializeAsync<FundSnapshotExtract>(gunzipped, ExtractsJson.Options, cancellationToken);
     }
 
+    public async Task<MoneyMarketRegistryExtract?> GetMoneyMarketRegistryAsync(CancellationToken cancellationToken = default)
+    {
+        var archive = await EnsureArchiveAsync(cancellationToken);
+        await using var stream = archive.OpenEntry("money_market_funds.json");
+        if (stream is null)
+        {
+            _logger.LogInformation("Funds tarball has no money_market_funds.json yet; skipping the money market registry.");
+            return null;
+        }
+        return await JsonSerializer.DeserializeAsync<MoneyMarketRegistryExtract>(stream, ExtractsJson.Options, cancellationToken);
+    }
+
     private async Task<GitHubTarballArchive> EnsureArchiveAsync(CancellationToken cancellationToken)
     {
         if (_archive is not null) return _archive;

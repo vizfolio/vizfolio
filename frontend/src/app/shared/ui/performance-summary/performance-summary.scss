@@ -4,53 +4,49 @@
   gap: var(--space-5);
 }
 
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-4);
-}
-
-.details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-4);
-}
-
-.detail-card {
-  padding: var(--space-4);
+.calc {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
 }
 
-.detail-card h3 {
-  font-size: 1rem;
-  margin-bottom: var(--space-3);
+.calc summary {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-radius: var(--radius-lg);
 }
 
-.detail-card dl {
+.calc summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.calc-body {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.calc dl {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
-.detail-card dl > div {
+.calc dl > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
 }
 
-.detail-card dt {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
+.calc dt {
   color: var(--color-text-muted);
   font-size: 0.9rem;
 }
 
-.detail-card dd {
+.calc dd {
   margin: 0;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -62,6 +58,21 @@
   font-size: 0.78rem;
   font-weight: 400;
   color: var(--color-text-muted);
+}
+
+.note {
+  margin: var(--space-3) 0 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.trend-up {
+  color: var(--color-positive);
+}
+
+.trend-down {
+  color: var(--color-negative);
 }
 
 .chart-card {

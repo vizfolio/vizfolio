@@ -41,6 +41,28 @@ public sealed class AccountHolding
 
     public DateTimeOffset CreatedAt { get; private set; }
 
+    /// <summary>
+    /// The account's settlement (core / sweep) fund, as its broker marks it: its shares are the account's cash.
+    /// Set by imports from broker knowledge (see docs/performance-api.md → "Broker profiles").
+    /// </summary>
+    public bool IsSettlementFund { get; private set; }
+
+    /// <summary>The upload that created this holding; undoing it may remove the holding if nothing else uses it.</summary>
+    public Guid? CreatedByImportBatchId { get; private set; }
+
+    public void MarkSettlementFund()
+    {
+        IsSettlementFund = true;
+    }
+
+    public void MarkCreatedByImport(Guid importBatchId)
+    {
+        if (importBatchId == Guid.Empty)
+            throw new ArgumentException("Import batch ID is required.", nameof(importBatchId));
+
+        CreatedByImportBatchId ??= importBatchId;
+    }
+
     public void SetIdentifiers(string? symbol, string? name, string? isin, string? cusip)
     {
         Symbol = string.IsNullOrWhiteSpace(symbol) ? null : symbol.Trim().ToUpperInvariant();
@@ -64,6 +86,34 @@ public sealed class AccountHolding
         CurrencyCode = string.IsNullOrWhiteSpace(currencyCode)
             ? null
             : currencyCode.Trim().ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Promotes a holding created before its reference data was known (<see cref="AccountHoldingKind.Other"/>,
+    /// e.g. an unrecognised ticker or an opening balance) to a <see cref="AccountHoldingKind.Security"/>. The
+    /// holding keeps its id, so its transactions and snapshots stay attached.
+    /// </summary>
+    public void PromoteToSecurity(Guid securityId)
+    {
+        EnsurePromotable(securityId);
+        Kind = AccountHoldingKind.Security;
+        LinkToSecurity(securityId);
+    }
+
+    /// <summary>As <see cref="PromoteToSecurity"/>, for a holding now recognised as a fund share class.</summary>
+    public void PromoteToFund(Guid fundId)
+    {
+        EnsurePromotable(fundId);
+        Kind = AccountHoldingKind.Fund;
+        LinkToFund(fundId);
+    }
+
+    private void EnsurePromotable(Guid referenceId)
+    {
+        if (referenceId == Guid.Empty)
+            throw new ArgumentException("Reference ID is required.", nameof(referenceId));
+        if (Kind != AccountHoldingKind.Other)
+            throw new InvalidOperationException($"Only an unclassified (Other) holding can be promoted; this one is {Kind}.");
     }
 
     public void LinkToSecurity(Guid securityId)

@@ -35,6 +35,24 @@ public sealed class TransactionFingerprintTests
     }
 
     [Fact]
+    public void A_reinvestment_matches_across_sources_that_sign_its_amount_differently()
+    {
+        // QFX reports a reinvestment's total as positive; the Vanguard report has it negative.
+        var qfx = TransactionFingerprint.Compute(Account, Date, "FUNDX", 2.5m, 25.00m);
+        var vanguard = TransactionFingerprint.Compute(Account, Date, "FUNDX", 2.5m, -25.00m);
+
+        qfx.ShouldBe(vanguard);
+    }
+
+    [Fact]
+    public void A_deposit_and_a_withdrawal_of_the_same_amount_stay_distinct()
+    {
+        // Cash rows have no quantity, so the amount's sign is their only direction.
+        TransactionFingerprint.Compute(Account, Date, null, null, 500m)
+            .ShouldNotBe(TransactionFingerprint.Compute(Account, Date, null, null, -500m));
+    }
+
+    [Fact]
     public void Amount_is_compared_at_cent_precision()
     {
         TransactionFingerprint.Compute(Account, Date, "VOO", 10m, -463.8200m)

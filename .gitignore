@@ -10,8 +10,18 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+# ...and renamed copies/backups of them (e.g. vizfolio.dev.db_old, its -shm/-wal side files)
+*.db_*
+*.db-*
+
+# direnv / nix flake dev-shell state (holds the .direnv/dotnet-root symlink)
+.direnv/
 
 # Frontend (frontend/ Angular workspace; frontend/.gitignore covers the rest)
 frontend/node_modules/
 frontend/dist/
 frontend/.angular/
+
+# Claude Code: personal settings and working plans (shared .claude/settings.json and skills stay tracked)
+.claude/settings.local.json
+.claude/plans/

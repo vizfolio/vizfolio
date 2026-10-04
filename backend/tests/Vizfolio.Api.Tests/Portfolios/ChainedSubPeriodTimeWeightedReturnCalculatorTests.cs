@@ -99,6 +99,23 @@ public sealed class ChainedSubPeriodTimeWeightedReturnCalculatorTests
         Math.Abs(result.Rate!.Value - expected).ShouldBeLessThan(0.0001m);
     }
 
+    [Fact]
+    public void A_flow_on_the_first_day_belongs_to_the_first_sub_period()
+    {
+        // Regression: a deposit dated `from` (e.g. the funding of a first-day purchase) was in no sub-period,
+        // so it counted as investment gain. Start $1000, +$1000 on day 0 → $2000 at day 180 → $2200 at the end:
+        // sub1 = (2000 − 1000 − 1000) / (1000 + 1000) = 0, sub2 = 200 / 2000 = 10%.
+        var ctx = Ctx(
+            starting: 1000m,
+            ending: 2200m,
+            interim: new[] { new BalancePoint(Start.AddDays(180), 2000m) },
+            flows: new[] { new CashFlow(Start, 1000m) });
+
+        var result = _calc.Compute(ctx);
+
+        result.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+    }
+
     private static PerformanceComputationContext Ctx(
         decimal starting = 1000m,
         decimal ending = 1000m,

@@ -25,7 +25,7 @@ public sealed class GetAccountHistoryCoverageEndpoint
             .Produces<HistoryCoverageResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound));
         Summary(s => s.Summary =
-            "Report whether the account has a gap between its earliest transaction and its earliest snapshot.");
+            "Report whether the account's starting positions can be derived from its statements (a gap means they can't).");
     }
 
     public override async Task HandleAsync(GetAccountHistoryCoverageRequest req, CancellationToken ct)

@@ -58,4 +58,25 @@ describe('FileUpload', () => {
 
     expect(emitted).toEqual([]);
   });
+
+  it('emits every dropped file together when multiple is on, and only the first otherwise', () => {
+    const drop = (multiple: boolean) => {
+      const fixture = render();
+      fixture.componentRef.setInput('multiple', multiple);
+      fixture.detectChanges();
+      const batches: File[][] = [];
+      fixture.componentInstance.filesSelected.subscribe((f) => batches.push(f));
+      const files = [new File(['a'], 'a.qfx'), new File(['b'], 'b.xlsx')];
+      const event = new Event('drop') as DragEvent;
+      Object.defineProperty(event, 'dataTransfer', { value: { files } });
+      Object.defineProperty(event, 'preventDefault', { value: () => {} });
+      (fixture.nativeElement as HTMLElement).querySelector('.dropzone')!.dispatchEvent(event);
+      return { batches, fixture };
+    };
+
+    const several = drop(true);
+    expect(several.batches.map((b) => b.map((f) => f.name))).toEqual([['a.qfx', 'b.xlsx']]);
+    expect((several.fixture.nativeElement as HTMLElement).querySelector('input')?.multiple).toBe(true);
+    expect(drop(false).batches.map((b) => b.map((f) => f.name))).toEqual([['a.qfx']]);
+  });
 });

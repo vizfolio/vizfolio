@@ -35,7 +35,7 @@ frontend/
         │   ├── api/      # PortfolioApiService + typed DTO models
         │   └── theme/    # ThemeService (light/dark, persisted)
         ├── layout/       # app chrome: shell, sidebar, topbar, theme-toggle, nav-items
-        ├── shared/ui/    # reusable presentational components (stat-card, perf-chart)
+        ├── shared/ui/    # reusable presentational components (stat-card, performance-headline, perf-chart, returns-chart)
         └── features/     # routed pages: dashboard, coming-soon (placeholders)
 ```
 
@@ -46,7 +46,7 @@ The UI is a **shell + features** structure so sections can be added without touc
 - **`layout/shell`** — CSS-grid frame: fixed top bar, left sidebar, scrollable `<router-outlet>` main area. Owns the off-canvas sidebar state used on narrow (< 768px) screens.
 - **`layout/sidebar`** — primary nav rendered from the `NavItem[]` array in `layout/nav-items.ts`. **Add a nav link by adding one entry there.** Uses `routerLink` + `routerLinkActive`.
 - **`layout/topbar`** — brand, hamburger (narrow screens, emits `menuToggle`), theme toggle, and a disabled account-menu placeholder for when auth lands.
-- **`shared/ui`** — presentational, `input()`-driven components with no data dependencies: `stat-card` (label/value/trend/incomplete), `perf-chart`, and reusable form controls that wrap native inputs behind app design tokens (`date-field`, `select-field`, `file-upload`) so styling/behaviour live in one place and swap without touching call sites.
+- **`shared/ui`** — presentational, `input()`-driven components with no data dependencies: `stat-card` (label/value/trend/incomplete, plus an optional `hint` explaining the figure and `featured` for the page's headline), `perf-chart`, `returns-chart`, and reusable form controls that wrap native inputs behind app design tokens (`date-field`, `select-field`, `file-upload`) so styling/behaviour live in one place and swap without touching call sites.
 - **`features/*`** — lazy-loaded routed pages. `dashboard` is the landing page; `coming-soon` is a shared placeholder whose heading is bound from route `data.title` via `withComponentInputBinding()`.
 
 ## Theming
@@ -60,7 +60,13 @@ Components reference **only** semantic tokens, so re-theming never touches compo
 
 ## Charts
 
-`shared/ui/perf-chart` is a thin wrapper around **Chart.js** (`chart.js`, MIT-licensed) — the only place Chart.js is imported, so the library is swappable from one file. It takes `labels` + typed `PerfDataset[]` inputs, resolves series colors from the semantic theme tokens (so charts follow light/dark), and rebuilds when inputs or the theme change. Note: the performance API returns period *aggregates*, not a time series, so the dashboard chart currently renders a **synthetic** monthly curve (`features/dashboard/dashboard.util.ts`, marked `TODO(perf-timeseries)`) until a time-series endpoint exists.
+`shared/ui/perf-chart` is a thin wrapper around **Chart.js** (`chart.js`, MIT-licensed) — the only place Chart.js is imported, so the library is swappable from one file. It takes `labels` + typed `PerfDataset[]` inputs, resolves series colors from the semantic theme tokens (so charts follow light/dark), and rebuilds when inputs or the theme change. The "Value over time" charts (dashboard, portfolio Performance, account Performance) plot the performance response's `series` — real balances valued from price history, with each interval's deposits/withdrawals as bars — mapped onto chart arrays by `buildValueSeries` (`shared/util/performance-format.ts`), which also formats the axis labels to suit the API-chosen interval. A `null` value (a date where some holding couldn't be valued) is a gap in the line, so `PerfDataset.data` is `(number | null)[]`. `perf-chart` takes an optional `valueFormat` (`number` | `currency` | `percent`, plus `currencyCode`) that formats y-axis ticks and tooltips; `percent` expects values already in percent and emphasizes the zero line.
+
+`shared/ui/returns-chart` is the "Investment returns over time" card, shown under the value chart on the dashboard and in `performance-summary` (portfolio and account Performance). A `%` / currency toggle (`aria-pressed` buttons) switches between the series' `cumulativeReturn` (ends at the time-weighted "Investment return", not the money-weighted "Your return" headline — a caption says so, and flags a Modified Dietz fallback as approximate) and `investmentGain` (value − starting balance − net contributions), mapped by `buildReturnSeries`. `headingLevel` (2 or 3) fits the host page's outline. The dashboard's offline `SAMPLE_PERFORMANCE` carries a sample series, including consistent return/gain values.
+
+## Returns: "Your return" and "Investment return"
+
+The headline return is the **money-weighted** `returns.moneyWeighted` (XIRR), labelled **"Your return"** (a personal rate of return). The time-weighted `returns.timeWeighted` is second, labelled **"Investment return"**. Both appear in the shared headline row (Your return `featured`), each with a hint explaining it and a detail line from `returnDetail` (`performance-format.ts`): "a year", "over the period", the annualized equivalent ("+10.2% a year"), "approximate" on a fallback, or the reason a figure is unknown. Labels, hints and the plain-language text for backend reason/cause codes live in `shared/util/reason-text.ts` (`returnReasonText`, `fallbackText`, `returnMethodText`, `causeText`); add new codes there. The headline row is one shared component, `shared/ui/performance-headline`, used by the dashboard and by `performance-summary` (portfolio and account Performance), so all three pages show the same four cards in the same order, each figure once: **Balance** (ending value, "from $X at the start", and a completeness badge projected into the card via `statBadge`, describing whichever end of the period is worse off; `balanceLabel="Portfolio value"` on the dashboard) · **Your return** (featured) · **Investment return** · **Net contributions** (with "$X in · $Y out" underneath unless `showGrossFlows` is false — it's off on the portfolio-scope dashboard and Performance page, where transfers between accounts inflate the gross figures). `performance-summary` adds a native `<details>` "How this is calculated" panel (closed by default) with the methods, annualized rate, fallback and reason text. Screens stay provider-agnostic: no broker is named in return labels, hints or notes. See [performance-api.md](./performance-api.md#returns).
 
 ## Data flow
 
@@ -70,7 +76,64 @@ Components reference **only** semantic tokens, so re-theming never touches compo
 
 `features/accounts/detail/account.ts` is a tabbed container over the account-scoped endpoints. Each tab is its own small component taking `portfolioId`/`accountId` inputs and following the same shape: a `status` signal + `toObservable(query) → switchMap(api) → subscribe` feeding a data signal.
 
-- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings values come from the latest snapshot (see the Performance API's "Holdings & ledger endpoints"); a holding with no snapshot is left unvalued and surfaced in a "not valued" note. The ledger reuses the `date-field` control for its optional trade-date filter.
+- **Holdings** (`account-holdings.ts`) and **Ledger** (`account-ledger.ts`) render the reusable `shared/ui/data-table` (client-side sortable, fully presentational). Their row DTOs (`core/api/models/holdings.models.ts`, `ledger.models.ts`) are `type` aliases — not `interface`s — so they satisfy `DataTable`'s `Record<string, unknown>` row constraint. Money/quantity cells format via `shared/util/performance-format.ts` (`formatMoney`, `formatQuantity`). Holdings are valued by the same engine as performance (see the Performance API's "Holdings & ledger endpoints"): each row has a `status` (`Valued` / `NotHeld` / `Missing`), a `valuationSource` and a "Priced as of" date; the account's cash (incl. its settlement fund) is the last row, `kind: "Cash"`. Missing rows are listed by cause in a "couldn't be valued" note. The "Adjust starting positions" form (`opening-balance-form.ts`) prefills from `getOpeningPositions` — positions held before the imported history are filled in to confirm, ones that can't be derived are blank, cash is a `$CASH` row. The ledger reuses the `date-field` control for its optional trade-date filter.
+
+## Imports: one drop zone, summaries, warnings and undo
+
+- **One drop zone** (`features/accounts/import-drop-zone/`), on the Accounts page and — for a portfolio with no
+  accounts yet — on the dashboard next to `import-onboarding` (export steps per broker; broker names are fine there,
+  they're import formats). It takes several files (`file-upload` with `multiple`) and imports them **one at a time**
+  through the portfolio endpoint, which finds each file's account by number or, for a file without one, by the
+  transactions already in an account. When the server answers `NeedsAccountSelection`, the file waits for an inline
+  **`account-picker`** (candidates with their evidence — "2,514 matching transactions · 3 shared funds" — the
+  likeliest pre-selected, or a new account; a new account for a file without a number asks for the institution and
+  number) and the queue pauses, since the answer can affect later files; the answer is sent with the file again.
+  The Format override sits under "Advanced". The manual add-account form is a collapsed "Add an account manually"
+  card.
+- **Summary** (`import-summary/`), after every import here and on an account's Import tab: the detected format;
+  each account and how it was found (`import-text.ts` → `routingNote`), the dates the file covers, added / already
+  there / updated / failed counts with **failure reasons**; warnings; implied contributions in the account's
+  currency; "Fetching prices…" until the account's value and "Your return" are in (polled); and **Undo this
+  import**. A re-upload of the same file shows the earlier result (`AlreadyImported`).
+- **Account Import tab**: a file without account details that clearly belongs to another account comes back
+  `LikelyOtherAccount` and is held with **Import into {account}** / **Import here anyway**. A 422 is
+  `AccountMismatch` (a QFX for other accounts).
+- **Warnings** (`import-warnings/`): what the parser didn't fully understand, collapsed in a native `<details>`.
+- **Undo** (`undo-import/undo-import-confirm.ts`): loads the server's preview, shows it in an inline confirmation
+  (focus moves to its heading; Undo / Cancel) and undoes. Used by the summary and the **Import history**
+  (`import-history/import-history-list.ts`: uploads newest first, filtered to the account on an account page, with
+  a Download link for the stored file; undone imports stay listed, struck through).
+- **Reprocess** lives on **Settings → Ledger** ("Reprocess imports").
+
+## Data health
+
+- **Account → Data health tab** (`detail/account-health.ts`, replaces the old History tab; `?tab=health` opens it):
+  the account's findings via **`health-list/`** — "Needs attention" (Blocking) then "Worth knowing" (Info), each with
+  its action: *Fetch prices* (queues `POST /api/prices/refresh`, then re-checks), *Add a price provider* (Settings),
+  *Adjust starting positions* / *Import a file* (switch tab), *Review* implied contributions (a by-year table from
+  `GET .../implied-contributions`). History coverage facts sit in a collapsed panel. It re-checks while prices
+  download.
+- **Accounts list**: each account's value, this year's "Your return" (account performance from Jan 1, fetched in
+  parallel) and a health dot from one `GET .../health` call, linking to that account's Data health tab.
+- **Readable reasons** (`shared/util/reason-text.ts`): `missingText` names what couldn't be valued and why ("We
+  couldn't value XYZ at the end of the period: no price available (+2 more).") — in the completeness badge's tooltip
+  and as a note under the headline cards (dashboard, Performance, account Performance) with a "Review data health"
+  link. The Holdings tab lists missing holdings by cause.
+- **Tabs**: Performance · Holdings · Ledger · Data health · Import · Adjust starting positions (the old "Opening
+  balance" form, rarely needed). The Ledger shows the normalized type next to the broker's label.
+- Global `.btn` styles live in `styles.scss`; new components use them instead of copying button CSS.
+
+## Prices: Settings and "Updating…"
+
+- **Settings → Prices** (`features/settings/price-settings/`) lists the price providers in the order they're tried
+  with their state (Active / Needs an API key / Off; Stooq flagged as adjusted-only), a password field to save or
+  remove an API key (hidden when the key comes from server configuration), the background refresh status with a
+  "Fetch prices now" button (it polls the status while a fetch runs), and the price series that need a look (no data,
+  failed, history starting late). With no provider set up it points to getting a free Tiingo key.
+- **Pending prices.** Right after an import, missing values whose prices are still downloading come back with cause
+  `PricesPending`. The completeness badge then reads "Updating…" (not "Estimate"), the Holdings tab says
+  "Prices updating…", and the dashboard, Performance page, account Performance tab and Holdings tab re-fetch every
+  5 s until the cause clears (`shared/util/poll.ts` → `pollWhilePending`, capped at 5 minutes).
 
 ## Dev loop
 

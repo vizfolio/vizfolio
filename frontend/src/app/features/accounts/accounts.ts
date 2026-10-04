@@ -2,16 +2,18 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { catchError, of, switchMap } from 'rxjs';
+import { catchError, forkJoin, map, of, switchMap } from 'rxjs';
 
 import { PortfolioApiService } from '../../core/api/portfolio-api.service';
-import { ImportParser, PortfolioImportResult } from '../../core/api/models/imports.models';
-import { AccountSummary } from '../../core/api/models/performance.models';
+import { HealthStatus } from '../../core/api/models/health.models';
+import { AccountSummary, PortfolioPerformance } from '../../core/api/models/performance.models';
 import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.service';
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
-import { FileUpload } from '../../shared/ui/file-upload/file-upload';
-import { SelectField } from '../../shared/ui/select-field/select-field';
-import { parserAcceptAttr, parserFormatOptions } from './import-format-options';
+import { formatMoney, formatPercent } from '../../shared/util/performance-format';
+import { YOUR_RETURN_LABEL } from '../../shared/util/reason-text';
+import { ImportDropZone } from './import-drop-zone/import-drop-zone';
+import { ImportHistoryList } from './import-history/import-history-list';
+import { ImportOnboarding } from './import-onboarding/import-onboarding';
 
 type ListStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -30,13 +32,27 @@ const EMPTY_FORM: AccountForm = {
   accountType: '',
 };
 
+/** Value, this year's "Your return" and data health for one account in the list. */
+interface AccountOverview {
+  value: string;
+  yourReturn: string;
+  health: HealthStatus | null;
+}
+
+const HEALTH_TEXT: Record<HealthStatus, string> = {
+  Healthy: 'Data looks complete',
+  Info: 'Data has notes worth a look',
+  NeedsAttention: 'Data needs attention',
+};
+
 /**
- * Accounts for the active portfolio: list, add, and bulk-import (portfolio-scoped, i.e. a
- * broker file that carries account metadata and may create several accounts at once).
+ * Accounts for the active portfolio: the list (with each account's value, this year's return and a data-health dot),
+ * the one drop zone for broker files (which finds or creates each file's account), a manual add-account form, and
+ * the import history.
  */
 @Component({
   selector: 'app-accounts',
-  imports: [EmptyState, FileUpload, RouterLink, SelectField],
+  imports: [EmptyState, ImportDropZone, ImportHistoryList, ImportOnboarding, RouterLink],
   templateUrl: './accounts.html',
   styleUrl: './accounts.scss',
 })
@@ -47,9 +63,13 @@ export class Accounts {
 
   protected readonly activeId = this.activePortfolio.activeId;
   protected readonly activeName = computed(() => this.activePortfolio.active()?.name ?? null);
+  protected readonly yourReturnLabel = YOUR_RETURN_LABEL;
+  /** Bumped after each import so the history list reloads. */
+  protected readonly historyKey = signal(0);
 
   protected readonly accounts = signal<AccountSummary[]>([]);
   protected readonly listStatus = signal<ListStatus>('idle');
+  protected readonly overview = signal<Record<string, AccountOverview>>({});
 
   // Add-account form state.
   protected readonly form = signal<AccountForm>({ ...EMPTY_FORM });
@@ -63,23 +83,7 @@ export class Accounts {
       this.form().accountNumber.trim().length > 0,
   );
 
-  // Import state.
-  protected readonly importing = signal(false);
-  protected readonly importResult = signal<PortfolioImportResult | null>(null);
-  protected readonly importError = signal<string | null>(null);
-
-  // Format override; '' selection means auto-detect.
-  private readonly parsers = signal<ImportParser[]>([]);
-  protected readonly sourceSystem = signal('');
-  protected readonly formatOptions = computed(() => parserFormatOptions(this.parsers()));
-  protected readonly acceptAttr = computed(() => parserAcceptAttr(this.parsers()));
-
   constructor() {
-    this.api
-      .getImportParsers()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((parsers) => this.parsers.set(parsers));
-
     // (Re)load accounts whenever the active portfolio changes.
     toObservable(this.activeId)
       .pipe(
@@ -106,7 +110,12 @@ export class Accounts {
         if (this.activeId()) {
           this.listStatus.set('ready');
         }
+        this.loadOverview();
       });
+  }
+
+  protected healthText(status: HealthStatus): string {
+    return HEALTH_TEXT[status];
   }
 
   protected updateField(field: keyof AccountForm, event: Event): void {
@@ -148,33 +157,14 @@ export class Accounts {
       });
   }
 
-  /** Upload a portfolio-scoped broker file; refresh the list on success. */
-  protected onFileSelected(file: File): void {
-    const portfolioId = this.activeId();
-    if (!portfolioId || this.importing()) {
-      return;
-    }
-    this.importing.set(true);
-    this.importError.set(null);
-    this.importResult.set(null);
-    this.api
-      .importPortfolioFile(portfolioId, file, this.sourceSystem() || undefined)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.importResult.set(result);
-          this.importing.set(false);
-          this.reload();
-        },
-        error: (err: HttpErrorResponse) => {
-          this.importError.set(importErrorMessage(err));
-          this.importing.set(false);
-        },
-      });
+  /** After an import or undo: refresh the list, its figures and the history. */
+  protected onImportsChanged(): void {
+    this.historyKey.update((n) => n + 1);
+    this.reload();
   }
 
-  /** One-off refetch of the account list (after a mutation that the server performed). */
-  private reload(): void {
+  /** One-off refetch of the account list (after a mutation that the server performed, e.g. an undo). */
+  protected reload(): void {
     const portfolioId = this.activeId();
     if (!portfolioId) {
       return;
@@ -182,26 +172,48 @@ export class Accounts {
     this.api
       .getAccounts(portfolioId)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((accounts) => this.accounts.set(accounts));
+      .subscribe((accounts) => {
+        this.accounts.set(accounts);
+        this.loadOverview();
+      });
   }
 
   protected accountTypeLabel(type: string | null): string {
     return type && type.trim().length > 0 ? type : '—';
   }
-}
 
-/** Maps import HTTP failures to user-facing guidance. */
-function importErrorMessage(err: HttpErrorResponse): string {
-  switch (err.status) {
-    case 413:
-      return 'That file is too large. The import limit is 10 MB.';
-    case 415:
-      return 'Unsupported file type. Upload a QFX/OFX statement or a Vanguard report — or pick the format explicitly.';
-    case 422:
-      return 'This file has no account metadata. Import it from a specific account instead.';
-    case 404:
-      return 'Portfolio not found. Try reselecting a portfolio.';
-    default:
-      return 'The import failed. Please try again.';
+  /** Each account's value and year-to-date "Your return" (in parallel), and every account's data health (one call). */
+  private loadOverview(): void {
+    const portfolioId = this.activeId();
+    const accounts = this.accounts();
+    if (!portfolioId || accounts.length === 0) {
+      this.overview.set({});
+      return;
+    }
+    const yearStart = `${new Date().getFullYear()}-01-01`;
+    const performances = forkJoin(
+      accounts.map((a) =>
+        this.api.getAccountPerformance(portfolioId, a.accountId, yearStart).pipe(
+          catchError(() => of<PortfolioPerformance | null>(null)),
+          map((perf) => [a.accountId, perf] as const),
+        ),
+      ),
+    );
+    const health = this.api.getPortfolioHealth(portfolioId).pipe(catchError(() => of(null)));
+
+    forkJoin([performances, health])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([perfs, report]) => {
+        const statuses = new Map(report?.accounts.map((a) => [a.accountId, a.status]) ?? []);
+        const next: Record<string, AccountOverview> = {};
+        for (const [accountId, perf] of perfs) {
+          next[accountId] = {
+            value: perf ? formatMoney(perf.endingBalance.value, perf.currencyCode) : '—',
+            yourReturn: perf ? formatPercent(perf.returns.moneyWeighted.rate) : '—',
+            health: statuses.get(accountId) ?? null,
+          };
+        }
+        this.overview.set(next);
+      });
   }
 }

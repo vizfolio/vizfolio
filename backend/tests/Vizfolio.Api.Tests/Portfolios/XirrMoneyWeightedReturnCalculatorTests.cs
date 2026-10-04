@@ -45,16 +45,53 @@ public sealed class XirrMoneyWeightedReturnCalculatorTests
     }
 
     [Fact]
-    public void Half_year_ten_percent_gain_annualizes_to_roughly_twenty_one_percent()
+    public void A_period_shorter_than_a_year_reports_the_period_return_not_an_annualized_one()
     {
-        // 1000 → 1100 over ~182 days (half year). Annualized ≈ 1.10^2 - 1 = 21%.
+        // 1000 → 1100 over ~182 days. Annualizing would report ≈ 21%; for a part-year period the return the
+        // investor actually got over the period (10%) is reported instead, labelled "Period".
         var half = Start.AddDays(182);
         var ctx = Ctx(starting: 1000m, ending: 1100m, from: Start, to: half);
 
         var result = _calc.Compute(ctx);
 
-        var expected = (decimal)(Math.Pow(1.10, 365.0 / 182.0) - 1);
-        Math.Abs(result.Rate!.Value - expected).ShouldBeLessThan(0.001m);
+        result.Basis.ShouldBe("Period");
+        result.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+    }
+
+    [Fact]
+    public void A_large_move_over_a_few_days_is_reported_without_overflowing_the_solver()
+    {
+        // +30% in a week annualizes to ~84,000,000% — beyond the solver's bounds. As a period return it's 30%.
+        var week = Start.AddDays(7);
+        var ctx = Ctx(starting: 1000m, ending: 1300m, from: Start, to: week);
+
+        var result = _calc.Compute(ctx);
+
+        result.Basis.ShouldBe("Period");
+        result.Rate!.Value.ShouldBe(0.30m, tolerance: 0.0001m);
+    }
+
+    [Fact]
+    public void A_part_year_deposit_is_weighted_by_how_long_it_was_invested()
+    {
+        // 1000 invested for 100 days, then +1000 for the last 50: the 150-day period return lies between
+        // the simple gain on all money (300 / 2000 = 15%) and on the first deposit alone (30%), and NPV ≈ 0.
+        var end = Start.AddDays(150);
+        var ctx = Ctx(
+            starting: 1000m,
+            ending: 2300m,
+            flows: new[] { new CashFlow(Start.AddDays(100), 1000m) },
+            from: Start,
+            to: end);
+
+        var result = _calc.Compute(ctx);
+
+        result.Basis.ShouldBe("Period");
+        var r = (double)result.Rate!.Value;
+        r.ShouldBeGreaterThan(0.15);
+        r.ShouldBeLessThan(0.30);
+        var npv = -1000.0 - 1000.0 / Math.Pow(1 + r, 100.0 / 150.0) + 2300.0 / (1 + r);
+        Math.Abs(npv).ShouldBeLessThan(0.01);
     }
 
     [Fact]

@@ -27,3 +27,27 @@
   color: var(--color-positive);
   font-size: 0.9rem;
 }
+
+.history {
+  margin-top: var(--space-5);
+}
+
+.misfit {
+  padding: var(--space-4);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  background: var(--color-surface-2);
+}
+
+.misfit-title {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.misfit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}

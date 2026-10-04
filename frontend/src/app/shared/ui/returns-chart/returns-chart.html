@@ -1,0 +1,38 @@
+<div class="chart-card">
+  <div class="chart-head">
+    @if (headingLevel() === 2) {
+      <h2>Investment returns over time</h2>
+    } @else {
+      <h3>Investment returns over time</h3>
+    }
+    <div class="chart-tools">
+      <span class="chart-note">{{ note() }}</span>
+      <div class="toggle" role="group" aria-label="Show returns as">
+        <button
+          type="button"
+          [attr.aria-pressed]="mode() === 'percent'"
+          (click)="mode.set('percent')"
+        >
+          %
+        </button>
+        <button
+          type="button"
+          [attr.aria-pressed]="mode() === 'gain'"
+          (click)="mode.set('gain')"
+        >
+          {{ currency() }}
+        </button>
+      </div>
+    </div>
+  </div>
+  <p class="chart-caption">{{ caption() }}</p>
+  <div class="chart-body">
+    <app-perf-chart
+      [labels]="labels()"
+      [datasets]="datasets()"
+      [valueFormat]="valueFormat()"
+      [currencyCode]="currency()"
+      [ariaLabel]="ariaLabel()"
+    />
+  </div>
+</div>

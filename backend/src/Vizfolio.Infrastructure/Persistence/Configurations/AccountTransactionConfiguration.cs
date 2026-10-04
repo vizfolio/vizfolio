@@ -53,6 +53,18 @@ internal sealed class AccountTransactionConfiguration : IEntityTypeConfiguration
         builder.Property(t => t.SourceType).HasMaxLength(50);
         builder.Property(t => t.ImportedAt).IsRequired();
 
+        // The upload that inserted the row: a provenance pointer with no FK. Both the row (via its account) and the
+        // batch cascade from the portfolio, and SQL Server rejects a second cascade/set-null path. Batches are never
+        // deleted (undo marks them), so the pointer can't dangle.
+        builder.Property(t => t.ImportBatchId);
+        builder.HasIndex(t => t.ImportBatchId);
+
+        builder.Property(t => t.SplitNumerator).HasColumnType(SharesType);
+        builder.Property(t => t.SplitDenominator).HasColumnType(SharesType);
+        builder.Ignore(t => t.SplitFactor);
+        builder.Property(t => t.IsSettlementFund).IsRequired().HasDefaultValue(false);
+        builder.Property(t => t.SubAccount).HasMaxLength(40);
+
         builder.HasIndex(t => new { t.AccountId, t.SourceSystem, t.ExternalId }).IsUnique();
         builder.HasIndex(t => new { t.AccountId, t.TradeDate });
         builder.HasIndex(t => t.Ticker);

@@ -1,0 +1,76 @@
+<section class="import-history" aria-labelledby="import-history-title">
+  <h2 class="card-title" id="import-history-title">Import history</h2>
+
+  @if (notice(); as message) {
+    <p class="notice" role="status">{{ message }}</p>
+  }
+
+  @if (pending(); as batch) {
+    <app-undo-import-confirm
+      [portfolioId]="portfolioId()"
+      [importBatchId]="batch.importBatchId"
+      [fileName]="batch.fileName"
+      (undone)="onUndone($event)"
+      (cancelled)="cancelUndo()"
+    />
+  }
+
+  @switch (status()) {
+    @case ('loading') {
+      <p class="hint" role="status">Loading imports…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Couldn't load the import history.</p>
+    }
+    @default {
+      @if (imports().length === 0) {
+        <p class="hint">No files imported yet.</p>
+      } @else {
+        <ul class="imports">
+          @for (item of imports(); track item.importBatchId) {
+            <li class="import" [class.import--undone]="item.status === 'Undone'">
+              <div class="import-head">
+                <span class="file">{{ item.fileName }}</span>
+                <span class="meta">{{ item.sourceSystem }} · {{ formatImportedAt(item.importedAt) }}</span>
+                @if (item.hasStoredFile) {
+                  <a
+                    class="btn btn--ghost btn--sm download"
+                    [href]="fileUrl(item)"
+                    download
+                    [attr.aria-label]="'Download ' + item.fileName"
+                  >
+                    Download
+                  </a>
+                }
+                @if (item.status === 'Undone') {
+                  <span class="badge">Undone {{ formatImportedAt(item.undoneAt) }}</span>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn btn--ghost btn--sm undo"
+                    [disabled]="pending() !== null"
+                    [attr.aria-label]="'Undo the import of ' + item.fileName"
+                    (click)="startUndo(item)"
+                  >
+                    Undo
+                  </button>
+                }
+              </div>
+              <ul class="accounts">
+                @for (account of visibleAccounts(item); track account.accountId) {
+                  <li>{{ accountSummary(account) }}</li>
+                }
+              </ul>
+              <app-import-warnings [warnings]="item.warnings" />
+            </li>
+          }
+        </ul>
+      }
+      @if (beforeHistory() > 0) {
+        <p class="hint">
+          {{ beforeHistory() }} transactions were imported before import history was kept; those can't be undone.
+        </p>
+      }
+    }
+  }
+</section>

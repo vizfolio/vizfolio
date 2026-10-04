@@ -12,11 +12,21 @@
           <span class="total-label">Total value</span>
           <span class="total-value">{{ totalLabel() }}</span>
         </div>
-        @if (missingCount() > 0) {
-          <p class="missing" role="status">
-            {{ missingCount() }} holding(s) have no snapshot yet and aren't valued. Add an
-            opening balance to include them.
+        @if (pendingCount() > 0) {
+          <p class="pending" role="status">
+            Prices updating… {{ pendingCount() }} holding(s) will be valued as soon as their prices finish downloading.
           </p>
+        }
+        @if (missingCount() > 0) {
+          <div class="missing" role="status">
+            <p>{{ missingCount() }} holding(s) couldn't be valued, so they're left out of the total:</p>
+            <ul>
+              @for (line of missingLines(); track line) {
+                <li>{{ line }}</li>
+              }
+            </ul>
+            <p>The Data health tab says what to do about it.</p>
+          </div>
         }
       </header>
 

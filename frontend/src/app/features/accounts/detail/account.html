@@ -51,14 +51,14 @@
                 [accountId]="accountId()"
               />
             }
-            @case ('history') {
-              <app-account-history
+            @case ('health') {
+              <app-account-health
                 [portfolioId]="portfolioId()!"
                 [accountId]="accountId()"
-                (fillGap)="select('opening-balance')"
+                (navigate)="onHealthNavigate($event)"
               />
             }
-            @case ('opening-balance') {
+            @case ('starting-positions') {
               <app-opening-balance-form
                 [portfolioId]="portfolioId()!"
                 [accountId]="accountId()"

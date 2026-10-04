@@ -43,6 +43,12 @@ internal sealed class AccountHoldingSnapshotConfiguration : IEntityTypeConfigura
 
         builder.Property(s => s.RecordedAt).IsRequired();
 
+        // Provenance pointer with no FK, as on AccountTransaction.ImportBatchId.
+        builder.Property(s => s.ImportBatchId);
+        builder.HasIndex(s => s.ImportBatchId);
+
+        builder.Property(s => s.PriceAsOf);
+
         builder.HasIndex(s => new { s.AccountHoldingId, s.AsOf }).IsUnique();
     }
 }

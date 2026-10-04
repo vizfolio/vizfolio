@@ -62,3 +62,27 @@ export interface OpeningBalanceResponse {
   snapshotsUpdated: number;
   holdings: OpeningBalanceHoldingOutcome[];
 }
+
+/** How a starting position was worked out (see OpeningPositionsResponse). */
+export type OpeningPositionClass = 'None' | 'PreHistory' | 'Inconsistent';
+
+/** One holding's (or, with a null id, the cash's) position the day before the first transaction. */
+export interface OpeningPosition {
+  accountHoldingId: string | null;
+  symbol: string | null;
+  quantity: number;
+  /** None = nothing held; PreHistory = held before the imported history; Inconsistent = can't be derived. */
+  class: OpeningPositionClass | string;
+  /** False when no statement exists to derive it from (the position is assumed to start at zero). */
+  verified: boolean;
+  unitPrice: number | null;
+  marketValue: number | null;
+}
+
+/** GET /api/portfolios/{portfolioId}/accounts/{accountId}/opening-positions */
+export interface OpeningPositionsResponse {
+  /** The day before the account's first transaction; null when it has none. */
+  asOf: string | null;
+  holdings: OpeningPosition[];
+  cash: OpeningPosition;
+}

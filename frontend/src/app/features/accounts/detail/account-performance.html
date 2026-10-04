@@ -14,7 +14,11 @@
     }
     @default {
       @if (performance(); as p) {
-        <app-performance-summary [performance]="p" />
+        <app-performance-summary
+          [performance]="p"
+          [healthLink]="['/accounts', accountId()]"
+          [healthQuery]="{ tab: 'health' }"
+        />
       }
     }
   }

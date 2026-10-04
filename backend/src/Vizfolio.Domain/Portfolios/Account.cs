@@ -42,6 +42,24 @@ public sealed class Account
 
     public DateTimeOffset CreatedAt { get; private set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>The upload that created this account; undoing it removes the account if nothing else uses it.</summary>
+    public Guid? CreatedByImportBatchId { get; private set; }
+
+    /// <summary>
+    /// <see cref="AccountNumber"/> reduced to its letters and digits, upper-cased, so "1234-5678", "12345678 " and a
+    /// hand-typed "1234 5678" all match the same statement.
+    /// </summary>
+    public static string NormalizeAccountNumber(string? accountNumber)
+        => new((accountNumber ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    public void MarkCreatedByImport(Guid importBatchId)
+    {
+        if (importBatchId == Guid.Empty)
+            throw new ArgumentException("Import batch ID is required.", nameof(importBatchId));
+
+        CreatedByImportBatchId ??= importBatchId;
+    }
+
     public IReadOnlyList<AccountTransaction> Transactions => _transactions;
 
     public IReadOnlyList<AccountHolding> Holdings => _holdings;
@@ -53,6 +71,12 @@ public sealed class Account
 
         Name = name.Trim();
     }
+
+    /// <summary>
+    /// Corrects the account number — when an import shows the one typed in was wrong and the user confirms the
+    /// file's number is the account's.
+    /// </summary>
+    public void ChangeAccountNumber(string accountNumber) => SetAccountNumber(accountNumber);
 
     public void SetAccountType(string? accountType)
     {

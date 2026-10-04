@@ -4,10 +4,10 @@ import { Observable, of, throwError } from 'rxjs';
 
 import { PortfolioApiService } from '../../../core/api/portfolio-api.service';
 import {
-  HistoryCoverageResponse,
   OpeningBalanceResponse,
+  OpeningPosition,
+  OpeningPositionsResponse,
 } from '../../../core/api/models/coverage.models';
-import { HoldingRow } from '../../../core/api/models/holdings.models';
 import { OpeningBalanceForm } from './opening-balance-form';
 
 const RESPONSE: OpeningBalanceResponse = {
@@ -29,43 +29,30 @@ const RESPONSE: OpeningBalanceResponse = {
   ],
 };
 
-const COVERAGE: HistoryCoverageResponse = {
-  accountId: 'a1',
-  firstTransactionDate: '2023-06-02',
-  earliestSnapshotDate: '2024-01-01',
-  hasHistoryGap: true,
-  suggestedOpeningDate: '2023-06-01',
-  openingBalanceSnapshotCount: 0,
-  statementSnapshotCount: 1,
-  brokerPositionSnapshotCount: 0,
-};
-
-function holding(overrides: Partial<HoldingRow>): HoldingRow {
+function position(overrides: Partial<OpeningPosition>): OpeningPosition {
   return {
     accountHoldingId: 'h1',
-    kind: 'Security',
     symbol: 'AAPL',
-    name: 'Apple Inc.',
-    cusip: '037833100',
-    isin: null,
-    currencyCode: 'USD',
-    hasSnapshot: false,
-    snapshotAsOf: null,
-    source: null,
-    quantity: null,
+    quantity: 0,
+    class: 'None',
+    verified: true,
     unitPrice: null,
-    marketValue: null,
-    costBasis: null,
-    gainLoss: null,
+    marketValue: 0,
     ...overrides,
   };
 }
 
+const CASH_NONE = position({ accountHoldingId: null, symbol: null });
+
+const POSITIONS: OpeningPositionsResponse = {
+  asOf: '2023-06-01',
+  holdings: [],
+  cash: CASH_NONE,
+};
+
 class MockApi {
   result: Observable<OpeningBalanceResponse> = of(RESPONSE);
-  coverage: Observable<HistoryCoverageResponse> = of(COVERAGE);
-  holdings: Observable<HoldingRow[]> = of([]);
-  holdingsAsOf: string | undefined;
+  positions: Observable<OpeningPositionsResponse> = of(POSITIONS);
   args: unknown = null;
 
   setOpeningBalance(portfolioId: string, accountId: string, body: unknown) {
@@ -73,13 +60,8 @@ class MockApi {
     return this.result;
   }
 
-  getHistoryCoverage(_portfolioId: string, _accountId: string) {
-    return this.coverage;
-  }
-
-  getAccountHoldings(_portfolioId: string, _accountId: string, asOf?: string) {
-    this.holdingsAsOf = asOf;
-    return this.holdings;
+  getOpeningPositions(_portfolioId: string, _accountId: string) {
+    return this.positions;
   }
 }
 
@@ -153,37 +135,32 @@ describe('OpeningBalanceForm', () => {
     expect(cmp.result()?.snapshotsCreated).toBe(1);
   });
 
-  it('prefills the as-of date and a row per holding, carrying existing snapshot values', () => {
+  it('prefills the opening date and the positions held before the history, from the statements', () => {
     const api = new MockApi();
-    api.holdings = of([
-      // Already valued at the opening date.
-      holding({
-        symbol: 'AAPL',
-        currencyCode: 'USD',
-        cusip: '037833100',
-        hasSnapshot: true,
-        quantity: 10,
-        marketValue: 1000,
-        unitPrice: 100,
-        costBasis: 900,
-      }),
-      // No snapshot yet — identity only, values blank.
-      holding({ symbol: 'MSFT', currencyCode: 'CAD', cusip: '594918104' }),
-    ]);
+    api.positions = of({
+      asOf: '2023-06-01',
+      holdings: [
+        // Held before the imported history: prefilled with what the statement implies.
+        position({ symbol: 'AAPL', quantity: 10, class: 'PreHistory', unitPrice: 100, marketValue: 1000 }),
+        // The ledger and the statement disagree: shown blank for the user to supply.
+        position({ accountHoldingId: 'h2', symbol: 'MSFT', quantity: -3, class: 'Inconsistent', marketValue: null }),
+        // Bought within the history: not held at the opening, so not shown.
+        position({ accountHoldingId: 'h3', symbol: 'VOO' }),
+      ],
+      cash: position({ accountHoldingId: null, symbol: null, quantity: 250, class: 'PreHistory', unitPrice: 1, marketValue: 250 }),
+    });
     const cmp = setup(api);
 
     expect(cmp.asOf()).toBe('2023-06-01');
-    expect(api.holdingsAsOf).toBe('2023-06-01'); // holdings valued at the suggested date
-    expect(cmp.rows().length).toBe(2);
-    const [aapl, msft] = cmp.rows();
-    expect(aapl.symbol).toBe('AAPL');
+    expect(cmp.rows().map((r: { symbol: string }) => r.symbol)).toEqual(['AAPL', 'MSFT', '$CASH']);
+    const [aapl, msft, cash] = cmp.rows();
     expect(aapl.units).toBe('10');
     expect(aapl.marketValue).toBe('1000');
     expect(aapl.unitPrice).toBe('100');
-    expect(aapl.costBasis).toBe('900');
-    expect(msft.symbol).toBe('MSFT');
     expect(msft.units).toBe('');
     expect(msft.marketValue).toBe('');
+    expect(cash.units).toBe('250');
+    expect(cash.marketValue).toBe('250');
     expect(cmp.prefilling()).toBe(false);
   });
 
@@ -214,21 +191,19 @@ describe('OpeningBalanceForm', () => {
     expect(cmp.completeCount()).toBe(1); // only AAPL is complete
   });
 
-  it('falls back to a single blank row when there is no suggested date', () => {
+  it('falls back to a single blank row when the account has no transactions', () => {
     const api = new MockApi();
-    api.coverage = of({ ...COVERAGE, suggestedOpeningDate: null });
-    api.holdings = of([holding({ symbol: 'AAPL' })]);
+    api.positions = of({ asOf: null, holdings: [position({ symbol: 'AAPL' })], cash: CASH_NONE });
     const cmp = setup(api);
 
     expect(cmp.asOf()).toBe('');
-    expect(api.holdingsAsOf).toBeUndefined(); // holdings not fetched without a date
     expect(cmp.rows().length).toBe(1);
     expect(cmp.rows()[0].symbol).toBe('');
   });
 
-  it('falls back to a single blank row when the account has no holdings', () => {
+  it('falls back to a single blank row when nothing was held before the history', () => {
     const api = new MockApi();
-    api.holdings = of([]);
+    api.positions = of({ ...POSITIONS, holdings: [position({ symbol: 'AAPL' })] });
     const cmp = setup(api);
 
     expect(cmp.rows().length).toBe(1);
@@ -237,7 +212,7 @@ describe('OpeningBalanceForm', () => {
 
   it('stays usable when the prefetch fails', () => {
     const api = new MockApi();
-    api.coverage = throwError(() => new HttpErrorResponse({ status: 500 }));
+    api.positions = throwError(() => new HttpErrorResponse({ status: 500 }));
     const cmp = setup(api);
 
     expect(cmp.asOf()).toBe('');
