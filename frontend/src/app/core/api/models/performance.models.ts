@@ -64,14 +64,27 @@ export interface PerformanceContributions {
   count: number;
 }
 
-/** A single return figure; `rate` is null when it cannot be computed. */
+/**
+ * A single return figure; `rate` is null when it cannot be computed (`reason` says why).
+ * `annualizedRate` is the per-year equivalent of a period rate when the period is a year or more.
+ * `fallbackReason` is set when the preferred method couldn't be used and `method` names the
+ * approximation used instead (e.g. 'ModifiedDietz' because a day couldn't be valued — the cause).
+ */
 export interface PerformanceReturn {
   rate: number | null;
+  /** 'XIRR' (money-weighted), 'DailyValuedTWR' (time-weighted) or 'ModifiedDietz' (approximation). */
   method: string;
   basis: 'Period' | 'Annualized' | string;
   reason: string | null;
+  annualizedRate: number | null;
+  fallbackReason: string | null;
 }
 
+/**
+ * `moneyWeighted` is the headline "Your return" (XIRR — your personal rate of return);
+ * `timeWeighted` is the "Investment return" (how the investments did, regardless of when money was
+ * added).
+ */
 export interface PerformanceReturns {
   timeWeighted: PerformanceReturn;
   moneyWeighted: PerformanceReturn;
@@ -84,8 +97,9 @@ export type PerformanceSeriesInterval = 'Weekly' | 'Monthly' | 'Quarterly';
 /**
  * One chart point: the balance at the close of `date` (null when a holding couldn't be valued —
  * drawn as a gap), the deposits / withdrawals (negative) since the previous point, the cumulative
- * time-weighted return from the period's start (decimal rate; the last point equals the headline
- * TWR) and the cumulative investment gain (value − starting balance − net contributions to date).
+ * time-weighted return from the period's start (decimal rate; the last point equals
+ * `returns.timeWeighted`, the investment return — not the money-weighted headline) and the
+ * cumulative investment gain (value − starting balance − net contributions to date).
  * Return and gain are null where they can't be computed.
  */
 export interface PerformanceSeriesPoint {

@@ -87,12 +87,20 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         // docs/price-history-valuation.md §11. Balances, flows and the series all come from it.
         var valuation = await _valuationLoader.LoadAsync(accountIds, to, cancellationToken);
         var engines = valuation.Engines.Values.ToList();
+        // The time-weighted return and every chart point value the same dates repeatedly (each flow date's eve, for
+        // every point after it), so each date is valued once.
+        var balances = new Dictionary<DateOnly, PerformanceBalanceResult>();
+        PerformanceBalanceResult ValueAt(DateOnly date)
+        {
+            if (!balances.TryGetValue(date, out var balance)) balances[date] = balance = BalanceAt(valuation, date);
+            return balance;
+        }
 
-        var ending = BalanceAt(valuation, to);
+        var ending = ValueAt(to);
         // The period opens at the *start* of `from` — the close of the previous day — because cash flows
         // dated `from` are counted inside the period. Valuing at the close of `from` would count a
         // first-day purchase twice: once in the starting balance and again as its contribution.
-        var starting = BalanceAt(valuation, from.AddDays(-1));
+        var starting = ValueAt(from.AddDays(-1));
 
         var flows = engines.SelectMany(e => e.FlowsBetween(from, to)).OrderBy(f => f.Date).ToList();
         var cashFlows = flows.Select(f => new CashFlow(f.Date, f.Amount)).ToList();
@@ -105,7 +113,7 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             .OrderBy(d => d)
             .ToList();
         var intermediateBalances = interiorDates
-            .Select(d => BalanceAt(valuation, d))
+            .Select(ValueAt)
             .Zip(interiorDates)
             .Where(x => x.First.IsComplete && x.First.HoldingsCovered > 0)
             .Select(x => new BalancePoint(x.Second, x.First.Value))
@@ -119,7 +127,8 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
             EndingBalance: ending.Value,
             EndingIsComplete: ending.IsComplete,
             CashFlows: cashFlows,
-            IntermediateBalances: intermediateBalances);
+            IntermediateBalances: intermediateBalances,
+            ValueAt: ValueAt);
 
         // An in-kind transfer that couldn't be valued (no price on the day) leaves the flows unknown, so no return
         // can be computed honestly.
@@ -135,12 +144,12 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var returns = new PerformanceReturnsResult(timeWeighted, moneyWeighted);
 
         // Value / returns-over-time charts, valued by the same engines so they always agree with the
-        // balances. Each point's cumulative return is the headline TWR strategy run over [from, point], so the
-        // last point equals Returns.TimeWeighted.
+        // balances. Each point's cumulative return is the time-weighted strategy run over [from, point] — for the
+        // daily-valued TWR, the running chain of sub-period returns — so the last point equals Returns.TimeWeighted.
         var series = PerformanceSeriesBuilder.Build(
             from,
             to,
-            date => BalanceAt(valuation, date),
+            ValueAt,
             cashFlows,
             (date, balance) => unvaluedTransfer ? null : _twrCalculator.Compute(context with
             {
@@ -231,7 +240,7 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var zero = new PerformanceBalanceResult(0m, true, null, 0, 0);
         var noContrib = new PerformanceContributionsResult(0m, 0m, 0m, 0);
         var noReturns = new PerformanceReturnsResult(
-            TimeWeighted: new ReturnResult(null, "ModifiedDietz", "Period", "NoData"),
+            TimeWeighted: new ReturnResult(null, DailyValuedTimeWeightedReturnCalculator.MethodName, "Period", "NoData"),
             MoneyWeighted: new ReturnResult(null, "XIRR", "Annualized", "NoData"));
         return new PortfolioPerformanceResult(
             from, to, zero, zero, noContrib, noReturns, AccountValuationLoader.DefaultCurrencyCode, PerformanceSeriesResult.Empty);

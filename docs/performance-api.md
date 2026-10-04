@@ -51,15 +51,19 @@ Both endpoints return **404** if the portfolio or account doesn't exist (an acco
   "returns": {
     "timeWeighted": {
       "rate": null,
-      "method": "ModifiedDietz",
+      "method": "DailyValuedTWR",
       "basis": "Period",
-      "reason": "IncompleteStartingBalance"
+      "reason": "IncompleteStartingBalance",
+      "annualizedRate": null,
+      "fallbackReason": null
     },
     "moneyWeighted": {
       "rate": null,
       "method": "XIRR",
       "basis": "Annualized",
-      "reason": "IncompleteStartingBalance"
+      "reason": "IncompleteStartingBalance",
+      "annualizedRate": null,
+      "fallbackReason": null
     }
   },
   "currencyCode": "USD",
@@ -89,12 +93,15 @@ produces:
   is missing a valuation at that date — drawn as a gap, never guessed.
 - **`deposits` / `withdrawals`** (withdrawals negative): the contribution cash flows in
   `(previous point, point]`, so across all points they sum to `contributions`.
-- **`cumulativeReturn`** (decimal rate): the return from `from` to the point. The service runs the
+- **`cumulativeReturn`** (decimal rate): the time-weighted return from `from` to the point. The service runs the
   **configured `ITimeWeightedReturnCalculator`** over `[from, point]` — the headline context `with` `To`,
   the ending balance, cash flows ≤ point and intermediate balances < point — so the last point always equals
-  `returns.timeWeighted.rate`, whichever strategy is registered. The builder takes this as a delegate and
-  stays calculator-agnostic. `null` where the calculator returns no rate (e.g. `PeriodTooShort`,
-  `ZeroDenominator`), which the chart draws as a gap.
+  `returns.timeWeighted.rate` (the *investment* return, not the money-weighted headline), whichever strategy is
+  registered. For the default daily-valued TWR this is the running chain of sub-period returns, with a final
+  partial sub-period ending at the point. The service values each date once (a per-request cache behind
+  `ValueAt`), so re-running the chain per point costs lookups, not valuations. The builder takes this as a
+  delegate and stays calculator-agnostic. `null` where the calculator returns no rate (e.g.
+  `NoInvestedBalance`), which the chart draws as a gap.
 - **`investmentGain`**: `value − starting balance − net contributions to date`, i.e. the change in value
   not explained by deposits/withdrawals. The last point equals `ending − starting − contributions.net`.
 - Both are `0` at the opening point, and `null` when the point or the opening couldn't be fully valued.
@@ -285,14 +292,59 @@ Contributions at portfolio scope sum every deposit/withdrawal/transfer across ev
 
 ## Returns
 
-Two returns are reported, both under `Returns`:
+Two returns are reported, both under `Returns`. The UI headlines the money-weighted one:
 
-- `timeWeighted` — period return, method `ModifiedDietz` (default). Reports how the portfolio grew after adjusting for the timing of cash flows.
-- `moneyWeighted` — IRR, method `XIRR`. Reports the rate the investor experienced given their contribution timing: **annualized** for periods of a year or more, the **period** rate for shorter ones.
+- `moneyWeighted` — **"Your return"** (the headline). IRR, method `XIRR`: how *your money* did, including when
+  you added or withdrew it — the same method as Vanguard's "personal performance". **Annualized** for periods
+  of a year or more, the **period** rate for shorter ones.
+- `timeWeighted` — **"Investment return"**. A true time-weighted return, method `DailyValuedTWR` (default): how
+  the *investments* did regardless of when money was added — comparable to a fund's published return. Always a
+  period rate, with `annualizedRate` alongside when the period is a year or more.
 
-Both are `decimal?` (null when uncomputable) with a `reason` string when null. `basis` is `"Period"` or `"Annualized"` so a caller can format correctly.
+Both answer different questions and both are correct; they diverge most in periods with large deposits or
+withdrawals around big market moves.
 
-### Method: Modified Dietz (default TWRR)
+Each is a `decimal?` `rate` (null when uncomputable, with a `reason`). `basis` is `"Period"` or `"Annualized"`
+so a caller can format correctly. `annualizedRate` is the per-year equivalent of a period rate
+(`(1 + rate)^(365 / days) − 1`, `days = to − from ≥ 365`; null otherwise and for XIRR, which is already
+annualized then). `fallbackReason` is set when the preferred method couldn't be used: `method` then names the
+approximation used instead, and the UI labels the figure approximate.
+
+### Method: DailyValuedTWR (default TWRR)
+
+The period is split at every date with a non-zero net external flow (flows happen at the **start** of their
+day, like the period itself, which opens at the close of `from − 1`). Each sub-period is measured from
+actual valuations of the account-state engine and the results are chained:
+
+```
+rᵢ  = V(close of next flow date − 1) / (V(close of dᵢ − 1) + Fᵢ) − 1
+TWR = ∏ (1 + rᵢ) − 1
+```
+
+- The first sub-period starts at `from` with `V = startingBalance` (so it owns flows dated `from`); the last
+  ends at `to` with `V = endingBalance`.
+- Flow dates that net to zero (e.g. both legs of an internal transfer at portfolio scope) aren't boundaries —
+  they wouldn't change the chain, and needn't be valued.
+- A sub-period where the scope is empty — invested amount `≤ $0.01` and ending value `≤ $0.01` — is skipped,
+  so emptying an account and refunding it later neither helps nor hurts (Modified Dietz inflated this case).
+- Portfolio scope values the sum of the account engines; internal transfers still net to zero.
+
+**Fallback.** If a boundary can't be honestly measured, the figure is Modified Dietz over the whole period with
+`method = "ModifiedDietz"` and `fallbackReason` =
+
+- the first missing valuation's cause (`NoPrice`, `StalePrice`, `PricesPending`, `NegativePosition`,
+  `MaterialMismatch`, …) when an interior flow eve can't be fully valued;
+- `ValueWithoutInvestment` — value at the end of a sub-period with nothing invested at its start;
+- `ValueVanished` — everything invested gone with no withdrawal (the valuation and flows disagree);
+- `NoDailyValuation` — the context carries no `ValueAt` (only possible outside the service).
+
+Reasons `rate` may be `null`:
+- `IncompleteStartingBalance` / `IncompleteEndingBalance` — see the completeness section.
+- `NoInvestedBalance` — nothing was invested at any point in the period.
+- `PeriodTooShort` — `to < from` (a single day, `from == to`, is measured).
+- `UnvaluedTransfer` — an in-kind transfer couldn't be priced (set by the service for both returns).
+
+### Method: Modified Dietz (fallback; previously the default)
 
 ```
 R = (EMV − BMV − Σ Cᵢ) / (BMV + Σ (wᵢ · Cᵢ))
@@ -302,9 +354,11 @@ R = (EMV − BMV − Σ Cᵢ) / (BMV + Σ (wᵢ · Cᵢ))
 - `Cᵢ` = signed cash-flow amount at date `tᵢ`.
 - `wᵢ = (T − dayFromStart) / T` — fraction of the period remaining after the flow.
 
-Widely used by retail brokerages as a TWRR proxy. Formally a money-weighted approximation, so the `method` field says `ModifiedDietz` — consumers who need GIPS-grade TWRR can tell it apart from the strict chained calculator.
-
-**Known limitation — long periods with large flows.** Applied as one period over many years, the denominator's weighting treats a large withdrawal as absent for the rest of the window, shrinking the "average invested capital" and inflating the rate. E.g. an account mostly withdrawn years before `to` (then only brief in-and-out round trips) can report a markedly higher rate than a brokerage's chained time-weighted figure, even with identical contributions and ending balance. The fix is a chained TWR that values the account at every external cash-flow date (from PriceHistory) — not yet built; it also depends on a raw price series (see [price-history-valuation.md §5](./price-history-valuation.md#5-gotchas-to-carry-forward)).
+Widely used by retail brokerages as a TWRR proxy, but formally a money-weighted approximation — it lands close
+to XIRR, not to a true TWR. Applied as one period over many years, its weighting treats a large withdrawal as
+absent for the rest of the window and inflates the rate; on a near-empty account a few dollars of flows read as
+a multi-percent return. That's why it's now only the labelled fallback of `DailyValuedTWR`. To use it as the
+strategy anyway, register `ModifiedDietzTimeWeightedReturnCalculator` in `DependencyInjection.cs`.
 
 Reasons `rate` may be `null`:
 - `IncompleteStartingBalance` / `IncompleteEndingBalance` — see the completeness section.
@@ -337,6 +391,10 @@ The true internal rate of return of the signed cash-flow stream, from the invest
 
 Solves `Σ CFᵢ / (1 + r)^((tᵢ − t₀) / U) = 0` via bisection over `r ∈ [−0.9999, 100.0]` with tolerance `1e-9` and 200 iterations. Bisection is chosen over Newton's for robustness — XIRR can have multiple roots for pathological flow patterns.
 
+**Comparing with Vanguard.** Vanguard's personal performance is the same IRR, reported as of the last day of the
+previous month, and shows no figure when the balance was $0 at the start or end of the period. To compare, pick
+a month-end `to`; the UI notes the $0 case.
+
 **Basis.** When `to − from ≥ 365` days, `U = 365` and `basis = "Annualized"`. For a shorter period, `U` is the flows' own span (first to last flow) and `basis = "Period"`: `r` is then the return over the period itself. Annualizing a few weeks' gain misleads (3% in two weeks reads as ~115% a year), and solving in period units keeps a short, large move inside the solver's bounds.
 
 Reasons `rate` may be `null`:
@@ -360,7 +418,7 @@ public sealed class PortfolioPerformanceService(
     IMoneyWeightedReturnCalculator mwrCalculator)
 ```
 
-Each calculator receives a `PerformanceComputationContext` — from/to dates, both balances plus their `IsComplete` flags, the ordered list of `CashFlow`s, and the interior `BalancePoint`s (built by walking every unique snapshot `AsOf` in `(from, to)` and computing the portfolio balance at that date; points where any relevant holding is missing coverage are dropped).
+Each calculator receives a `PerformanceComputationContext` — from/to dates, both balances plus their `IsComplete` flags, the ordered list of `CashFlow`s, the interior `BalancePoint`s (built by walking every unique snapshot `AsOf` in `(from, to)` and computing the portfolio balance at that date; points where any relevant holding is missing coverage are dropped), and `ValueAt` — the scope's balance at the close of any date, from the same engines as the balances (cached per request). Strategies that don't need daily valuations ignore it.
 
 Adding a new return metric is a matter of implementing the corresponding interface and swapping the DI registration. Adding a *new* metric (e.g., drawdown, contribution-vs-market-effect decomposition) means adding a sibling record to `PerformanceReturnsResult` and a new field to the response — no changes to the route or existing metrics.
 

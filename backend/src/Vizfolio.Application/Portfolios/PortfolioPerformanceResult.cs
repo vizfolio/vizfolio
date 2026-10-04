@@ -39,8 +39,20 @@ public sealed record PerformanceReturnsResult(
     ReturnResult TimeWeighted,
     ReturnResult MoneyWeighted);
 
+/// <summary>
+/// One return figure. <see cref="Rate"/> is null when it can't be computed, and <see cref="Reason"/> then says why.
+/// <see cref="AnnualizedRate"/> is the per-year equivalent of a period rate when the period is a year or longer.
+/// <see cref="FallbackReason"/> is set when the preferred method couldn't be used and <see cref="Method"/> names the
+/// approximation that was used instead (e.g. a daily-valued TWR falling back to Modified Dietz because a day in the
+/// period couldn't be valued).
+/// </summary>
 public sealed record ReturnResult(
     decimal? Rate,
     string Method,
     string Basis,
-    string? Reason);
+    string? Reason)
+{
+    public decimal? AnnualizedRate { get; init; }
+
+    public string? FallbackReason { get; init; }
+}

@@ -1,43 +1,41 @@
 import { Component, computed, input } from '@angular/core';
 
 import { PortfolioPerformance } from '../../../core/api/models/performance.models';
+import { buildValueSeries, formatPercent, trendOf } from '../../util/performance-format';
 import {
-  buildValueSeries,
-  formatCurrency,
-  formatPercent,
-  hasPendingPrices,
-  trendOf,
-} from '../../util/performance-format';
-import { CompletenessBadge } from '../completeness-badge/completeness-badge';
+  INVESTMENT_RETURN_LABEL,
+  YOUR_RETURN_LABEL,
+  fallbackText,
+  returnMethodText,
+  returnReasonText,
+} from '../../util/reason-text';
 import { PerfChart, PerfDataset } from '../perf-chart/perf-chart';
+import { PerformanceHeadline } from '../performance-headline/performance-headline';
 import { ReturnsChart } from '../returns-chart/returns-chart';
-import { StatCard } from '../stat-card/stat-card';
 
 /**
- * Presentational summary of a {@link PortfolioPerformance}: headline stat cards, a balances /
- * contributions / returns breakdown (with completeness badges and null-return reasons), and the
- * value- and returns-over-time charts. Shared by the dashboard-style views (portfolio and account).
+ * Presentational summary of a {@link PortfolioPerformance} for the portfolio and account Performance
+ * views: the shared headline row (the same cards as the dashboard), a collapsed "How this is
+ * calculated" panel (methods, annualized rate, fallbacks, reasons), and the value- and
+ * returns-over-time charts.
  */
 @Component({
   selector: 'app-performance-summary',
-  imports: [StatCard, CompletenessBadge, PerfChart, ReturnsChart],
+  imports: [PerformanceHeadline, PerfChart, ReturnsChart],
   templateUrl: './performance-summary.html',
   styleUrl: './performance-summary.scss',
 })
 export class PerformanceSummary {
   readonly performance = input.required<PortfolioPerformance>();
+  /** Gross deposits / withdrawals under net contributions; off at portfolio scope (see PerformanceHeadline). */
+  readonly showGrossFlows = input(true);
 
-  protected readonly pendingPrices = hasPendingPrices;
-
-  protected readonly currency = computed(() => this.performance().currencyCode || 'USD');
-
-  protected money(value: number): string {
-    return formatCurrency(value, this.currency());
-  }
-
-  protected readonly netTrend = computed(() =>
-    trendOf(this.performance().contributions.net),
-  );
+  protected readonly yourReturnLabel = YOUR_RETURN_LABEL;
+  protected readonly investmentReturnLabel = INVESTMENT_RETURN_LABEL;
+  protected readonly methodText = returnMethodText;
+  protected readonly reasonText = returnReasonText;
+  protected readonly fallbackText = fallbackText;
+  protected readonly percent = formatPercent;
 
   protected readonly twrLabel = computed(() =>
     formatPercent(this.performance().returns.timeWeighted.rate),

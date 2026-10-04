@@ -332,7 +332,7 @@ public sealed class PortfolioPerformanceServiceTests
     {
         // Opening snapshot at the close of the day before From ($1000) — the period's start — and an
         // ending snapshot at To ($1100), no cash flows.
-        // Modified Dietz: R = 100 / 1000 = 10% period.
+        // Time-weighted (daily-valued): no flows, so one sub-period: 1100 / 1000 − 1 = 10% period.
         // XIRR: 10% annualized (365-day period).
         await using var ctx = await TestDbContext.CreateAsync();
         var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
@@ -349,8 +349,9 @@ public sealed class PortfolioPerformanceServiceTests
 
         result.Returns.TimeWeighted.Rate.ShouldNotBeNull();
         Math.Abs(result.Returns.TimeWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.0001m);
-        result.Returns.TimeWeighted.Method.ShouldBe("ModifiedDietz");
+        result.Returns.TimeWeighted.Method.ShouldBe("DailyValuedTWR");
         result.Returns.TimeWeighted.Basis.ShouldBe("Period");
+        result.Returns.TimeWeighted.FallbackReason.ShouldBeNull();
 
         result.Returns.MoneyWeighted.Rate.ShouldNotBeNull();
         Math.Abs(result.Returns.MoneyWeighted.Rate!.Value - 0.10m).ShouldBeLessThan(0.001m);
@@ -735,6 +736,69 @@ public sealed class PortfolioPerformanceServiceTests
     }
 
     [Fact]
+    public async Task Time_weighted_return_ignores_when_money_was_added_and_the_series_is_its_running_chain()
+    {
+        // $1000 buys 100 shares at $10 (Mar 3); the price is $12 on Jun 30 (+20%). $1200 more buys 100 shares at
+        // $12 on Jul 1; the price ends at $11. Investments: 1.20 × (2200 / 2400) − 1 = +10% (time-weighted). The
+        // second $1200 lost money, so the money-weighted return is lower — and the two answer different questions.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXTIME");
+        var firstDay = new DateOnly(2025, 3, 3);
+        var secondDay = new DateOnly(2025, 7, 1);
+
+        await SeedSnapshotAsync(ctx, holding, firstDay.AddDays(-1), marketValue: 0m, source: AccountHoldingSnapshotSource.OpeningBalance);
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedCashAsync(ctx, accountId, secondDay, TransactionType.Deposit, 1200m);
+        await SeedTransactionAsync(ctx, accountId, holding, secondDay, TransactionType.Buy, amount: -1200m, quantity: 100m);
+        await SeedPriceAsync(ctx, "ZXTIME", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "ZXTIME", new DateOnly(2025, 6, 30), close: 12m);
+        await SeedPriceAsync(ctx, "ZXTIME", secondDay, close: 12m);
+        await SeedPriceAsync(ctx, "ZXTIME", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var twr = result.Returns.TimeWeighted;
+        twr.Method.ShouldBe("DailyValuedTWR");
+        twr.Rate!.Value.ShouldBe(0.10m, tolerance: 0.000001m);
+        result.Returns.MoneyWeighted.Rate!.Value.ShouldBeLessThan(0.10m);
+
+        var points = result.Series.Points;
+        points.Single(p => p.Date == new DateOnly(2025, 6, 30)).CumulativeReturn!.Value.ShouldBe(0.20m, tolerance: 0.000001m);
+        points[^1].CumulativeReturn.ShouldBe(twr.Rate);
+    }
+
+    [Fact]
+    public async Task A_deposit_whose_eve_cant_be_valued_falls_back_to_Modified_Dietz_with_the_cause()
+    {
+        // No close within the price-age limit around the Aug 1 deposit, so the account can't be valued on its eve and
+        // the chain can't be split there. The figure is the labelled Modified Dietz approximation, not a guess.
+        await using var ctx = await TestDbContext.CreateAsync();
+        var (portfolioId, accountId) = await SeedPortfolioWithAccountAsync(ctx);
+        var holding = await SeedHoldingWithSymbolAsync(ctx, accountId, "ZXGAP");
+        var firstDay = new DateOnly(2025, 3, 3);
+
+        await SeedCashAsync(ctx, accountId, firstDay, TransactionType.Deposit, 1000m);
+        await SeedTransactionAsync(ctx, accountId, holding, firstDay, TransactionType.Buy, amount: -1000m, quantity: 100m);
+        await SeedCashAsync(ctx, accountId, new DateOnly(2025, 8, 1), TransactionType.Deposit, 500m);
+        await SeedPriceAsync(ctx, "ZXGAP", firstDay, close: 10m);
+        await SeedPriceAsync(ctx, "ZXGAP", To, close: 11m);
+
+        var service = NewService(ctx);
+        var result = await service.ComputeForAccountAsync(portfolioId, accountId, from: null, To, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        var twr = result.Returns.TimeWeighted;
+        twr.Method.ShouldBe("ModifiedDietz");
+        twr.FallbackReason.ShouldBe("StalePrice");
+        twr.Rate.ShouldNotBeNull();
+        result.Series.Points[^1].CumulativeReturn.ShouldBe(twr.Rate);
+    }
+
+    [Fact]
     public async Task A_held_position_is_missing_not_zero_when_its_only_earlier_snapshot_says_nothing_was_held()
     {
         // Regression (F2): a $0 opening balance at inception, then a purchase, and no price until months later.
@@ -990,7 +1054,7 @@ public sealed class PortfolioPerformanceServiceTests
     private static PortfolioPerformanceService NewService(TestDbContext ctx) =>
         new(ctx.Db,
             new AccountValuationLoader(ctx.Db, new ValuationOptions()),
-            new ModifiedDietzTimeWeightedReturnCalculator(),
+            new DailyValuedTimeWeightedReturnCalculator(),
             new XirrMoneyWeightedReturnCalculator());
 
     // ---------- seeding helpers ----------

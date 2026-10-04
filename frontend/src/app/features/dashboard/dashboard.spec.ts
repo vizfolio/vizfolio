@@ -8,6 +8,7 @@ import {
   PortfolioSummary,
 } from '../../core/api/models/performance.models';
 import { Dashboard } from './dashboard';
+import { SAMPLE_PERFORMANCE } from './dashboard.util';
 
 const PERF: PortfolioPerformance = {
   from: '2025-01-01',
@@ -28,8 +29,8 @@ const PERF: PortfolioPerformance = {
   },
   contributions: { net: 5000, deposits: 6000, withdrawals: -1000, count: 3 },
   returns: {
-    timeWeighted: { rate: 0.2, method: 'ModifiedDietz', basis: 'Period', reason: null },
-    moneyWeighted: { rate: 0.22, method: 'XIRR', basis: 'Annualized', reason: null },
+    timeWeighted: { rate: 0.2, method: 'DailyValuedTWR', basis: 'Period', reason: null, annualizedRate: null, fallbackReason: null },
+    moneyWeighted: { rate: 0.22, method: 'XIRR', basis: 'Annualized', reason: null, annualizedRate: null, fallbackReason: null },
   },
   currencyCode: 'USD',
   series: { interval: 'Monthly', points: [] },
@@ -74,18 +75,15 @@ function createDashboard(api: MockApi) {
 describe('Dashboard', () => {
   beforeEach(() => localStorage.clear());
 
-  it('maps the active portfolio performance into card signals', () => {
+  it('feeds the active portfolio performance to the headline row and charts', () => {
     const cmp = createDashboard(new MockApi());
 
     expect(cmp.status()).toBe('ready');
     expect(cmp.portfolioName()).toBe('My Portfolio');
-    expect(cmp.valueLabel()).toContain('25,000');
-    expect(cmp.depositsLabel()).toContain('6,000');
-    expect(cmp.withdrawalsLabel()).toContain('1,000');
-    expect(cmp.returnLabel()).toBe('+20.0%');
     expect(cmp.notice()).toBeNull();
     expect(cmp.chartDatasets().length).toBe(3);
-    expect(cmp.displayPerformance()).toBe(PERF); // feeds the returns-over-time chart
+    // The shared headline row (see PerformanceHeadline) and the returns chart both render this.
+    expect(cmp.displayPerformance()).toBe(PERF);
   });
 
   it('shows the first-run empty state when there are no portfolios', () => {
@@ -105,7 +103,7 @@ describe('Dashboard', () => {
 
     expect(cmp.status()).toBe('error');
     expect(cmp.notice()).toContain("Couldn't reach the API");
-    expect(cmp.valueLabel()).not.toBe('—');
+    expect(cmp.displayPerformance()).toBe(SAMPLE_PERFORMANCE);
   });
 
   it('falls back to sample data when the performance request fails', () => {

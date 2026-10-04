@@ -375,6 +375,9 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
         body.EndingBalance.SnapshotAsOf.ShouldBe(new DateOnly(2026, 6, 1));
         body.EndingBalance.HoldingsCovered.ShouldBe(3); // VOO, AAPL and the account's cash
         body.EndingBalance.HoldingsMissingSnapshot.ShouldBe(0);
+        // The registered strategies: the daily-valued TWR ("investment return") and the XIRR headline ("your return").
+        body.Returns.TimeWeighted.Method.ShouldBe("DailyValuedTWR");
+        body.Returns.MoneyWeighted.Method.ShouldBe("XIRR");
     }
 
     [Fact]

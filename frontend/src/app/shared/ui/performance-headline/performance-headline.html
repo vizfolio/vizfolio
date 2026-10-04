@@ -1,0 +1,31 @@
+@let p = performance();
+<div class="stat-grid">
+  <app-stat-card [label]="balanceLabel()" [value]="money(p.endingBalance.value)" [delta]="balanceDetail()">
+    @let b = balanceStatus();
+    <app-completeness-badge
+      statBadge
+      [complete]="b.isComplete"
+      [missing]="b.holdingsMissingSnapshot"
+      [asOf]="b.snapshotAsOf"
+      [pending]="pendingPrices(b)"
+    />
+  </app-stat-card>
+  <app-stat-card
+    [label]="yourReturnLabel"
+    [value]="mwrValue()"
+    [delta]="mwrDetail()"
+    [hint]="yourReturnHint"
+    [featured]="true"
+  />
+  <app-stat-card
+    [label]="investmentReturnLabel"
+    [value]="twrValue()"
+    [delta]="twrDetail()"
+    [hint]="investmentReturnHint"
+  />
+  <app-stat-card
+    label="Net contributions"
+    [value]="money(p.contributions.net)"
+    [delta]="contributionsDetail()"
+  />
+</div>

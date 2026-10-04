@@ -9,14 +9,8 @@ import { ActivePortfolioService } from '../../core/portfolio/active-portfolio.se
 import { EmptyState } from '../../shared/ui/empty-state/empty-state';
 import { PerfChart, PerfDataset } from '../../shared/ui/perf-chart/perf-chart';
 import { ReturnsChart } from '../../shared/ui/returns-chart/returns-chart';
-import { StatCard } from '../../shared/ui/stat-card/stat-card';
-import {
-  SAMPLE_PERFORMANCE,
-  buildValueSeries,
-  formatCurrency,
-  formatPercent,
-  trendOf,
-} from './dashboard.util';
+import { PerformanceHeadline } from '../../shared/ui/performance-headline/performance-headline';
+import { SAMPLE_PERFORMANCE, buildValueSeries } from './dashboard.util';
 import { pollWhilePending } from '../../shared/util/poll';
 import { performanceAwaitsPrices } from '../../shared/util/performance-format';
 
@@ -30,10 +24,10 @@ type DashboardStatus = 'loading' | 'ready' | 'empty' | 'error';
 
 type PerfFetchStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-/** Landing page: headline stats + value and returns charts for the active portfolio. */
+/** Landing page: the shared headline row + value and returns charts for the active portfolio. */
 @Component({
   selector: 'app-dashboard',
-  imports: [StatCard, PerfChart, ReturnsChart, EmptyState, RouterLink],
+  imports: [PerformanceHeadline, PerfChart, ReturnsChart, EmptyState, RouterLink],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
@@ -88,41 +82,6 @@ export class Dashboard {
     this.status() === 'error'
       ? "Couldn't reach the API — showing sample data instead."
       : null,
-  );
-
-  protected readonly valueLabel = computed(() => {
-    const p = this.displayPerformance();
-    return p ? formatCurrency(p.endingBalance.value, p.currencyCode) : '—';
-  });
-  protected readonly valueIncomplete = computed(
-    () => this.displayPerformance()?.endingBalance.isComplete === false,
-  );
-
-  protected readonly depositsLabel = computed(() => {
-    const p = this.displayPerformance();
-    return p ? formatCurrency(p.contributions.deposits, p.currencyCode) : '—';
-  });
-
-  protected readonly withdrawalsLabel = computed(() => {
-    const p = this.displayPerformance();
-    return p
-      ? formatCurrency(Math.abs(p.contributions.withdrawals), p.currencyCode)
-      : '—';
-  });
-
-  protected readonly netLabel = computed(() => {
-    const p = this.displayPerformance();
-    return p ? formatCurrency(p.contributions.net, p.currencyCode) : '—';
-  });
-  protected readonly netTrend = computed(() =>
-    trendOf(this.displayPerformance()?.contributions.net ?? null),
-  );
-
-  protected readonly returnLabel = computed(() =>
-    formatPercent(this.displayPerformance()?.returns.timeWeighted.rate ?? null),
-  );
-  protected readonly returnTrend = computed(() =>
-    trendOf(this.displayPerformance()?.returns.timeWeighted.rate ?? null),
   );
 
   private readonly series = computed(() => {

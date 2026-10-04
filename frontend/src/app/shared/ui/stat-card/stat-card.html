@@ -1,6 +1,7 @@
 <article class="stat-card">
   <div class="stat-head">
     <span class="stat-label">{{ label() }}</span>
+    <ng-content select="[statBadge]" />
     @if (incomplete()) {
       <span class="stat-flag" title="Some holdings are missing snapshot data for this period">
         incomplete
@@ -12,5 +13,9 @@
 
   @if (delta(); as d) {
     <p class="stat-delta" [class]="'trend-' + trend()">{{ d }}</p>
+  }
+
+  @if (hint(); as h) {
+    <p class="stat-hint">{{ h }}</p>
   }
 </article>

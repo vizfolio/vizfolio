@@ -1,7 +1,9 @@
 import {
+  PerformanceReturn,
   PerformanceSeriesInterval,
   PortfolioPerformance,
 } from '../../core/api/models/performance.models';
+import { returnReasonText } from './reason-text';
 
 /** Formats a number as currency for the given ISO code (falls back to plain if invalid). */
 export function formatCurrency(value: number, currencyCode: string): string {
@@ -47,6 +49,24 @@ export function formatPercent(rate: number | null): string {
   const pct = rate * 100;
   const sign = pct > 0 ? '+' : '';
   return `${sign}${pct.toFixed(1)}%`;
+}
+
+/**
+ * The line under a return figure: what span it covers ("a year", "over the period", or the
+ * annualized equivalent "+10.2% a year"), "approximate" when it fell back to Modified Dietz, or
+ * why it couldn't be computed.
+ */
+export function returnDetail(r: PerformanceReturn): string | null {
+  if (r.rate === null) {
+    return returnReasonText(r.reason);
+  }
+  const span =
+    r.basis === 'Annualized'
+      ? 'a year'
+      : r.annualizedRate !== null && r.annualizedRate !== undefined
+        ? `${formatPercent(r.annualizedRate)} a year`
+        : 'over the period';
+  return r.fallbackReason ? `${span} · approximate` : span;
 }
 
 /** Up/down/neutral from a signed number. */

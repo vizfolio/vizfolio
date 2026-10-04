@@ -26,8 +26,36 @@ describe('ReturnsChart', () => {
     expect(percentBtn.getAttribute('aria-pressed')).toBe('true');
     expect(gainBtn.getAttribute('aria-pressed')).toBe('false');
     expect(cmp.valueFormat()).toBe('percent');
-    expect(cmp.datasets()[0].label).toBe('Cumulative return');
+    expect(cmp.datasets()[0].label).toBe('Cumulative investment return');
     expect(cmp.datasets()[0].data.at(-1)).toBe(11.4);
+  });
+
+  it('says the line is time-weighted and ends at the investment return, not the headline', async () => {
+    const { el } = await setup();
+
+    expect(el.querySelector('.chart-caption')?.textContent).toContain(
+      'Time-weighted: ends at the investment return, not your return.',
+    );
+  });
+
+  it('flags the line as approximate when the time-weighted return fell back to Modified Dietz', async () => {
+    const fixture = TestBed.createComponent(ReturnsChart);
+    fixture.componentRef.setInput('performance', {
+      ...SAMPLE_PERFORMANCE,
+      returns: {
+        ...SAMPLE_PERFORMANCE.returns,
+        timeWeighted: {
+          ...SAMPLE_PERFORMANCE.returns.timeWeighted,
+          method: 'ModifiedDietz',
+          fallbackReason: 'NoPrice',
+        },
+      },
+    });
+    await fixture.whenStable();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('.chart-caption')?.textContent).toContain(
+      'Approximate',
+    );
   });
 
   it('switches to the investment gain in the portfolio currency', async () => {

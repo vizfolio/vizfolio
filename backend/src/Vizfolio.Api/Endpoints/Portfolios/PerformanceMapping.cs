@@ -26,7 +26,7 @@ internal static class PerformanceMapping
         new(ToReturn(r.TimeWeighted), ToReturn(r.MoneyWeighted));
 
     private static PerformanceReturn ToReturn(ReturnResult r) =>
-        new(r.Rate, r.Method, r.Basis, r.Reason);
+        new(r.Rate, r.Method, r.Basis, r.Reason, r.AnnualizedRate, r.FallbackReason);
 
     private static PerformanceSeries ToSeries(PerformanceSeriesResult s) =>
         new(s.Interval.ToString(), s.Points.Select(p => new PerformanceSeriesPointResponse(

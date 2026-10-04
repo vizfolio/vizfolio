@@ -39,15 +39,19 @@ export const SAMPLE_PERFORMANCE: PortfolioPerformance = {
   returns: {
     timeWeighted: {
       rate: 0.114,
-      method: 'ModifiedDietz',
+      method: 'DailyValuedTWR',
       basis: 'Period',
       reason: null,
+      annualizedRate: null,
+      fallbackReason: null,
     },
     moneyWeighted: {
       rate: 0.121,
       method: 'XIRR',
       basis: 'Annualized',
       reason: null,
+      annualizedRate: null,
+      fallbackReason: null,
     },
   },
   currencyCode: 'USD',

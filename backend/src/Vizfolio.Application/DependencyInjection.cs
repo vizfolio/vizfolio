@@ -43,10 +43,10 @@ public static class DependencyInjection
         services.AddScoped<IAccountHistoryService, AccountHistoryService>();
         services.AddScoped<IImpliedContributionService, ImpliedContributionService>();
 
-        // Return-metric strategies. Swap the TWRR line to
-        // ChainedSubPeriodTimeWeightedReturnCalculator to opt into the strict GIPS-style
-        // calculator (returns null until multiple snapshots exist across the period).
-        services.AddScoped<ITimeWeightedReturnCalculator, ModifiedDietzTimeWeightedReturnCalculator>();
+        // Return-metric strategies. The time-weighted ("investment") return is a true TWR from daily valuations,
+        // falling back to Modified Dietz when a day in the period can't be valued. The money-weighted XIRR is the
+        // headline ("your return"), the same method as Vanguard's personal performance.
+        services.AddScoped<ITimeWeightedReturnCalculator, DailyValuedTimeWeightedReturnCalculator>();
         services.AddScoped<IMoneyWeightedReturnCalculator, XirrMoneyWeightedReturnCalculator>();
 
         // Price-history pipeline. Sources (IPriceHistorySource) are registered in the Infrastructure

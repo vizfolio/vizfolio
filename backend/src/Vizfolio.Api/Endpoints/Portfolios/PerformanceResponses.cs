@@ -35,11 +35,18 @@ public sealed record PerformanceReturns(
     PerformanceReturn TimeWeighted,
     PerformanceReturn MoneyWeighted);
 
+/// <summary>
+/// A return figure. <c>Rate</c> is null when it can't be computed (<c>Reason</c> says why). <c>AnnualizedRate</c> is
+/// the per-year equivalent of a period rate when the period is a year or more. <c>FallbackReason</c> is set when the
+/// preferred method couldn't be used and <c>Method</c> names the approximation used instead.
+/// </summary>
 public sealed record PerformanceReturn(
     decimal? Rate,
     string Method,
     string Basis,
-    string? Reason);
+    string? Reason,
+    decimal? AnnualizedRate,
+    string? FallbackReason);
 
 /// <summary>
 /// Value / returns-over-time chart data. <c>Interval</c> is "Weekly", "Monthly" or "Quarterly". The first point is
