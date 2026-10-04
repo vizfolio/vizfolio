@@ -27,11 +27,15 @@ public sealed record PriceSeriesResult(
 
 /// <summary>
 /// Options for a price-history import run. <see cref="AccountIds"/> limits it to the series those accounts hold (each
-/// still fetched over the window every account holding it needs).
+/// still fetched over the window every account holding it needs). With <see cref="FreshSince"/>, a series fetched
+/// since then is skipped unless it now needs older history than that fetch covered (see
+/// <see cref="PriceHistoryImporter"/>) — the background refresh passes the time of the latest daily close, so a
+/// restart or a repeated import doesn't spend provider requests on prices that can't have changed.
 /// </summary>
 public sealed record PriceHistoryImportOptions(
     IReadOnlyList<string>? Tickers = null,
     DateOnly? From = null,
     DateOnly? To = null,
     bool Force = false,
-    IReadOnlyCollection<Guid>? AccountIds = null);
+    IReadOnlyCollection<Guid>? AccountIds = null,
+    DateTimeOffset? FreshSince = null);

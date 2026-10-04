@@ -489,6 +489,9 @@ not FKs (a second cascade path from the portfolio is rejected by SQL Server; bat
 - **`GET /api/portfolios/{id}/imports`** lists the batches newest first (`fileName`, `sourceSystem`, `importedAt`,
   `reprocessedAt`, `status`, `undoneAt`, per-account counts with the account's current name, `warnings`) plus
   `transactionsImportedBeforeHistory` — rows that belong to no batch and can't be undone.
+- **`GET /api/portfolios/{id}/imports/{batchId}/file`** downloads the stored file exactly as uploaded (attachment,
+  original name and content type; undone imports included). `404` for an import outside the portfolio or one whose
+  file wasn't kept (`hasStoredFile: false`).
 - **`GET /api/portfolios/{id}/imports/{batchId}/undo-preview`** / **`POST .../undo`** (no body). Undo, in one
   transaction: restores rows the batch updated (only where they still hold its values — a later import's change
   stands); deletes the rows and snapshots it inserted (never rows it skipped as duplicates, never pre-batch rows);

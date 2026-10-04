@@ -10,7 +10,16 @@ public interface IImportHistoryService
 {
     /// <summary>The portfolio's imports, newest first. Null when the portfolio doesn't exist.</summary>
     Task<ImportHistory?> ListAsync(Guid portfolioId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The file an import stored, as uploaded (undone imports included). Null when the import isn't in the portfolio or
+    /// its file wasn't kept.
+    /// </summary>
+    Task<StoredImportFile?> GetFileAsync(Guid portfolioId, Guid importBatchId, CancellationToken cancellationToken);
 }
+
+/// <summary>An uploaded file, decompressed, with its original name and content type.</summary>
+public sealed record StoredImportFile(string FileName, string ContentType, byte[] Content);
 
 /// <summary>A portfolio's imports, and how many of its rows were imported before imports were recorded.</summary>
 public sealed record ImportHistory(IReadOnlyList<ImportBatchItem> Imports, int TransactionsImportedBeforeHistory);
@@ -91,5 +100,15 @@ public sealed class ImportHistoryService : IImportHistoryService
                              && t.SourceSystem != ImpliedContributionService.SourceSystem, cancellationToken);
 
         return new ImportHistory(items, beforeHistory);
+    }
+
+    public async Task<StoredImportFile?> GetFileAsync(Guid portfolioId, Guid importBatchId, CancellationToken cancellationToken)
+    {
+        var batch = await _db.ImportBatches.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.ImportBatchId == importBatchId && b.PortfolioId == portfolioId, cancellationToken);
+        if (batch?.Content is null) return null;
+
+        var file = ImportFile.FromBatch(batch);
+        return new StoredImportFile(batch.FileName, batch.ContentType ?? "application/octet-stream", file.Content);
     }
 }

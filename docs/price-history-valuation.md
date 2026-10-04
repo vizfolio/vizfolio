@@ -188,7 +188,15 @@ Nobody has to fetch prices by hand (roadmap Phase 3):
 - **From Settings** ("Fetch prices now", `POST /api/prices/refresh`) and whenever a provider key is saved.
 
 One `PriceRefreshWorker` runs whatever is queued as a single run, and **waits** for the shared `ImportRunGate`
-(never overlapping an extracts import, never skipped). While an account's refresh is queued or running, a value
+(never overlapping an extracts import, never skipped).
+
+**No wasted requests.** Providers publish one close a day, so startup, scheduled and import-triggered runs pass
+`FreshSince` = the latest daily refresh time (`DailyAt` in `TimeZone`, at or before now; `now − Interval` without
+`DailyAt`), and the importer skips a series whose last attempt is newer than that — restarting the app or importing the
+same holdings again costs nothing. A series is still fetched when it needs older history than that attempt covered
+(`PriceSeriesStatus.NeededFrom`, e.g. an older account was imported), when it had no provider (a key may have been added
+since; asking costs nothing), or when its last fetch failed more than an hour ago (never sooner, so a rate limit isn't
+hit repeatedly). A manual "Fetch prices now" (or saving a key) skips nothing. While an account's refresh is queued or running, a value
 missing for want of a price reports `PricesPending` instead of `NoPrice`/`StalePrice`, and the UI shows "Updating…"
 and polls until it clears.
 

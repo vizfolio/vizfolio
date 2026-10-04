@@ -290,6 +290,113 @@ public sealed class PriceHistoryImporterTests
         first.ShouldNotBe(second);
     }
 
+    // ---------------- skipping series already fetched (no wasted provider requests) ----------------
+
+    private static readonly DateTimeOffset LatestClose = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero); // 8pm New York, Oct 1
+    private static readonly DateTimeOffset Now = LatestClose.AddHours(14);
+
+    /// <summary>Closes from the first day the series is needed, so only freshness decides whether to fetch.</summary>
+    private static PriceSeriesResult Covering() => Closes((Buy.AddDays(-7), 99m), (new(2025, 1, 2), 100m));
+
+    [Fact]
+    public async Task A_series_fetched_since_the_latest_close_isnt_fetched_again()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        await SeedHeldSymbolAsync(ctx, "AAPL");
+        var source = new FakePriceHistorySource { Handler = _ => Covering() };
+
+        await NewImporter(ctx, Now.AddMinutes(-2), source).ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+        source.Requests.Count.ShouldBe(1);
+
+        // Restarting two minutes later: nothing newer can exist, so no request.
+        await NewImporter(ctx, Now, source).ImportAsync(new PriceHistoryImportOptions(FreshSince: LatestClose), CancellationToken.None);
+        source.Requests.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_series_last_fetched_before_the_latest_close_is_fetched_for_the_new_close()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        await SeedHeldSymbolAsync(ctx, "AAPL");
+        var source = new FakePriceHistorySource { Handler = _ => Covering() };
+
+        await NewImporter(ctx, LatestClose.AddHours(-3), source).ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+        await NewImporter(ctx, Now, source).ImportAsync(new PriceHistoryImportOptions(FreshSince: LatestClose), CancellationToken.None);
+
+        source.Requests.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Importing_older_history_fetches_the_series_again_even_when_it_was_just_fetched()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        await SeedHeldSymbolAsync(ctx, "AAPL");
+        var source = new FakePriceHistorySource { Handler = _ => Covering() };
+        await NewImporter(ctx, Now.AddMinutes(-2), source).ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+
+        // An older account holding the same symbol now needs history from 2020.
+        await SeedHeldSymbolAsync(ctx, "AAPL", firstTrade: new DateOnly(2020, 1, 6), accountNumber: "older");
+        await NewImporter(ctx, Now, source).ImportAsync(new PriceHistoryImportOptions(FreshSince: LatestClose), CancellationToken.None);
+
+        source.Requests.Count.ShouldBeGreaterThan(1);
+        source.Requests.ShouldContain(r => r.From < new DateOnly(2025, 1, 1) && r != source.Requests[0]);
+    }
+
+    [Fact]
+    public async Task A_series_with_no_provider_is_tried_again_so_a_newly_added_key_is_used_at_once()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        await SeedHeldSymbolAsync(ctx, "AAPL");
+        await NewImporter(ctx, Now.AddMinutes(-2), new FakePriceHistorySource { Enabled = false })
+            .ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+
+        var keyed = new FakePriceHistorySource { Handler = _ => Covering() };
+        await NewImporter(ctx, Now, keyed).ImportAsync(new PriceHistoryImportOptions(FreshSince: LatestClose), CancellationToken.None);
+
+        keyed.Requests.Count.ShouldBe(1);
+        (await ctx.Db.PriceSeriesStatuses.SingleAsync()).LastOutcome.ShouldBe(PriceFetchOutcome.Ok);
+    }
+
+    [Fact]
+    public async Task A_failed_series_is_retried_only_once_an_hour_has_passed()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        await SeedHeldSymbolAsync(ctx, "AAPL");
+        var failing = new FakePriceHistorySource { Throws = new HttpRequestException("429 Too Many Requests") };
+        await NewImporter(ctx, Now, failing).ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+
+        await NewImporter(ctx, Now.AddMinutes(30), failing).ImportAsync(new PriceHistoryImportOptions(FreshSince: LatestClose), CancellationToken.None);
+        failing.Requests.Count.ShouldBe(1);
+
+        await NewImporter(ctx, Now.AddMinutes(61), failing).ImportAsync(new PriceHistoryImportOptions(FreshSince: LatestClose), CancellationToken.None);
+        failing.Requests.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_run_without_a_freshness_cutoff_or_a_forced_one_skips_nothing()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        await SeedHeldSymbolAsync(ctx, "AAPL");
+        var source = new FakePriceHistorySource { Handler = _ => Covering() };
+        await NewImporter(ctx, Now.AddMinutes(-2), source).ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+
+        await NewImporter(ctx, Now, source).ImportAsync(new PriceHistoryImportOptions(), CancellationToken.None);
+        await NewImporter(ctx, Now, source).ImportAsync(new PriceHistoryImportOptions(Force: true, FreshSince: LatestClose), CancellationToken.None);
+
+        source.Requests.Count.ShouldBe(3);
+    }
+
+    private static PriceHistoryImporter NewImporter(TestDbContext ctx, DateTimeOffset now, params IPriceHistorySource[] sources) =>
+        new(ctx.Db,
+            new PriceHistorySourceSelector(sources),
+            NullLogger<PriceHistoryImporter>.Instance,
+            time: new FixedTime(now));
+
+    private sealed class FixedTime(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     private static PriceSeriesResult Closes(params (DateOnly Date, decimal Close)[] closes) =>
         new(closes.Select(c => new PricePoint(c.Date, c.Close)).ToList(), Array.Empty<SplitEvent>(), "USD");
 

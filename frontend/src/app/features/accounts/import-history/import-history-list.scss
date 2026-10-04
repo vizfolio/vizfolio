@@ -61,9 +61,16 @@
   font-size: 0.85rem;
 }
 
+// Actions sit at the end of the row: the first one pushes them right.
+.download,
 .undo,
 .badge {
   margin-left: auto;
+}
+
+.download + .undo,
+.download + .badge {
+  margin-left: 0;
 }
 
 .badge {
@@ -114,6 +121,7 @@
 
 .btn {
   display: inline-flex;
+  text-decoration: none;
   align-items: center;
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius);

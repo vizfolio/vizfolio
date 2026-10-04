@@ -97,9 +97,34 @@ public sealed class PriceRefreshTests
         var schedule = new PriceSchedule();
         var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
 
-        var next = PriceHistoryRefreshHostedService.NextRun(DateTimeOffset.Parse(now), schedule, zone);
+        var next = PriceScheduleClock.NextRun(DateTimeOffset.Parse(now), schedule, zone);
 
         next.ShouldBe(DateTimeOffset.Parse(expected));
+    }
+
+    [Theory]
+    [InlineData("2026-10-05T15:00:00Z", "2026-10-05T00:00:00Z")] // 11:00 EDT → last night's 20:00
+    [InlineData("2026-10-06T01:00:00Z", "2026-10-06T00:00:00Z")] // 21:00 EDT → tonight's 20:00
+    public void The_latest_close_is_the_most_recent_eight_pm_new_york_time(string now, string expected)
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+
+        PriceScheduleClock.LatestClose(DateTimeOffset.Parse(now), new PriceSchedule(), zone).ShouldBe(DateTimeOffset.Parse(expected));
+    }
+
+    [Fact]
+    public void Startup_scheduled_and_import_runs_skip_fresh_series_but_a_manual_fetch_skips_nothing()
+    {
+        var now = DateTimeOffset.Parse("2026-10-05T15:00:00Z");
+        var schedule = new PriceSchedule();
+
+        PriceRefreshWorker.OptionsFor(PriceRefreshRequest.Everything(PriceRefreshTrigger.Schedule), now, schedule)
+            .FreshSince.ShouldBe(DateTimeOffset.Parse("2026-10-05T00:00:00Z"));
+        var import = PriceRefreshWorker.OptionsFor(PriceRefreshRequest.ForAccounts([A], PriceRefreshTrigger.Import), now, schedule);
+        import.FreshSince.ShouldNotBeNull();
+        import.AccountIds.ShouldBe([A]);
+        PriceRefreshWorker.OptionsFor(PriceRefreshRequest.Everything(PriceRefreshTrigger.Manual), now, schedule)
+            .FreshSince.ShouldBeNull();
     }
 
     [Fact]
@@ -108,7 +133,7 @@ public sealed class PriceRefreshTests
         var schedule = new PriceSchedule { DailyAt = null, Interval = TimeSpan.FromHours(6) };
         var now = DateTimeOffset.Parse("2026-10-05T15:00:00Z");
 
-        PriceHistoryRefreshHostedService.NextRun(now, schedule, TimeZoneInfo.Utc).ShouldBe(now.AddHours(6));
+        PriceScheduleClock.NextRun(now, schedule, TimeZoneInfo.Utc).ShouldBe(now.AddHours(6));
     }
 
     [Fact]

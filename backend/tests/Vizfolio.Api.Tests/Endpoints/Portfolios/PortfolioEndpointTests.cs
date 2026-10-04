@@ -659,6 +659,25 @@ public sealed class PortfolioEndpointTests : IClassFixture<VizfolioApiFactory>
     }
 
     [Fact]
+    public async Task GET_import_file_downloads_the_upload_under_its_original_name()
+    {
+        var portfolio = await CreatePortfolioAsync();
+        var account = await CreateAccountAsync(portfolio.PortfolioId, accountNumber: "FILE-1");
+        var upload = await (await UploadAccountFileAsync(portfolio.PortfolioId, account.AccountId, "ledger.csv", CanonicalCsv))
+            .Content.ReadFromJsonAsync<PortfolioImportResult>();
+
+        var response = await _client.GetAsync($"/api/portfolios/{portfolio.PortfolioId}/imports/{upload!.ImportBatchId}/file");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).ShouldBe(CanonicalCsv);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("text/csv");
+        response.Content.Headers.ContentDisposition!.FileNameStar.ShouldBe("ledger.csv");
+
+        (await _client.GetAsync($"/api/portfolios/{Guid.NewGuid()}/imports/{upload.ImportBatchId}/file")).StatusCode
+            .ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Undo_preview_of_an_unknown_import_returns_404()
     {
         var portfolio = await CreatePortfolioAsync();

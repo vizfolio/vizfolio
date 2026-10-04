@@ -46,11 +46,11 @@ public sealed class PriceHistoryRefreshHostedService : BackgroundService
             if (schedule.RunOnStartup)
                 _queue.Enqueue(PriceRefreshRequest.Everything(PriceRefreshTrigger.Schedule));
 
-            var zone = ResolveTimeZone(schedule.TimeZone);
+            var zone = PriceScheduleClock.ResolveTimeZone(schedule.TimeZone);
             while (!stoppingToken.IsCancellationRequested)
             {
                 var now = _time.GetUtcNow();
-                var next = NextRun(now, schedule, zone);
+                var next = PriceScheduleClock.NextRun(now, schedule, zone);
                 _logger.LogInformation("Next scheduled price refresh at {Next:u}", next);
                 await Task.Delay(next - now, _time, stoppingToken);
                 _queue.Enqueue(PriceRefreshRequest.Everything(PriceRefreshTrigger.Schedule));
@@ -58,31 +58,6 @@ public sealed class PriceHistoryRefreshHostedService : BackgroundService
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-        }
-    }
-
-    /// <summary>The next scheduled refresh after <paramref name="nowUtc"/>: today's or tomorrow's DailyAt, or now + Interval.</summary>
-    internal static DateTimeOffset NextRun(DateTimeOffset nowUtc, PriceSchedule schedule, TimeZoneInfo zone)
-    {
-        if (schedule.DailyAt is not { } dailyAt)
-            return nowUtc + (schedule.Interval <= TimeSpan.Zero ? TimeSpan.FromHours(24) : schedule.Interval);
-
-        var local = TimeZoneInfo.ConvertTime(nowUtc, zone);
-        var candidate = local.Date + dailyAt;
-        if (candidate <= local.DateTime) candidate = candidate.AddDays(1);
-        return new DateTimeOffset(candidate, zone.GetUtcOffset(candidate)).ToUniversalTime();
-    }
-
-    private TimeZoneInfo ResolveTimeZone(string id)
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(id);
-        }
-        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
-        {
-            _logger.LogWarning("Unknown time zone {TimeZone} for the price schedule; using UTC.", id);
-            return TimeZoneInfo.Utc;
         }
     }
 }

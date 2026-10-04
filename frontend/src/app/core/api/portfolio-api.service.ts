@@ -168,6 +168,14 @@ export class PortfolioApiService {
     return this.http.get<ImportHistory>(`${API_BASE}/portfolios/${portfolioId}/imports`);
   }
 
+  /**
+   * URL of GET .../imports/{importBatchId}/file — the uploaded file as stored, served as an attachment under its
+   * original name. A plain link (not an HttpClient call), so the browser downloads it.
+   */
+  importFileUrl(portfolioId: string, importBatchId: string): string {
+    return `${API_BASE}/portfolios/${portfolioId}/imports/${importBatchId}/file`;
+  }
+
   /** GET .../imports/{importBatchId}/undo-preview — what undoing would remove or revert (dry run). */
   getImportUndoPreview(portfolioId: string, importBatchId: string): Observable<ImportUndoSummary> {
     return this.http.get<ImportUndoSummary>(

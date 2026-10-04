@@ -86,7 +86,8 @@ from `features/accounts/`:
 - **Warnings** (`import-warnings/`): what the parser didn't fully understand, collapsed in a native `<details>`
   ("3 rows need a look") listing each message with its row count and examples.
 - **Import history** (`import-history/import-history-list.ts`): the portfolio's uploads newest first — on an account
-  page filtered to that account (`accountId` input) — with what each did, its warnings, and an **Undo** button. Undo
+  page filtered to that account (`accountId` input) — with what each did, its warnings, a **Download** link for the
+  stored file (a plain `<a download>` to the API, so the browser saves it under its original name), and an **Undo** button. Undo
   first loads the server's preview and shows it in an inline confirmation panel (focus moves to its heading; Undo /
   Cancel), then undoes, reloads and emits `undone` so the parent can refresh. Undone imports stay listed, struck
   through. The parent bumps `reloadKey` after each import so the list picks it up.

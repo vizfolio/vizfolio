@@ -75,10 +75,11 @@ public sealed class PriceSeriesStatus
         string? message,
         DateOnly? neededFrom,
         DateOnly? firstStored,
-        DateOnly? lastStored)
+        DateOnly? lastStored,
+        DateTimeOffset? attemptedAt = null)
     {
         NeededFrom = neededFrom;
-        LastAttemptAt = DateTimeOffset.UtcNow;
+        LastAttemptAt = attemptedAt ?? DateTimeOffset.UtcNow;
         LastOutcome = outcome;
         LastSource = source;
         Message = string.IsNullOrWhiteSpace(message) ? null : message.Trim();

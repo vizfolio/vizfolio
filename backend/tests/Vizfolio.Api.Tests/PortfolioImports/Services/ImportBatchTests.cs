@@ -110,6 +110,25 @@ public sealed class ImportBatchTests
         ids.Select(id => id[^2..]).Order().ShouldBe(["-0", "-1", "-2"]);
     }
 
+    [Fact]
+    public async Task The_stored_file_can_be_fetched_back_exactly_as_uploaded_but_only_within_its_portfolio()
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = await SeedPortfolioAsync(ctx);
+        var qfx = Qfx(Statement("ACCT-1", Buy("B-1", "20260105", "XYZ", 2, -200m)));
+        var result = await Service(ctx).ImportToPortfolioAsync(portfolio.PortfolioId, Stream(qfx), "jan.qfx", CancellationToken.None);
+        var history = new ImportHistoryService(ctx.Db);
+
+        var file = await history.GetFileAsync(portfolio.PortfolioId, result.ImportBatchId!.Value, CancellationToken.None);
+
+        file.ShouldNotBeNull();
+        file.FileName.ShouldBe("jan.qfx");
+        file.ContentType.ShouldBe("application/x-ofx");
+        Encoding.UTF8.GetString(file.Content).ShouldBe(qfx);
+        (await history.GetFileAsync(Guid.NewGuid(), result.ImportBatchId!.Value, CancellationToken.None)).ShouldBeNull();
+        (await history.GetFileAsync(portfolio.PortfolioId, Guid.NewGuid(), CancellationToken.None)).ShouldBeNull();
+    }
+
     // ---------------- reprocess ----------------
 
     [Fact]

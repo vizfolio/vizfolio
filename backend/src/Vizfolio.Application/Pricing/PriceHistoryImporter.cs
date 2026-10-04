@@ -27,21 +27,27 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
     /// <summary>Days of prices fetched before an account's first trade, so its opening day always has a close.</summary>
     private const int LeadDays = 7;
 
+    /// <summary>A failed series is retried no sooner than this, so a rate limit isn't hit again and again.</summary>
+    internal static readonly TimeSpan FailedRetryAfter = TimeSpan.FromHours(1);
+
     private readonly IAppDbContext _db;
     private readonly IPriceHistorySourceSelector _selector;
     private readonly IProviderKeyStore? _keys;
     private readonly ILogger<PriceHistoryImporter> _logger;
+    private readonly TimeProvider _time;
 
     public PriceHistoryImporter(
         IAppDbContext db,
         IPriceHistorySourceSelector selector,
         ILogger<PriceHistoryImporter> logger,
-        IProviderKeyStore? keys = null)
+        IProviderKeyStore? keys = null,
+        TimeProvider? time = null)
     {
         _db = db;
         _selector = selector;
         _logger = logger;
         _keys = keys;
+        _time = time ?? TimeProvider.System;
     }
 
     public async Task<ImportResult> ImportAsync(
@@ -62,11 +68,19 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
 
         var statuses = await _db.PriceSeriesStatuses.ToListAsync(cancellationToken);
         var totals = new RunTotals();
+        var now = _time.GetUtcNow();
+        var upToDate = 0;
 
         foreach (var target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var status = StatusFor(target, statuses);
+            if (IsUpToDate(target, status, options, now))
+            {
+                upToDate++;
+                continue;
+            }
+
             try
             {
                 await ImportSeriesAsync(target, status, options, to, totals, cancellationToken);
@@ -79,12 +93,14 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
             {
                 _logger.LogWarning(ex, "Failed to import prices for {Symbol}", target.QuerySymbol);
                 status.RecordAttempt(PriceFetchOutcome.Failed, null, ex.Message, target.EarliestNeeded,
-                    target.EarliestStored, target.LatestStored);
+                    target.EarliestStored, target.LatestStored, now);
                 totals.Failures.Add(new ImportFailure(target.QuerySymbol, ex.Message));
             }
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+        if (upToDate > 0)
+            _logger.LogInformation("{Count} price series already fetched since {FreshSince:u}; skipped", upToDate, options.FreshSince);
 
         stopwatch.Stop();
         return new ImportResult(
@@ -142,10 +158,30 @@ public sealed class PriceHistoryImporter : IPriceHistoryImporter
 
         var (outcome, message) = Summarize(target, outcomes, firstRaw);
         var lastSource = outcomes.LastOrDefault(o => o.Kind == FetchKind.Raw).Source ?? status.LastSource;
-        status.RecordAttempt(outcome, lastSource, message, target.EarliestNeeded, firstRaw, lastRaw);
+        status.RecordAttempt(outcome, lastSource, message, target.EarliestNeeded, firstRaw, lastRaw, _time.GetUtcNow());
 
         if (outcome != PriceFetchOutcome.Ok)
             totals.Failures.Add(new ImportFailure(target.QuerySymbol, message ?? outcome.ToString()));
+    }
+
+    /// <summary>
+    /// True when the series needs no requests this run: it was fetched since <see cref="PriceHistoryImportOptions.FreshSince"/>
+    /// (no newer close can exist) and nothing needs older history than that fetch covered. A series with no provider is
+    /// never up to date — a key may have been added since — and asking costs nothing. A failed one is retried once
+    /// <see cref="FailedRetryAfter"/> has passed. Forced or explicitly dated runs skip nothing.
+    /// </summary>
+    internal static bool IsUpToDate(PriceTarget target, PriceSeriesStatus status, PriceHistoryImportOptions options, DateTimeOffset now)
+    {
+        if (options.FreshSince is not { } freshSince || options.Force || options.From is not null) return false;
+        if (status.LastAttemptAt is not { } attempted || attempted < freshSince) return false;
+        if (status.NeededFrom is not { } coveredFrom || target.EarliestNeeded < coveredFrom) return false;
+
+        return status.LastOutcome switch
+        {
+            PriceFetchOutcome.Ok or PriceFetchOutcome.Empty or PriceFetchOutcome.AdjustedOnly => true,
+            PriceFetchOutcome.Failed => now - attempted < FailedRetryAfter,
+            _ => false, // NoSource
+        };
     }
 
     /// <summary>

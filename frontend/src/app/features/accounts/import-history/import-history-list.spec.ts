@@ -16,7 +16,7 @@ const HISTORY: ImportHistory = {
     },
     {
       importBatchId: 'b1', fileName: 'all.qfx', sourceSystem: 'QFX', importedAt: '2026-10-01T10:00:00Z',
-      reprocessedAt: null, status: 'Undone', undoneAt: '2026-10-01T11:00:00Z', hasStoredFile: true,
+      reprocessedAt: null, status: 'Undone', undoneAt: '2026-10-01T11:00:00Z', hasStoredFile: false,
       accounts: [{ accountId: 'a1', accountName: 'Brokerage', created: true, inserted: 3, skipped: 0, updated: 0, snapshotsInserted: 2, failed: 0 }],
       warnings: [],
     },
@@ -30,6 +30,9 @@ const PREVIEW: ImportUndoSummary = {
 };
 
 class MockApi {
+  importFileUrl(portfolioId: string, batchId: string) {
+    return `/api/portfolios/${portfolioId}/imports/${batchId}/file`;
+  }
   loads = 0;
   undone: string | null = null;
   undoResult: Observable<ImportUndoSummary> = of(PREVIEW);
@@ -121,5 +124,16 @@ describe('ImportHistoryList', () => {
     fixture.detectChanges();
 
     expect(el.querySelector('.confirm [role="alert"]')?.textContent).toContain('already been undone');
+  });
+
+  it('links each stored file for download under its own name, and none for imports whose file was not kept', () => {
+    const { el } = setup(new MockApi());
+
+    const items = el.querySelectorAll('li.import');
+    const link = items[0].querySelector('a.download') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/api/portfolios/p1/imports/b2/file');
+    expect(link.hasAttribute('download')).toBe(true);
+    expect(link.getAttribute('aria-label')).toBe('Download report.xlsx');
+    expect(items[1].querySelector('a.download')).toBeNull();
   });
 });

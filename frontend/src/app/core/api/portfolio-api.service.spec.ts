@@ -102,6 +102,10 @@ describe('PortfolioApiService', () => {
     req.flush({});
   });
 
+  it('builds the download URL of an import\'s stored file', () => {
+    expect(service.importFileUrl('p1', 'b1')).toBe('/api/portfolios/p1/imports/b1/file');
+  });
+
   it('GETs the import history and undo preview, and POSTs an undo with no body', () => {
     service.getImports('p1').subscribe();
     const list = http.expectOne('/api/portfolios/p1/imports');

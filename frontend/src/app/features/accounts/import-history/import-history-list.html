@@ -53,6 +53,16 @@
               <div class="import-head">
                 <span class="file">{{ item.fileName }}</span>
                 <span class="meta">{{ item.sourceSystem }} · {{ formatImportedAt(item.importedAt) }}</span>
+                @if (item.hasStoredFile) {
+                  <a
+                    class="btn btn--ghost btn--sm download"
+                    [href]="fileUrl(item)"
+                    download
+                    [attr.aria-label]="'Download ' + item.fileName"
+                  >
+                    Download
+                  </a>
+                }
                 @if (item.status === 'Undone') {
                   <span class="badge">Undone {{ formatImportedAt(item.undoneAt) }}</span>
                 } @else {

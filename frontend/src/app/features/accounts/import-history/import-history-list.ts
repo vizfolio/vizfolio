@@ -77,6 +77,10 @@ export class ImportHistoryList {
   });
   protected readonly formatImportedAt = formatImportedAt;
 
+  protected fileUrl(item: ImportBatchItem): string {
+    return this.api.importFileUrl(this.portfolioId(), item.importBatchId);
+  }
+
   private readonly reloads = signal(0);
 
   constructor() {
