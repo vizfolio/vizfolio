@@ -21,3 +21,7 @@ obj/
 frontend/node_modules/
 frontend/dist/
 frontend/.angular/
+
+# Claude Code: personal settings and working plans (shared .claude/settings.json and skills stay tracked)
+.claude/settings.local.json
+.claude/plans/
