@@ -61,11 +61,46 @@ describe('PerformanceHeadline', () => {
 
     expect(cards[1].classList).toContain('featured');
     expect(cards[1].querySelector('.stat-value')?.textContent).toContain('+12.1%');
-    expect(cards[1].querySelector('.stat-delta')?.textContent).toContain('a year');
     expect(cards[1].querySelector('.stat-hint')?.textContent).toContain('your personal rate of return');
     expect(cards[2].querySelector('.stat-value')?.textContent).toContain('+11.4%');
-    expect(cards[2].querySelector('.stat-delta')?.textContent).toContain('over the period');
     expect(cards[2].querySelector('.stat-hint')?.textContent).toContain("fund's published return");
+  });
+
+  it('shows a multi-year return per year, with the total it adds up to underneath, on both cards', async () => {
+    const { cards } = await render({
+      ...SAMPLE_PERFORMANCE,
+      from: '2019-03-01',
+      to: '2024-04-01',
+      returns: {
+        moneyWeighted: { ...SAMPLE_PERFORMANCE.returns.moneyWeighted, rate: 0.12, annualizedRate: 0.12, periodRate: 0.78 },
+        timeWeighted: { ...SAMPLE_PERFORMANCE.returns.timeWeighted, rate: 0.7, annualizedRate: 0.11, periodRate: 0.7 },
+      },
+    });
+
+    for (const [card, perYear, total] of [
+      [cards[1], '+12.0%', '+78.0% in total over 5.1 years'],
+      [cards[2], '+11.0%', '+70.0% in total over 5.1 years'],
+    ] as const) {
+      expect(card.querySelector('.stat-value')?.textContent).toContain(perYear);
+      expect(card.querySelector('.stat-unit')?.textContent).toContain('a year');
+      expect(card.querySelector('.stat-delta')?.textContent).toContain(total);
+    }
+  });
+
+  it('shows a return under a year as the total, with how long the period is', async () => {
+    const { cards } = await render({
+      ...SAMPLE_PERFORMANCE,
+      from: '2026-03-01',
+      to: '2026-09-01',
+      returns: {
+        moneyWeighted: { ...SAMPLE_PERFORMANCE.returns.moneyWeighted, rate: 0.032, basis: 'Period', annualizedRate: null, periodRate: 0.032 },
+        timeWeighted: { ...SAMPLE_PERFORMANCE.returns.timeWeighted, rate: 0.03, annualizedRate: null, periodRate: 0.03 },
+      },
+    });
+
+    expect(cards[1].querySelector('.stat-value')?.textContent).toContain('+3.2%');
+    expect(cards[1].querySelector('.stat-unit')?.textContent).toContain('in total');
+    expect(cards[1].querySelector('.stat-delta')?.textContent).toContain('over 6 months');
   });
 
   it('shows gross deposits and withdrawals under net contributions by default (account scope)', async () => {

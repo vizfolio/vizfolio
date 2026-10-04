@@ -42,15 +42,16 @@ describe('PerformanceSummary', () => {
     expect(panel?.textContent).toContain('Time-weighted, valued daily');
   });
 
-  it('shows the annualized investment return for a period of a year or more', async () => {
+  it('shows each return per year and in total for a period of a year or more, and explains the two', async () => {
     const el = await render(
       withReturns({
-        timeWeighted: { ...SAMPLE_PERFORMANCE.returns.timeWeighted, rate: 0.21, annualizedRate: 0.1 },
+        timeWeighted: { ...SAMPLE_PERFORMANCE.returns.timeWeighted, rate: 0.21, annualizedRate: 0.1, periodRate: 0.21 },
       }),
     );
 
-    expect(el.textContent).toContain('Investment return, per year');
     expect(el.textContent).toContain('+10.0% a year');
+    expect(el.textContent).toContain('+21.0% in total');
+    expect(el.textContent).toContain('compare a total with a total');
   });
 
   it('labels a Modified Dietz fallback as approximate and says why', async () => {

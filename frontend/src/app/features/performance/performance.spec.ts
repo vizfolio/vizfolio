@@ -16,8 +16,8 @@ const PERF: PortfolioPerformance = {
   endingBalance: { value: 1500, isComplete: false, snapshotAsOf: '2025-12-31', holdingsCovered: 2, holdingsMissingSnapshot: 1 },
   contributions: { net: 300, deposits: 400, withdrawals: -100, count: 5 },
   returns: {
-    timeWeighted: { rate: 0.15, method: 'DailyValuedTWR', basis: 'Period', reason: null, annualizedRate: null, fallbackReason: null },
-    moneyWeighted: { rate: null, method: 'XIRR', basis: 'Annualized', reason: 'NoSignChange', annualizedRate: null, fallbackReason: null },
+    timeWeighted: { rate: 0.15, method: 'DailyValuedTWR', basis: 'Period', reason: null, annualizedRate: null, periodRate: null, fallbackReason: null },
+    moneyWeighted: { rate: null, method: 'XIRR', basis: 'Annualized', reason: 'NoSignChange', annualizedRate: null, periodRate: null, fallbackReason: null },
   },
   currencyCode: 'USD',
   series: { interval: 'Monthly', points: [] },

@@ -9,9 +9,11 @@ import { ImportSummary } from './import-summary';
 
 function performance(cause: string | null): PortfolioPerformance {
   return {
+    from: '2021-01-04',
+    to: '2026-01-05',
     endingBalance: { value: 1234.5, isComplete: cause === null, missing: cause ? [{ cause }] : [] },
     startingBalance: { value: 0, isComplete: true, missing: [] },
-    returns: { moneyWeighted: { rate: 0.12, basis: 'Annualized', annualizedRate: null, fallbackReason: null, reason: null } },
+    returns: { moneyWeighted: { rate: 0.12, basis: 'Annualized', annualizedRate: 0.12, periodRate: 0.76, fallbackReason: null, reason: null } },
     currencyCode: 'EUR',
   } as unknown as PortfolioPerformance;
 }
@@ -92,7 +94,8 @@ describe('ImportSummary', () => {
     );
 
     expect(el.querySelector('.headline')?.textContent).toContain('Value €1,234.50');
-    expect(el.querySelector('.headline')?.textContent).toContain('Your return +12.0%');
+    expect(el.querySelector('.headline')?.textContent).toContain('Your return +12.0% a year');
+    expect(el.querySelector('.headline')?.textContent).toContain('(+76.0% in total over 5 years)');
     expect(el.textContent).toContain('2 implied contributions (€500.00)');
   });
 

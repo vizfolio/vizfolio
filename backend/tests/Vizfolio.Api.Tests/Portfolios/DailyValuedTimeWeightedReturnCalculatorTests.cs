@@ -215,6 +215,7 @@ public sealed class DailyValuedTimeWeightedReturnCalculatorTests
         var result = _calc.Compute(ctx);
 
         result.Rate!.Value.ShouldBe(0.21m, tolerance: 0.000001m);
+        result.PeriodRate!.Value.ShouldBe(0.21m, tolerance: 0.000001m);
         result.AnnualizedRate!.Value.ShouldBe(0.10m, tolerance: 0.000001m);
     }
 

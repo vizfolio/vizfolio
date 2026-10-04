@@ -35,6 +35,14 @@
   line-height: 1.1;
 }
 
+.stat-unit {
+  margin-left: var(--space-1);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
 .stat-delta {
   margin: var(--space-2) 0 0;
   font-size: 0.9rem;

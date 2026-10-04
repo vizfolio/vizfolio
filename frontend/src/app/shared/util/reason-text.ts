@@ -79,15 +79,13 @@ export function fallbackText(r: PerformanceReturn): string | null {
     : null;
 }
 
-/** How a return was computed, for the Returns breakdown ("Money-weighted (XIRR) · annualized"). */
+/** How a return was computed, for the Returns breakdown ("Money-weighted (XIRR)"). */
 export function returnMethodText(r: PerformanceReturn): string {
-  const method =
-    r.method === 'XIRR'
-      ? 'Money-weighted (XIRR)'
-      : r.method === 'DailyValuedTWR'
-        ? 'Time-weighted, valued daily'
-        : r.method === 'ModifiedDietz'
-          ? 'Approximate (Modified Dietz)'
-          : r.method;
-  return r.basis === 'Annualized' ? `${method} · annualized` : `${method} · over the period`;
+  return r.method === 'XIRR'
+    ? 'Money-weighted (XIRR)'
+    : r.method === 'DailyValuedTWR'
+      ? 'Time-weighted, valued daily'
+      : r.method === 'ModifiedDietz'
+        ? 'Approximate (Modified Dietz)'
+        : r.method;
 }

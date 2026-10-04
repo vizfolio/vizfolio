@@ -40,8 +40,10 @@ public sealed record PerformanceReturnsResult(
     ReturnResult MoneyWeighted);
 
 /// <summary>
-/// One return figure. <see cref="Rate"/> is null when it can't be computed, and <see cref="Reason"/> then says why.
-/// <see cref="AnnualizedRate"/> is the per-year equivalent of a period rate when the period is a year or longer.
+/// One return figure. <see cref="Rate"/> is null when it can't be computed, and <see cref="Reason"/> then says why;
+/// its <see cref="Basis"/> says which form it is in. Both forms are also given explicitly:
+/// <see cref="PeriodRate"/>, the total over the period, and <see cref="AnnualizedRate"/>, the per-year rate that
+/// compounds to it (only for periods of a year or longer) — see <see cref="ReturnRates"/>.
 /// <see cref="FallbackReason"/> is set when the preferred method couldn't be used and <see cref="Method"/> names the
 /// approximation that was used instead (e.g. a daily-valued TWR falling back to Modified Dietz because a day in the
 /// period couldn't be valued).
@@ -52,7 +54,17 @@ public sealed record ReturnResult(
     string Basis,
     string? Reason)
 {
+    /// <summary><see cref="Basis"/> of a rate that is per year (the XIRR over a year or more).</summary>
+    public const string AnnualizedBasis = "Annualized";
+
+    /// <summary><see cref="Basis"/> of a rate that is the total over the period.</summary>
+    public const string PeriodBasis = "Period";
+
+    /// <summary>The per-year rate, for periods of a year or longer; null for shorter periods.</summary>
     public decimal? AnnualizedRate { get; init; }
+
+    /// <summary>The total return over the whole period (how much the money grew, start to end).</summary>
+    public decimal? PeriodRate { get; init; }
 
     public string? FallbackReason { get; init; }
 }

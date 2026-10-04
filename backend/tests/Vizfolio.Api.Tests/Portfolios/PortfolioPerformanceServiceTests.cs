@@ -973,6 +973,10 @@ public sealed class PortfolioPerformanceServiceTests
         result.Returns.TimeWeighted.Rate.ShouldBeNull();
         result.Returns.TimeWeighted.Reason.ShouldBe("UnvaluedTransfer");
         result.Returns.MoneyWeighted.Reason.ShouldBe("UnvaluedTransfer");
+        // Neither the total nor the per-year figure survives a return that couldn't be computed.
+        result.Returns.TimeWeighted.PeriodRate.ShouldBeNull();
+        result.Returns.TimeWeighted.AnnualizedRate.ShouldBeNull();
+        result.Returns.MoneyWeighted.PeriodRate.ShouldBeNull();
     }
 
     [Fact]

@@ -16,10 +16,11 @@
           <dt>
             <span>{{ yourReturnLabel }}<span class="reason">{{ methodText(mwr) }}</span></span>
           </dt>
+          @let mwrFig = mwrFigure();
           <dd [class]="'trend-' + mwrTrend()">
-            {{ mwrLabel() }}
-            @if (mwr.rate === null && mwr.reason) {
-              <span class="reason">{{ reasonText(mwr.reason) }}</span>
+            {{ mwrFig.value }} {{ mwrFig.unit }}
+            @if (mwrFig.detail; as detail) {
+              <span class="reason">{{ detail }}</span>
             }
           </dd>
         </div>
@@ -28,19 +29,14 @@
           <dt>
             <span>{{ investmentReturnLabel }}<span class="reason">{{ methodText(twr) }}</span></span>
           </dt>
+          @let twrFig = twrFigure();
           <dd [class]="'trend-' + twrTrend()">
-            {{ twrLabel() }}
-            @if (twr.rate === null && twr.reason) {
-              <span class="reason">{{ reasonText(twr.reason) }}</span>
+            {{ twrFig.value }} {{ twrFig.unit }}
+            @if (twrFig.detail; as detail) {
+              <span class="reason">{{ detail }}</span>
             }
           </dd>
         </div>
-        @if (twr.annualizedRate !== null) {
-          <div>
-            <dt>{{ investmentReturnLabel }}, per year</dt>
-            <dd>{{ percent(twr.annualizedRate) }}</dd>
-          </div>
-        }
       </dl>
       @if (fallbackText(twr); as approx) {
         <p class="note">{{ approx }}</p>
@@ -49,6 +45,11 @@
         {{ yourReturnLabel }} weighs each dollar by how long it was invested, so when you added or
         withdrew money matters. {{ investmentReturnLabel }} links the growth between each deposit or
         withdrawal, so their timing doesn't — it shows how the investments themselves did.
+      </p>
+      <p class="note">
+        Over a year or more, each return is shown per year — the steady yearly rate that grows to
+        the same result — with the total for the whole period beneath it. Some sites show only the
+        total, so compare a total with a total.
       </p>
     </div>
   </details>

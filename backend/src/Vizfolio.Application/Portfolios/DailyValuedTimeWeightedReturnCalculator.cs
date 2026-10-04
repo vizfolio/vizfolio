@@ -17,7 +17,6 @@ public sealed class DailyValuedTimeWeightedReturnCalculator : ITimeWeightedRetur
 {
     public const string MethodName = "DailyValuedTWR";
     private const string BasisName = "Period";
-    private const int DaysPerYear = 365;
 
     // A balance at or below a cent is an empty scope (rounding residue), not something to measure a return on.
     private const decimal EmptyBalance = 0.01m;
@@ -37,13 +36,13 @@ public sealed class DailyValuedTimeWeightedReturnCalculator : ITimeWeightedRetur
         if (chain.FallbackCause is { } cause)
         {
             var approximate = _fallback.Compute(ctx);
-            return approximate with { AnnualizedRate = Annualize(approximate.Rate, ctx), FallbackReason = cause };
+            return ReturnRates.Complete(approximate with { FallbackReason = cause }, ctx.PeriodDays);
         }
 
         if (chain.Rate is not { } rate)
             return new ReturnResult(null, MethodName, BasisName, "NoInvestedBalance");
 
-        return new ReturnResult(rate, MethodName, BasisName, null) { AnnualizedRate = Annualize(rate, ctx) };
+        return ReturnRates.Complete(new ReturnResult(rate, MethodName, BasisName, null), ctx.PeriodDays);
     }
 
     private static ChainResult Chain(PerformanceComputationContext ctx)
@@ -105,13 +104,6 @@ public sealed class DailyValuedTimeWeightedReturnCalculator : ITimeWeightedRetur
     private static string CauseOf(PerformanceBalanceResult balance)
         => balance.Missing.FirstOrDefault()?.Cause ?? "IncompleteValuation";
 
-    /// <summary>The per-year equivalent of a period rate, for periods of a year or more (the XIRR's threshold).</summary>
-    private static decimal? Annualize(decimal? rate, PerformanceComputationContext ctx)
-    {
-        var days = ctx.To.DayNumber - ctx.From.DayNumber;
-        if (rate is not { } r || days < DaysPerYear || r <= -1m) return null;
-        return (decimal)(Math.Pow((double)(1m + r), DaysPerYear / (double)days) - 1.0);
-    }
 
     private sealed record ChainResult(decimal? Rate, string? FallbackCause)
     {

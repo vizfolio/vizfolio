@@ -4,7 +4,12 @@
     <ng-content select="[statBadge]" />
   </div>
 
-  <p class="stat-value">{{ value() }}</p>
+  <p class="stat-value">
+    {{ value() }}
+    @if (unit(); as u) {
+      <span class="stat-unit">{{ u }}</span>
+    }
+  </p>
 
   @if (delta(); as d) {
     <p class="stat-delta" [class]="'trend-' + trend()">{{ d }}</p>

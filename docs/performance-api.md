@@ -57,7 +57,8 @@ Both endpoints return **404** if the portfolio or account doesn't exist (an acco
       "basis": "Period",
       "reason": "IncompleteStartingBalance",
       "annualizedRate": null,
-      "fallbackReason": null
+      "fallbackReason": null,
+      "periodRate": null
     },
     "moneyWeighted": {
       "rate": null,
@@ -65,7 +66,8 @@ Both endpoints return **404** if the portfolio or account doesn't exist (an acco
       "basis": "Annualized",
       "reason": "IncompleteStartingBalance",
       "annualizedRate": null,
-      "fallbackReason": null
+      "fallbackReason": null,
+      "periodRate": null
     }
   },
   "currencyCode": "USD",
@@ -306,11 +308,22 @@ Two returns are reported, both under `Returns`. The UI headlines the money-weigh
 Both answer different questions and both are correct; they diverge most in periods with large deposits or
 withdrawals around big market moves.
 
-Each is a `decimal?` `rate` (null when uncomputable, with a `reason`). `basis` is `"Period"` or `"Annualized"`
-so a caller can format correctly. `annualizedRate` is the per-year equivalent of a period rate
-(`(1 + rate)^(365 / days) − 1`, `days = to − from ≥ 365`; null otherwise and for XIRR, which is already
-annualized then). `fallbackReason` is set when the preferred method couldn't be used: `method` then names the
-approximation used instead, and the UI labels the figure approximate.
+Each is a `decimal?` `rate` (null when uncomputable, with a `reason`); `basis` (`"Period"` or `"Annualized"`) says
+which form `rate` is in. **Both forms are always given explicitly** (`ReturnRates`), so a caller never has to
+convert:
+
+- `periodRate` — the **total** over the period: how much the money grew, start to end. For the time-weighted return
+  it is `rate`; for an annualized XIRR it is that rate compounded over the cash flows' span (first flow to last), so
+  an account opened part-way through the period isn't credited with growth before it had money.
+- `annualizedRate` — the **per-year** rate that compounds to the total, for periods of a year or more
+  (`(1 + total)^(365 / days) − 1`, `days = to − from ≥ 365`); `rate` itself for an annualized XIRR. Null under a
+  year — annualizing a few weeks' gain misleads.
+
+Both are null when `rate` is. Some brokers report a money-weighted return as the cumulative total (their "IRR"
+over the selected range) rather than per year; `periodRate` is the figure to compare with those. The UI shows both:
+per year as the headline for a year or more, with the total beneath (see `docs/frontend.md`). `fallbackReason` is
+set when the preferred method couldn't be used: `method` then names the approximation used instead, and the UI
+labels the figure approximate.
 
 ### Method: DailyValuedTWR (default TWRR)
 

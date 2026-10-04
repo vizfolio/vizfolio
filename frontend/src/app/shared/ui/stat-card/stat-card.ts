@@ -3,7 +3,7 @@ import { Component, input } from '@angular/core';
 export type StatTrend = 'up' | 'down' | 'neutral';
 
 /**
- * Presentational summary card: a label, a big value, an optional delta/trend line and an optional
+ * Presentational summary card: a label, a big value (with an optional unit), an optional delta/trend line and an optional
  * explanation of what the figure means. A featured card is the page's headline figure. Status can be
  * projected into the header with a `statBadge` attribute (e.g. a completeness badge).
  */
@@ -16,6 +16,8 @@ export type StatTrend = 'up' | 'down' | 'neutral';
 export class StatCard {
   readonly label = input.required<string>();
   readonly value = input.required<string>();
+  /** What the value is, shown smaller beside it (e.g. "a year" for a per-year return). */
+  readonly unit = input<string | null>(null);
   readonly delta = input<string | null>(null);
   readonly trend = input<StatTrend>('neutral');
   /** A short plain-language explanation of what the figure measures. */

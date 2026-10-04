@@ -137,8 +137,8 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var moneyWeighted = _mwrCalculator.Compute(context);
         if (unvaluedTransfer)
         {
-            timeWeighted = timeWeighted with { Rate = null, Reason = UnvaluedTransfer };
-            moneyWeighted = moneyWeighted with { Rate = null, Reason = UnvaluedTransfer };
+            timeWeighted = ReturnRates.Complete(timeWeighted with { Rate = null, Reason = UnvaluedTransfer }, context.PeriodDays);
+            moneyWeighted = ReturnRates.Complete(moneyWeighted with { Rate = null, Reason = UnvaluedTransfer }, context.PeriodDays);
         }
 
         var returns = new PerformanceReturnsResult(timeWeighted, moneyWeighted);
@@ -240,8 +240,8 @@ public sealed class PortfolioPerformanceService : IPortfolioPerformanceService
         var zero = new PerformanceBalanceResult(0m, true, null, 0, 0);
         var noContrib = new PerformanceContributionsResult(0m, 0m, 0m, 0);
         var noReturns = new PerformanceReturnsResult(
-            TimeWeighted: new ReturnResult(null, DailyValuedTimeWeightedReturnCalculator.MethodName, "Period", "NoData"),
-            MoneyWeighted: new ReturnResult(null, "XIRR", "Annualized", "NoData"));
+            TimeWeighted: new ReturnResult(null, DailyValuedTimeWeightedReturnCalculator.MethodName, ReturnResult.PeriodBasis, "NoData"),
+            MoneyWeighted: new ReturnResult(null, "XIRR", ReturnResult.AnnualizedBasis, "NoData"));
         return new PortfolioPerformanceResult(
             from, to, zero, zero, noContrib, noReturns, AccountValuationLoader.DefaultCurrencyCode, PerformanceSeriesResult.Empty);
     }

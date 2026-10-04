@@ -1,8 +1,10 @@
 namespace Vizfolio.Application.Portfolios;
 
 // True IRR of the cash-flow stream: solves NPV(r) = 0 with per-day discounting.
-// Periods of a year or more report the annualized rate. Shorter periods report the rate compounded over the
+// Periods of a year or more report the annualized rate as Rate. Shorter periods report the rate compounded over the
 // period instead (basis "Period"): annualizing a few weeks' gain (3% in two weeks → ~115% a year) misleads.
+// Either way PeriodRate is the total over the cash flows' span — the annual rate compounded from the first flow to the
+// last — so a long period can show both "x% a year" and "y% in total" (see ReturnRates).
 // Cash-flow signs are from the investor's perspective:
 //   - StartingBalance and each contribution deposit are outflows (negative).
 //   - Withdrawals and EndingBalance are inflows (positive).
@@ -11,9 +13,9 @@ namespace Vizfolio.Application.Portfolios;
 public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalculator
 {
     private const string MethodName = "XIRR";
-    private const string AnnualizedBasis = "Annualized";
-    private const string PeriodBasis = "Period";
-    private const int DaysPerYear = 365;
+    private const string AnnualizedBasis = ReturnResult.AnnualizedBasis;
+    private const string PeriodBasis = ReturnResult.PeriodBasis;
+    private const int DaysPerYear = ReturnRates.DaysPerYear;
     private const double LowerBound = -0.9999;
     private const double UpperBound = 100.0;
     private const double Tolerance = 1e-9;
@@ -59,7 +61,13 @@ public sealed class XirrMoneyWeightedReturnCalculator : IMoneyWeightedReturnCalc
         // the solver's bounds once annualized.
         var spanDays = consolidated[^1].Date.DayNumber - t0.DayNumber;
         var unitDays = basisName == AnnualizedBasis ? DaysPerYear : Math.Max(spanDays, 1);
-        ReturnResult Solved(double rate) => new((decimal)rate, MethodName, basisName, null);
+        ReturnResult Solved(double rate)
+        {
+            var solved = new ReturnResult((decimal)rate, MethodName, basisName, null);
+            return ReturnRates.Complete(
+                basisName == AnnualizedBasis ? solved with { PeriodRate = ReturnRates.Compound((decimal)rate, spanDays) } : solved,
+                periodDays);
+        }
 
         double Npv(double r)
         {

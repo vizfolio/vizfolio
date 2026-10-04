@@ -52,21 +52,64 @@ export function formatPercent(rate: number | null): string {
 }
 
 /**
- * The line under a return figure: what span it covers ("a year", "over the period", or the
- * annualized equivalent "+10.2% a year"), "approximate" when it fell back to Modified Dietz, or
- * why it couldn't be computed.
+ * A return shown both ways: the big number (`value`, with `unit` saying what it is) and a line under
+ * it (`detail`). For a year or more the big number is the rate **per year** and the line gives the
+ * **total** it compounds to ("+12.0%" "a year", "+78.0% in total over 5.1 years"), so a figure
+ * reported either way elsewhere can be compared. Under a year there's only the total. The line also
+ * says when the figure is approximate, or why there's no figure at all.
  */
-export function returnDetail(r: PerformanceReturn): string | null {
+export interface ReturnFigure {
+  value: string;
+  unit: 'a year' | 'in total' | null;
+  detail: string | null;
+}
+
+export function returnFigure(r: PerformanceReturn, from: string, to: string): ReturnFigure {
   if (r.rate === null) {
-    return returnReasonText(r.reason);
+    return { value: formatPercent(null), unit: null, detail: returnReasonText(r.reason) };
   }
-  const span =
-    r.basis === 'Annualized'
-      ? 'a year'
-      : r.annualizedRate !== null && r.annualizedRate !== undefined
-        ? `${formatPercent(r.annualizedRate)} a year`
-        : 'over the period';
-  return r.fallbackReason ? `${span} · approximate` : span;
+
+  const annual = r.annualizedRate ?? (r.basis === 'Annualized' ? r.rate : null);
+  const total = r.periodRate ?? (r.basis === 'Annualized' ? null : r.rate);
+  const length = formatSpan(from, to);
+  const span = length ? `over ${length}` : 'over the period';
+  const approximate = r.fallbackReason ? ' · approximate' : '';
+
+  if (annual !== null) {
+    const detail = total !== null ? `${formatPercent(total)} in total ${span}` : span;
+    return { value: formatPercent(annual), unit: 'a year', detail: detail + approximate };
+  }
+  return { value: formatPercent(total), unit: 'in total', detail: span + approximate };
+}
+
+/** A return as one short phrase: "+12.0% a year", "+3.2% in total", or "—". */
+export function formatReturn(r: PerformanceReturn, from: string, to: string): string {
+  const f = returnFigure(r, from, to);
+  return f.unit ? `${f.value} ${f.unit}` : f.value;
+}
+
+/**
+ * How long a period is, in words: "5.1 years", "1 year", "8 months", "3 weeks", "12 days".
+ * Dates are `YYYY-MM-DD`; null when either is missing or unreadable.
+ */
+export function formatSpan(from: string | null | undefined, to: string | null | undefined): string | null {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  if (!from || !to || Number.isNaN(ms)) {
+    return null;
+  }
+  const days = Math.max(0, Math.round(ms / 86_400_000));
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  if (days >= 365) {
+    const years = Math.round((days / 365.25) * 10) / 10;
+    return Number.isInteger(years) ? plural(years, 'year') : `${years.toFixed(1)} years`;
+  }
+  if (days >= 45) {
+    return plural(Math.round(days / 30.44), 'month');
+  }
+  if (days >= 14) {
+    return plural(Math.round(days / 7), 'week');
+  }
+  return plural(days, 'day');
 }
 
 /** Up/down/neutral from a signed number. */

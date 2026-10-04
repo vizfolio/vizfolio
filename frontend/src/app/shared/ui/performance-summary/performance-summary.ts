@@ -1,13 +1,12 @@
 import { Component, computed, input } from '@angular/core';
 
 import { PortfolioPerformance } from '../../../core/api/models/performance.models';
-import { buildValueSeries, formatPercent, trendOf } from '../../util/performance-format';
+import { buildValueSeries, returnFigure, trendOf } from '../../util/performance-format';
 import {
   INVESTMENT_RETURN_LABEL,
   YOUR_RETURN_LABEL,
   fallbackText,
   returnMethodText,
-  returnReasonText,
 } from '../../util/reason-text';
 import { PerfChart, PerfDataset } from '../perf-chart/perf-chart';
 import { PerformanceHeadline } from '../performance-headline/performance-headline';
@@ -36,19 +35,19 @@ export class PerformanceSummary {
   protected readonly yourReturnLabel = YOUR_RETURN_LABEL;
   protected readonly investmentReturnLabel = INVESTMENT_RETURN_LABEL;
   protected readonly methodText = returnMethodText;
-  protected readonly reasonText = returnReasonText;
   protected readonly fallbackText = fallbackText;
-  protected readonly percent = formatPercent;
 
-  protected readonly twrLabel = computed(() =>
-    formatPercent(this.performance().returns.timeWeighted.rate),
-  );
+  protected readonly twrFigure = computed(() => {
+    const p = this.performance();
+    return returnFigure(p.returns.timeWeighted, p.from, p.to);
+  });
   protected readonly twrTrend = computed(() =>
     trendOf(this.performance().returns.timeWeighted.rate),
   );
-  protected readonly mwrLabel = computed(() =>
-    formatPercent(this.performance().returns.moneyWeighted.rate),
-  );
+  protected readonly mwrFigure = computed(() => {
+    const p = this.performance();
+    return returnFigure(p.returns.moneyWeighted, p.from, p.to);
+  });
   protected readonly mwrTrend = computed(() =>
     trendOf(this.performance().returns.moneyWeighted.rate),
   );

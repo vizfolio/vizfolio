@@ -10,7 +10,7 @@ import {
   PortfolioImportStatus,
 } from '../../../core/api/models/imports.models';
 import { AccountSummary, PortfolioPerformance } from '../../../core/api/models/performance.models';
-import { formatMoney, formatPercent, performanceAwaitsPrices, returnDetail } from '../../../shared/util/performance-format';
+import { formatMoney, performanceAwaitsPrices, returnFigure } from '../../../shared/util/performance-format';
 import { pollWhilePending } from '../../../shared/util/poll';
 import { YOUR_RETURN_LABEL } from '../../../shared/util/reason-text';
 import { impliedContributionsNote } from '../implied-contributions-note';
@@ -56,8 +56,7 @@ export class ImportSummary {
   protected readonly undoneNotice = signal<string | null>(null);
   protected readonly yourReturnLabel = YOUR_RETURN_LABEL;
   protected readonly formatMoney = formatMoney;
-  protected readonly formatPercent = formatPercent;
-  protected readonly returnDetail = returnDetail;
+  protected readonly returnFigure = returnFigure;
   protected readonly awaitsPrices = performanceAwaitsPrices;
 
   protected readonly alreadyImported = computed(() => alreadyImportedNote(this.result()));

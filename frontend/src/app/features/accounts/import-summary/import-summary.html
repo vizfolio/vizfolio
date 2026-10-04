@@ -54,9 +54,10 @@
               <p class="detail" role="status">Fetching prices…</p>
             } @else if (line.performance; as perf) {
               <p class="headline">
+                @let mwr = returnFigure(perf.returns.moneyWeighted, perf.from, perf.to);
                 Value {{ formatMoney(perf.endingBalance.value, perf.currencyCode) }}
-                · {{ yourReturnLabel }} {{ formatPercent(perf.returns.moneyWeighted.rate) }}
-                @if (returnDetail(perf.returns.moneyWeighted); as detail) {
+                · {{ yourReturnLabel }} {{ mwr.value }} {{ mwr.unit }}
+                @if (mwr.detail; as detail) {
                   <span class="headline-detail">({{ detail }})</span>
                 }
               </p>

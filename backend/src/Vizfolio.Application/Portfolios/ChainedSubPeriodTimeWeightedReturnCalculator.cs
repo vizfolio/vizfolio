@@ -64,6 +64,6 @@ public sealed class ChainedSubPeriodTimeWeightedReturnCalculator : ITimeWeighted
             cumulative *= 1m + subReturn;
         }
 
-        return new ReturnResult(cumulative - 1m, MethodName, BasisName, null);
+        return ReturnRates.Complete(new ReturnResult(cumulative - 1m, MethodName, BasisName, null), ctx.PeriodDays);
     }
 }

@@ -37,6 +37,6 @@ public sealed class ModifiedDietzTimeWeightedReturnCalculator : ITimeWeightedRet
             return new ReturnResult(null, MethodName, BasisName, "ZeroDenominator");
 
         var rate = (ctx.EndingBalance - ctx.StartingBalance - netContribution) / denominator;
-        return new ReturnResult(rate, MethodName, BasisName, null);
+        return ReturnRates.Complete(new ReturnResult(rate, MethodName, BasisName, null), ctx.PeriodDays);
     }
 }

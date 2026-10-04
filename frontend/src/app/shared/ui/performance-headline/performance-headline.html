@@ -10,17 +10,21 @@
       [pending]="pendingPrices(b)"
     />
   </app-stat-card>
+  @let mwrFigure = mwr();
   <app-stat-card
     [label]="yourReturnLabel"
-    [value]="mwrValue()"
-    [delta]="mwrDetail()"
+    [value]="mwrFigure.value"
+    [unit]="mwrFigure.unit"
+    [delta]="mwrFigure.detail"
     [hint]="yourReturnHint"
     [featured]="true"
   />
+  @let twrFigure = twr();
   <app-stat-card
     [label]="investmentReturnLabel"
-    [value]="twrValue()"
-    [delta]="twrDetail()"
+    [value]="twrFigure.value"
+    [unit]="twrFigure.unit"
+    [delta]="twrFigure.detail"
     [hint]="investmentReturnHint"
   />
   <app-stat-card

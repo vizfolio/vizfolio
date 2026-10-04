@@ -65,8 +65,10 @@ export interface PerformanceContributions {
 }
 
 /**
- * A single return figure; `rate` is null when it cannot be computed (`reason` says why).
- * `annualizedRate` is the per-year equivalent of a period rate when the period is a year or more.
+ * A single return figure; `rate` is null when it cannot be computed (`reason` says why), and `basis`
+ * says whether it is per year ('Annualized') or the total ('Period'). Both forms are also given
+ * explicitly: `periodRate` is the total over the period and `annualizedRate` the per-year rate that
+ * compounds to it (periods of a year or more only).
  * `fallbackReason` is set when the preferred method couldn't be used and `method` names the
  * approximation used instead (e.g. 'ModifiedDietz' because a day couldn't be valued — the cause).
  */
@@ -77,6 +79,7 @@ export interface PerformanceReturn {
   basis: 'Period' | 'Annualized' | string;
   reason: string | null;
   annualizedRate: number | null;
+  periodRate: number | null;
   fallbackReason: string | null;
 }
 

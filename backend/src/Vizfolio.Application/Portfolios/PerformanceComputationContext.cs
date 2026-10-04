@@ -13,7 +13,11 @@ public sealed record PerformanceComputationContext(
     bool EndingIsComplete,
     IReadOnlyList<CashFlow> CashFlows,
     IReadOnlyList<BalancePoint> IntermediateBalances,
-    Func<DateOnly, PerformanceBalanceResult>? ValueAt = null);
+    Func<DateOnly, PerformanceBalanceResult>? ValueAt = null)
+{
+    /// <summary>Days from <see cref="From"/> to <see cref="To"/>: what decides whether a per-year rate is given.</summary>
+    public int PeriodDays => To.DayNumber - From.DayNumber;
+}
 
 public sealed record CashFlow(DateOnly Date, decimal Amount);
 

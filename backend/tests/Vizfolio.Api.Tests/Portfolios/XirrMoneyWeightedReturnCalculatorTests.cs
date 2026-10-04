@@ -159,6 +159,54 @@ public sealed class XirrMoneyWeightedReturnCalculatorTests
         (result.Reason == "NoSignChange" || result.Reason == "InsufficientCashFlows").ShouldBeTrue();
     }
 
+    [Fact]
+    public void A_period_of_a_year_or_more_gives_the_rate_per_year_and_the_total_it_compounds_to()
+    {
+        // 1000 → 1210 over two years is 10% a year, which is 21% in total.
+        var ctx = Ctx(starting: 1000m, ending: 1210m, to: Start.AddDays(730));
+
+        var result = _calc.Compute(ctx);
+
+        result.Basis.ShouldBe("Annualized");
+        result.Rate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+        result.AnnualizedRate!.Value.ShouldBe(result.Rate.Value);
+        result.PeriodRate!.Value.ShouldBe(0.21m, tolerance: 0.0001m);
+    }
+
+    [Fact]
+    public void The_total_compounds_only_over_the_time_the_money_was_invested()
+    {
+        // An account opened half-way through a two-year period: nothing at the start, 1000 deposited on day 365,
+        // 1100 at the end. The money grew 10% in total (in its one year), not 10% a year for two years.
+        var ctx = Ctx(starting: 0m, ending: 1100m, to: Start.AddDays(730),
+            flows: [new CashFlow(Start.AddDays(365), 1000m)]);
+
+        var result = _calc.Compute(ctx);
+
+        result.AnnualizedRate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+        result.PeriodRate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+    }
+
+    [Fact]
+    public void A_period_under_a_year_gives_only_the_total()
+    {
+        var ctx = Ctx(starting: 1000m, ending: 1100m, to: Start.AddDays(182));
+
+        var result = _calc.Compute(ctx);
+
+        result.PeriodRate!.Value.ShouldBe(0.10m, tolerance: 0.0001m);
+        result.AnnualizedRate.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Without_a_rate_neither_form_is_given()
+    {
+        var result = _calc.Compute(Ctx(starting: 1000m, ending: 1100m, startingComplete: false));
+
+        result.PeriodRate.ShouldBeNull();
+        result.AnnualizedRate.ShouldBeNull();
+    }
+
     private static PerformanceComputationContext Ctx(
         decimal starting,
         decimal ending,

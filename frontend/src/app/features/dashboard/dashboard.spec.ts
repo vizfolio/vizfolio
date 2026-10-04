@@ -30,8 +30,8 @@ const PERF: PortfolioPerformance = {
   },
   contributions: { net: 5000, deposits: 6000, withdrawals: -1000, count: 3 },
   returns: {
-    timeWeighted: { rate: 0.2, method: 'DailyValuedTWR', basis: 'Period', reason: null, annualizedRate: null, fallbackReason: null },
-    moneyWeighted: { rate: 0.22, method: 'XIRR', basis: 'Annualized', reason: null, annualizedRate: null, fallbackReason: null },
+    timeWeighted: { rate: 0.2, method: 'DailyValuedTWR', basis: 'Period', reason: null, annualizedRate: null, periodRate: null, fallbackReason: null },
+    moneyWeighted: { rate: 0.22, method: 'XIRR', basis: 'Annualized', reason: null, annualizedRate: null, periodRate: null, fallbackReason: null },
   },
   currencyCode: 'USD',
   series: { interval: 'Monthly', points: [] },

@@ -7,9 +7,8 @@ import {
 } from '../../../core/api/models/performance.models';
 import {
   formatCurrency,
-  formatPercent,
   hasPendingPrices,
-  returnDetail,
+  returnFigure,
 } from '../../util/performance-format';
 import {
   INVESTMENT_RETURN_HINT,
@@ -84,15 +83,15 @@ export class PerformanceHeadline {
     return missingText(b.missing, when);
   });
 
-  protected readonly mwrValue = computed(() =>
-    formatPercent(this.performance().returns.moneyWeighted.rate),
-  );
-  protected readonly mwrDetail = computed(() => returnDetail(this.performance().returns.moneyWeighted));
-
-  protected readonly twrValue = computed(() =>
-    formatPercent(this.performance().returns.timeWeighted.rate),
-  );
-  protected readonly twrDetail = computed(() => returnDetail(this.performance().returns.timeWeighted));
+  /** Each return per year (for a year or more) with the total it compounds to underneath. */
+  protected readonly mwr = computed(() => {
+    const p = this.performance();
+    return returnFigure(p.returns.moneyWeighted, p.from, p.to);
+  });
+  protected readonly twr = computed(() => {
+    const p = this.performance();
+    return returnFigure(p.returns.timeWeighted, p.from, p.to);
+  });
 
   protected readonly contributionsDetail = computed(() => {
     if (!this.showGrossFlows()) {
