@@ -73,6 +73,53 @@
       </div>
     </form>
 
+    <!-- Accounts list -->
+    @switch (listStatus()) {
+      @case ('loading') {
+        <p class="loading" role="status">Loading accounts…</p>
+      }
+      @case ('error') {
+        <p class="form-error" role="alert">Couldn't load accounts for this portfolio.</p>
+      }
+      @default {
+        @if (accounts().length === 0) {
+          <app-empty-state
+            title="No accounts yet"
+            message="Add an account above or import a broker file below to get started."
+          />
+        } @else {
+          <div class="card table-card">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Institution</th>
+                  <th scope="col">Type</th>
+                  <th scope="col" class="align-end">Transactions</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (account of accounts(); track account.accountId) {
+                  <tr>
+                    <td>{{ account.name }}</td>
+                    <td>{{ account.institutionCode }}</td>
+                    <td>{{ accountTypeLabel(account.accountType) }}</td>
+                    <td class="align-end">{{ account.transactionCount }}</td>
+                    <td class="align-end">
+                      <a class="btn btn--ghost btn--sm" [routerLink]="['/accounts', account.accountId]">
+                        Open
+                      </a>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
+    }
+
     <!-- Import a broker file -->
     <div class="card">
       <h2 class="card-title">Import a broker file</h2>
@@ -143,52 +190,5 @@
         (undone)="reload()"
       />
     </div>
-
-    <!-- Accounts list -->
-    @switch (listStatus()) {
-      @case ('loading') {
-        <p class="loading" role="status">Loading accounts…</p>
-      }
-      @case ('error') {
-        <p class="form-error" role="alert">Couldn't load accounts for this portfolio.</p>
-      }
-      @default {
-        @if (accounts().length === 0) {
-          <app-empty-state
-            title="No accounts yet"
-            message="Add an account above or import a broker file to get started."
-          />
-        } @else {
-          <div class="card table-card">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Institution</th>
-                  <th scope="col">Type</th>
-                  <th scope="col" class="align-end">Transactions</th>
-                  <th scope="col"><span class="visually-hidden">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (account of accounts(); track account.accountId) {
-                  <tr>
-                    <td>{{ account.name }}</td>
-                    <td>{{ account.institutionCode }}</td>
-                    <td>{{ accountTypeLabel(account.accountType) }}</td>
-                    <td class="align-end">{{ account.transactionCount }}</td>
-                    <td class="align-end">
-                      <a class="btn btn--ghost btn--sm" [routerLink]="['/accounts', account.accountId]">
-                        Open
-                      </a>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      }
-    }
   }
 </section>
