@@ -78,7 +78,7 @@ public sealed class CitSubstitutionTests
         var substitution = CreateSubstitution();
         substitution.ReplacePatterns(["State Street S&P 500"]);
 
-        substitution.MatchesName("Vanguard Total Stock Market").ShouldBeFalse();
+        substitution.MatchesName("Example Total Stock Market").ShouldBeFalse();
     }
 
     [Theory]
