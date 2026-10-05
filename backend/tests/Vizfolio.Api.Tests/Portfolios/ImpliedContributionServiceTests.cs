@@ -91,6 +91,34 @@ public sealed class ImpliedContributionServiceTests
         preview.EndingCash.ShouldBe(0m);
     }
 
+    [Theory]
+    [InlineData(7, 0)]  // the default window: the deposit clearing a day later paid for the purchases
+    [InlineData(0, 1)]  // the strict daily roll: the purchase day looks unfunded
+    public async Task Sync_stores_no_implied_contribution_for_purchases_made_while_their_deposit_cleared(
+        int settlementDays, int expectedRows)
+    {
+        await using var ctx = await TestDbContext.CreateAsync();
+        var portfolio = new Portfolio("Test");
+        ctx.Db.Portfolios.Add(portfolio);
+        var account = new Account(portfolio.PortfolioId, "Brokerage", "example.com", "1111");
+        ctx.Db.Accounts.Add(account);
+        await ctx.Db.SaveChangesAsync();
+
+        var holiday = new DateOnly(2012, 10, 8);
+        await SeedAsync(ctx, account.AccountId, holiday, TransactionType.Buy, -750m, 5m);
+        var deposit = new AccountTransaction(account.AccountId, "TEST", "dep-1", TransactionType.Deposit, holiday.AddDays(1), 750m);
+        ctx.Db.AccountTransactions.Add(deposit);
+        await ctx.Db.SaveChangesAsync();
+
+        var options = new ValuationOptions { ImpliedContributionSettlementDays = settlementDays };
+        var service = new ImpliedContributionService(ctx.Db, new AccountValuationLoader(ctx.Db, options));
+        var result = await service.SyncForAccountAsync(account.AccountId, CancellationToken.None);
+
+        result.Count.ShouldBe(expectedRows);
+        (await service.PreviewForAccountAsync(portfolio.PortfolioId, account.AccountId, CancellationToken.None))!
+            .SettlementDays.ShouldBe(settlementDays);
+    }
+
     private static async Task SeedAsync(
         TestDbContext ctx, Guid accountId, DateOnly date, TransactionType type, decimal amount, decimal quantity)
     {

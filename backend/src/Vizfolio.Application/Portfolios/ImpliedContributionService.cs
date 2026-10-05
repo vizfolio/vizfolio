@@ -28,6 +28,7 @@ public sealed record ImpliedContributionSyncResult(int Count, decimal TotalAmoun
 public sealed record ImpliedContributionPreview(
     Guid AccountId,
     decimal Tolerance,
+    int SettlementDays,
     decimal TotalAmount,
     decimal EndingCash,
     IReadOnlyList<ImpliedContributionYear> ByYear,
@@ -64,7 +65,8 @@ public sealed class ImpliedContributionService : IImpliedContributionService
         var openingCash = await OpeningCashAsync(accountId, cancellationToken);
 
         const decimal tolerance = ImpliedContributionCalculator.DefaultTolerance;
-        var contributions = ImpliedContributionCalculator.Find(rows, tolerance, openingCash);
+        var settlementDays = SettlementDays;
+        var contributions = ImpliedContributionCalculator.Find(rows, tolerance, openingCash, settlementDays);
 
         var byYear = contributions
             .GroupBy(c => c.Date.Year)
@@ -75,8 +77,9 @@ public sealed class ImpliedContributionService : IImpliedContributionService
         return new ImpliedContributionPreview(
             accountId,
             tolerance,
+            settlementDays,
             contributions.Sum(c => c.Amount),
-            ImpliedContributionCalculator.EndingCash(rows, tolerance, openingCash),
+            ImpliedContributionCalculator.EndingCash(rows, tolerance, openingCash, settlementDays),
             byYear,
             contributions);
     }
@@ -86,7 +89,7 @@ public sealed class ImpliedContributionService : IImpliedContributionService
     {
         var rows = await LoadImportedRowsAsync(accountId, cancellationToken);
         var openingCash = await OpeningCashAsync(accountId, cancellationToken);
-        var desired = ImpliedContributionCalculator.Find(rows, openingCash: openingCash)
+        var desired = ImpliedContributionCalculator.Find(rows, openingCash: openingCash, settlementDays: SettlementDays)
             .ToDictionary(c => ExternalIdFor(c.Date), c => c);
 
         var existing = await _db.AccountTransactions
@@ -117,6 +120,9 @@ public sealed class ImpliedContributionService : IImpliedContributionService
 
         return new ImpliedContributionSyncResult(desired.Count, desired.Values.Sum(c => c.Amount));
     }
+
+    /// <summary>How long a shortfall may wait for incoming cash before it is implied (configurable, "Valuation").</summary>
+    private int SettlementDays => _valuationLoader.Options.ImpliedContributionSettlementDays;
 
     /// <summary>The account's imported rows — its own implied rows excluded, so they never feed back in.</summary>
     private Task<List<CashLedgerRow>> LoadImportedRowsAsync(Guid accountId, CancellationToken cancellationToken)

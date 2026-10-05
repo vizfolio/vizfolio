@@ -22,4 +22,11 @@ public sealed class ValuationOptions
 
     /// <summary>…and more than this amount, so rounding residue on a small account never trips it.</summary>
     public decimal MismatchMaterialityMin { get; set; } = 10m;
+
+    /// <summary>
+    /// Calendar days cash may stay below zero waiting for the account's own incoming cash (a deposit still clearing,
+    /// sale proceeds settling) before the shortfall is taken as an implied contribution from outside the account.
+    /// 0 makes every shortfall an implied contribution on its day. See <c>ImpliedContributionCalculator</c>.
+    /// </summary>
+    public int ImpliedContributionSettlementDays { get; set; } = ImpliedContributionCalculator.DefaultSettlementDays;
 }

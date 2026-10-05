@@ -38,8 +38,17 @@ public sealed record ImpliedContribution(
 /// older fund-company (pre-brokerage) accounts, where a contribution <i>was</i> a purchase and the history
 /// only shows the Buy. It rolls the account's cash forward from zero, one day at a time by the date cash
 /// actually moves (<see cref="CashLedgerRow.CashDate"/>, i.e. settlement; row order within a day doesn't
-/// matter); whenever a day closes below zero by more than the tolerance, the shortfall is an implied
-/// contribution and cash is reset to zero.
+/// matter).
+/// <para>
+/// <b>Settlement window.</b> A day that closes below zero isn't outside money straight away: brokers let you buy
+/// with a deposit that is still clearing (instant buying power; a bank holiday delaying the ACH by a day), and
+/// record the deposit only when it completes. So each day's shortfall waits up to <c>settlementDays</c> for the
+/// account's own incoming cash — deposits, sales, income — which repays the oldest shortfall first. Only what is
+/// still unpaid when its window has passed becomes an implied contribution, dated on the day it was spent. Money
+/// is conserved: a shortfall wrongly taken as in flight resurfaces when cash next runs short. Shortfalls still open
+/// when the history ends are implied (a later import that brings the deposit retires them). A window of 0 is the
+/// strict daily roll: every shortfall is implied on its day.
+/// </para>
 /// <para>
 /// The brokerage <b>settlement fund</b> (e.g. a money-market sweep vehicle) counts as cash: moving money
 /// in or out of it doesn't change what's available to spend, only its income does. It is recognised from
@@ -52,21 +61,34 @@ public static class ImpliedContributionCalculator
     /// <summary>Shortfalls at or below this (rounding cents, interest timing) are ignored.</summary>
     public const decimal DefaultTolerance = 1m;
 
+    /// <summary>
+    /// Calendar days a shortfall may wait for the account's own incoming cash before it is outside money: five
+    /// business days of ACH clearing plus a weekend or holiday (see <c>ValuationOptions</c>).
+    /// </summary>
+    public const int DefaultSettlementDays = 7;
+
     /// <param name="rows">The account's imported rows.</param>
     /// <param name="tolerance">Shortfalls at or below this are ignored.</param>
     /// <param name="openingCash">
     /// Cash already in the account before its first row — non-zero only when the imported history is partial and
     /// the broker's statements show cash held before it (see AccountStateEngine.OpeningCashSeed). Purchases paid
-    /// from it are not outside money.
+    /// from it are not outside money. Never negative.
     /// </param>
+    /// <param name="settlementDays">How long a shortfall may wait for incoming cash (see the class remarks).</param>
     public static IReadOnlyList<ImpliedContribution> Find(
-        IEnumerable<CashLedgerRow> rows, decimal tolerance = DefaultTolerance, decimal openingCash = 0m)
-        => Roll(rows, tolerance, openingCash).Contributions;
+        IEnumerable<CashLedgerRow> rows,
+        decimal tolerance = DefaultTolerance,
+        decimal openingCash = 0m,
+        int settlementDays = DefaultSettlementDays)
+        => Roll(rows, tolerance, openingCash, settlementDays).Contributions;
 
     /// <summary>The cash the ledger implies is left in the account after all rows (with implied top-ups).</summary>
     public static decimal EndingCash(
-        IEnumerable<CashLedgerRow> rows, decimal tolerance = DefaultTolerance, decimal openingCash = 0m)
-        => Roll(rows, tolerance, openingCash).Cash;
+        IEnumerable<CashLedgerRow> rows,
+        decimal tolerance = DefaultTolerance,
+        decimal openingCash = 0m,
+        int settlementDays = DefaultSettlementDays)
+        => Roll(rows, tolerance, openingCash, settlementDays).Cash;
 
     /// <summary>
     /// Tickers the account treats as its settlement fund: any ticker on a row the broker's parser marked as a
@@ -163,27 +185,82 @@ public static class ImpliedContributionCalculator
     private static bool IsInKind(CashLedgerRow row)
         => !string.IsNullOrWhiteSpace(row.Ticker) && row.Quantity is { } q && q != 0m;
 
+    /// <summary>Cash spent beyond what the account had on one day, still waiting to be repaid.</summary>
+    private sealed class Shortfall(DateOnly date, decimal amount, decimal cashBefore, IReadOnlyList<CashMovement> dayRows)
+    {
+        public DateOnly Date { get; } = date;
+        public decimal Remaining { get; set; } = amount;
+        public decimal CashBefore { get; } = cashBefore;
+        public IReadOnlyList<CashMovement> DayRows { get; } = dayRows;
+    }
+
     private static (IReadOnlyList<ImpliedContribution> Contributions, decimal Cash) Roll(
-        IEnumerable<CashLedgerRow> rows, decimal tolerance, decimal openingCash)
+        IEnumerable<CashLedgerRow> rows, decimal tolerance, decimal openingCash, int settlementDays)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        ArgumentOutOfRangeException.ThrowIfNegative(settlementDays);
+        // Opening cash is cash held before the history (never a debt), so every shortfall below is one the roll saw.
+        ArgumentOutOfRangeException.ThrowIfNegative(openingCash);
 
         var all = rows.ToList();
         var settlementTickers = SettlementTickers(all);
 
         var contributions = new List<ImpliedContribution>();
+        // Oldest first; their remaining amounts always add up to how far cash is below zero.
+        var open = new List<Shortfall>();
         var cash = openingCash;
+
+        // Shortfalls whose window has passed (all of them at the end of the history) become implied contributions,
+        // oldest first. A residue within the tolerance isn't implied on its own: it stays open and is folded into the
+        // next shortfall that is, as the strict daily roll always did.
+        void Settle(DateOnly? before)
+        {
+            var due = open.TakeWhile(s => before is not { } day || s.Date.AddDays(settlementDays) < day).ToList();
+            var carried = 0m;
+            foreach (var shortfall in due)
+            {
+                open.Remove(shortfall);
+                var amount = carried + shortfall.Remaining;
+                if (amount <= tolerance) { carried = amount; continue; }
+
+                contributions.Add(new ImpliedContribution(shortfall.Date, amount, shortfall.CashBefore, shortfall.DayRows));
+                cash += amount;
+                carried = 0m;
+            }
+
+            if (carried > 0m)
+                open.Insert(0, new Shortfall(due[^1].Date, carried, due[^1].CashBefore, due[^1].DayRows));
+        }
+
         foreach (var day in all.GroupBy(r => r.CashDate).OrderBy(g => g.Key))
         {
+            Settle(before: day.Key);
+
             var movements = day.Select(r => new CashMovement(r, CashEffect(r, settlementTickers))).ToList();
             var cashBefore = cash;
             cash += movements.Sum(m => m.CashEffect) + SelfFundedReinvestment(day, settlementTickers);
-            if (cash >= -tolerance) { continue; }
 
-            contributions.Add(new ImpliedContribution(day.Key, -cash, cashBefore, movements));
-            cash = 0m;
+            var owedBefore = Math.Max(-cashBefore, 0m);
+            var owed = Math.Max(-cash, 0m);
+            if (owed > owedBefore)
+            {
+                open.Add(new Shortfall(day.Key, owed - owedBefore, cashBefore, movements));
+            }
+            else
+            {
+                // Incoming cash repays the oldest shortfalls first.
+                var repaid = owedBefore - owed;
+                while (repaid > 0m && open.Count > 0)
+                {
+                    var paid = Math.Min(repaid, open[0].Remaining);
+                    open[0].Remaining -= paid;
+                    repaid -= paid;
+                    if (open[0].Remaining == 0m) open.RemoveAt(0);
+                }
+            }
         }
 
+        Settle(before: null);
         return (contributions, cash);
     }
 }

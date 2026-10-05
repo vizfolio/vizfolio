@@ -24,6 +24,7 @@ public sealed record ImpliedContributionYearResponse(int Year, decimal Amount, i
 public sealed record ImpliedContributionPreviewResponse(
     Guid AccountId,
     decimal Tolerance,
+    int SettlementDays,
     decimal TotalAmount,
     decimal EndingCash,
     IReadOnlyList<ImpliedContributionYearResponse> ByYear,
@@ -53,8 +54,9 @@ public sealed class GetImpliedContributionsEndpoint
             s.Summary = "Preview contributions implied by purchases with no recorded deposit (dry run).";
             s.Description =
                 "Rolls the account's cash forward from zero, a day at a time by settlement date (trade date " +
-                "when there is none); a day that closes below zero " +
-                "(beyond a $1 tolerance) implies an unrecorded contribution of the shortfall. Nothing is written.";
+                "when there is none). A day that closes below zero (beyond a $1 tolerance) waits up to " +
+                "settlementDays for the account's own incoming cash (a deposit still clearing); whatever is still " +
+                "unpaid then implies an unrecorded contribution, dated the day it was spent. Nothing is written.";
         });
     }
 
@@ -73,6 +75,7 @@ public sealed class GetImpliedContributionsEndpoint
     private static ImpliedContributionPreviewResponse ToResponse(ImpliedContributionPreview p) => new(
         p.AccountId,
         p.Tolerance,
+        p.SettlementDays,
         p.TotalAmount,
         p.EndingCash,
         p.ByYear.Select(y => new ImpliedContributionYearResponse(y.Year, y.Amount, y.Count)).ToList(),

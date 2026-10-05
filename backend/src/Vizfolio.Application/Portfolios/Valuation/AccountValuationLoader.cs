@@ -46,6 +46,9 @@ public sealed class AccountValuationLoader
     private readonly IAppDbContext _db;
     private readonly ValuationOptions _options;
 
+    /// <summary>The valuation rules in force (shared with the implied-contribution sync).</summary>
+    public ValuationOptions Options => _options;
+
     public AccountValuationLoader(IAppDbContext db, ValuationOptions options)
     {
         _db = db;

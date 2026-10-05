@@ -221,9 +221,30 @@ sweep into the fund from cash is reported with a negative amount (or no quantity
 its own row (Dividend `+`, Reinvestment `−`), but a QFX `REINVEST` folds it into the one row, so the
 part of a day's reinvestments not covered by that day's cash income is added back (per day, not per
 ticker — some report dividend rows have no ticker). A reinvestment on its own can never imply a
-contribution. A day that closes more than $1 below zero implies a contribution
-of the shortfall, and cash resets to zero. The response lists each implied contribution with the rows
-that caused it (and their cash effect), totals by year, and the ledger-implied `endingCash`.
+contribution.
+
+**Settlement window.** A day that closes more than $1 below zero is not outside money straight away. Brokers let
+you buy with a deposit that is still clearing (instant buying power, or a bank holiday delaying the ACH while
+markets are open) and record the deposit only when it completes, a day or more after the purchases it paid for.
+So each day's shortfall waits up to `Valuation:ImpliedContributionSettlementDays` (default **7** calendar days:
+five business days of clearing plus a weekend or holiday) for the account's **own incoming cash** — deposits,
+sales, income — which repays the **oldest shortfall first**. Only what is still unpaid when its window has passed
+becomes an implied contribution, **dated the day it was spent**; cash may sit below zero in between, which the
+account engine values as a (briefly) negative cash balance. Design notes:
+
+- **Any inflow counts, not one matching deposit.** Buys are often paid by a deposit plus a dividend or leftover
+  cash, so "a deposit of about the shortfall" would miss them; there is no amount threshold to tune.
+- **Money is conserved.** A shortfall wrongly taken as in flight (an unrelated deposit lands inside its window)
+  resurfaces as an implied contribution when cash next runs short — implied late, never lost or doubled.
+- **The end of the history** settles everything still open as implied (the deposit may not have cleared by the
+  export); a later import that brings it retires the implied row on the next sync.
+- A residue within the $1 tolerance isn't implied on its own; it folds into the next shortfall that is.
+- `ImpliedContributionSettlementDays = 0` is the strict daily roll (every shortfall implied on its day, cash reset
+  to zero). On a multi-year fund-company history with monthly unfunded purchases, the 7-day window leaves every
+  implied contribution on the same date, moving only cents of income between neighbouring months.
+
+The response lists each implied contribution with the rows that caused it (and their cash effect), totals by year,
+the `settlementDays` in force, and the ledger-implied `endingCash`.
 
 **Stored at import.** After every import, `PortfolioImportService` calls
 `ImpliedContributionService.SyncForAccountAsync` for each affected account. It recomputes from the

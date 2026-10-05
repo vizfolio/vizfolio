@@ -347,4 +347,159 @@ public sealed class ImpliedContributionCalculatorTests
 
         ImpliedContributionCalculator.Find(rows).ShouldBeEmpty();
     }
+
+    // ---------------- settlement window ----------------
+
+    private static readonly DateOnly Holiday = new(2012, 10, 8); // banks closed, markets open
+
+    [Fact]
+    public void Buying_with_a_deposit_still_clearing_is_not_outside_money()
+    {
+        // Instant buying power: the purchases go through on a bank holiday, and the deposit that paid for them is
+        // recorded the next day, when the ACH completes.
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -280m, quantity: 1m, ticker: "AAA"),
+            Row(Holiday, TransactionType.Buy, -469.95m, quantity: 2m, ticker: "BBB"),
+            Row(Holiday.AddDays(1), TransactionType.Deposit, 750m),
+        };
+
+        ImpliedContributionCalculator.Find(rows).ShouldBeEmpty();
+        ImpliedContributionCalculator.EndingCash(rows).ShouldBe(0.05m);
+    }
+
+    [Fact]
+    public void A_shortfall_can_be_repaid_by_any_incoming_cash_not_just_one_matching_deposit()
+    {
+        // 850 spent, then repaid over the next days by a dividend and a smaller deposit together.
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -850m, quantity: 6m, ticker: "AAA"),
+            Row(Holiday.AddDays(1), TransactionType.Dividend, 100m, ticker: "BBB"),
+            Row(Holiday.AddDays(3), TransactionType.Deposit, 750m),
+        };
+
+        ImpliedContributionCalculator.Find(rows).ShouldBeEmpty();
+        ImpliedContributionCalculator.EndingCash(rows).ShouldBe(0m);
+    }
+
+    [Fact]
+    public void A_shortfall_still_unpaid_after_the_window_is_implied_on_the_day_it_was_spent()
+    {
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -1000m, quantity: 10m, ticker: "AAA"),
+            Row(Holiday.AddDays(8), TransactionType.Deposit, 1000m),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem();
+
+        implied.Date.ShouldBe(Holiday);
+        implied.Amount.ShouldBe(1000m);
+        implied.DayRows.ShouldHaveSingleItem().Row.Type.ShouldBe(TransactionType.Buy);
+        ImpliedContributionCalculator.EndingCash(rows).ShouldBe(1000m); // the later deposit is cash on top
+    }
+
+    [Fact]
+    public void Only_the_part_of_a_shortfall_left_unpaid_by_its_window_is_implied()
+    {
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -1000m, quantity: 10m, ticker: "AAA"),
+            Row(Holiday.AddDays(2), TransactionType.Deposit, 300m),
+            Row(Holiday.AddDays(30), TransactionType.Deposit, 50m),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem();
+
+        implied.Date.ShouldBe(Holiday);
+        implied.Amount.ShouldBe(700m);
+        ImpliedContributionCalculator.EndingCash(rows).ShouldBe(50m);
+    }
+
+    [Fact]
+    public void Incoming_cash_repays_the_oldest_shortfall_first()
+    {
+        // Two days short; a deposit inside the first one's window repays it, leaving only the second.
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -400m, quantity: 4m, ticker: "AAA"),
+            Row(Holiday.AddDays(2), TransactionType.Buy, -250m, quantity: 2m, ticker: "BBB"),
+            Row(Holiday.AddDays(4), TransactionType.Deposit, 400m),
+            Row(Holiday.AddDays(40), TransactionType.Deposit, 10m),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem();
+
+        implied.Date.ShouldBe(Holiday.AddDays(2));
+        implied.Amount.ShouldBe(250m);
+    }
+
+    [Fact]
+    public void A_shortfall_wrongly_taken_as_in_flight_resurfaces_when_cash_next_runs_short()
+    {
+        // A small unfunded purchase, then an unrelated deposit inside its window. The deposit is taken as repaying
+        // it, so when the deposit is spent in full later, the gap appears then: the money is implied late, not lost.
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -50m, quantity: 1m, ticker: "AAA"),
+            Row(Holiday.AddDays(5), TransactionType.Deposit, 5000m),
+            Row(Holiday.AddDays(60), TransactionType.Buy, -5000m, quantity: 50m, ticker: "BBB"),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem();
+
+        implied.Date.ShouldBe(Holiday.AddDays(60));
+        implied.Amount.ShouldBe(50m);
+        ImpliedContributionCalculator.EndingCash(rows).ShouldBe(0m);
+    }
+
+    [Fact]
+    public void A_shortfall_still_open_when_the_history_ends_is_implied()
+    {
+        // The deposit hasn't cleared by the export date; a later import that brings it retires the implied row.
+        var rows = new[] { Row(Holiday, TransactionType.Buy, -750m, quantity: 5m, ticker: "AAA") };
+
+        ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem().Amount.ShouldBe(750m);
+        ImpliedContributionCalculator.Find(rows.Append(Row(Holiday.AddDays(1), TransactionType.Deposit, 750m)))
+            .ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void A_window_of_zero_is_the_strict_daily_roll()
+    {
+        var rows = new[]
+        {
+            Row(Holiday, TransactionType.Buy, -750m, quantity: 5m, ticker: "AAA"),
+            Row(Holiday.AddDays(1), TransactionType.Deposit, 750m),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows, settlementDays: 0).ShouldHaveSingleItem();
+
+        implied.Date.ShouldBe(Holiday);
+        implied.Amount.ShouldBe(750m);
+        ImpliedContributionCalculator.EndingCash(rows, settlementDays: 0).ShouldBe(750m);
+    }
+
+    [Fact]
+    public void A_residue_within_the_tolerance_folds_into_the_next_implied_shortfall()
+    {
+        var rows = new[]
+        {
+            Row(Day1, TransactionType.Deposit, 100m),
+            Row(Day1, TransactionType.Buy, -100.50m, quantity: 1m, ticker: "AAA"),
+            Row(Day2, TransactionType.Buy, -200m, quantity: 2m, ticker: "AAA"),
+        };
+
+        var implied = ImpliedContributionCalculator.Find(rows).ShouldHaveSingleItem();
+
+        implied.Date.ShouldBe(Day2);
+        implied.Amount.ShouldBe(200.50m);
+        ImpliedContributionCalculator.EndingCash(rows).ShouldBe(0m);
+    }
+
+    [Fact]
+    public void Opening_cash_is_never_a_debt()
+        => Should.Throw<ArgumentOutOfRangeException>(
+            () => ImpliedContributionCalculator.Find([Row(Day1, TransactionType.Deposit, 1m)], openingCash: -1m));
 }
